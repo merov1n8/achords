@@ -23,7 +23,9 @@ import type { RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import { serveStatic } from "./static.ts";
 
-const COOKIE = "achords_session";
+// Browsers share cookies across all ports of a host, so the name carries the port this gateway
+// listens on: another gateway on 127.0.0.1 (a test, a second instance) cannot overwrite it.
+const cookieName = (req: IncomingMessage) => `achords_session_${req.socket.localPort}`;
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
 const BODY_LIMIT = 64 * 1024;
 const CLAUDE_ALIASES = [
@@ -94,14 +96,14 @@ function send(
   res.end(body === undefined ? "" : JSON.stringify(body));
 }
 
-function sessionCookie(token: string, maxAge: number): string {
-  return `${COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
+function sessionCookie(req: IncomingMessage, token: string, maxAge: number): string {
+  return `${cookieName(req)}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
 }
 
 function readCookie(req: IncomingMessage): string | undefined {
   for (const part of (req.headers.cookie ?? "").split(";")) {
     const [k, ...v] = part.trim().split("=");
-    if (k === COOKIE) return v.join("=");
+    if (k === cookieName(req)) return v.join("=");
   }
   return undefined;
 }
@@ -161,9 +163,9 @@ export function createApiHandler(deps: ApiDeps) {
     [
       "POST",
       /^\/api\/logout$/,
-      ({ res, session }) => {
+      ({ req, res, session }) => {
         revokeSession(db, session.id);
-        send(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
+        send(res, 200, { ok: true }, { "set-cookie": sessionCookie(req, "", 0) });
       },
     ],
     [
@@ -410,7 +412,7 @@ export function createApiHandler(deps: ApiDeps) {
           res,
           200,
           { device: { id: s.id }, csrf: s.csrf },
-          { "set-cookie": sessionCookie(s.token, COOKIE_MAX_AGE_S) },
+          { "set-cookie": sessionCookie(req, s.token, COOKIE_MAX_AGE_S) },
         );
         return;
       }

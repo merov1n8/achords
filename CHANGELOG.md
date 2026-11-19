@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- The web session cookie is named per gateway port (`achords_session_<port>`). Browsers share cookies across ports of one host, so pairing a second gateway on 127.0.0.1 (a test instance) silently replaced the owner's session and brought back the pairing screen. Existing browsers need to pair once more after this update.
+
 - Saving model settings keeps the `allowed` list in the style written in `agent.yaml` (one `- model` per line stays that way) instead of turning it into `[a, b]`.
 
 - The gateway log now says why a web request was not authenticated (no session cookie vs. unknown/revoked/expired session), never the token itself, to diagnose unexpected pairing screens.
