@@ -26,6 +26,7 @@ describe("doctor", () => {
       serviceLoaded: () => true,
       gatewayResponds: async () => true,
       vaultStatus: () => ({ ok: true, telegram: true }),
+      servicePath: "/usr/local/bin:/usr/bin",
     };
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -62,6 +63,17 @@ describe("doctor", () => {
     expect(c["claude CLI"]).toMatchObject({ level: "fail" });
     expect(c["claude CLI"]?.fix).toMatch(/install/i);
     expect(c["web UI"]?.fix).toMatch(/pnpm build/);
+  });
+
+  it("fails when the service PATH would not find the claude CLI", async () => {
+    // e.g. claude in ~/.local/bin, but the service runs with launchd's minimal PATH
+    const c = await byName({
+      ...env,
+      which: (bin) => (bin === "claude" ? "/Users/x/.local/bin/claude" : "/usr/bin/git"),
+      servicePath: "/usr/bin:/bin",
+    });
+    expect(c["claude CLI"]).toMatchObject({ level: "fail" });
+    expect(c["claude CLI"]?.fix).toMatch(/achords start/);
   });
 
   it("flags a data folder readable by others", async () => {

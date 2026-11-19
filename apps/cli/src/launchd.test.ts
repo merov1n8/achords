@@ -6,6 +6,7 @@ const input = {
   gatewayEntry: "/opt/achords & co/apps/gateway/src/main.ts",
   home: "/Users/x/.achords",
   logFile: "/Users/x/.achords/logs/gateway.log",
+  path: "/Users/x/.local/bin:/opt/homebrew/bin:/usr/bin:/bin",
 };
 
 describe("renderPlist", () => {
@@ -18,6 +19,10 @@ describe("renderPlist", () => {
     expect(xml).toContain("<string>/opt/achords &amp; co/apps/gateway/src/main.ts</string>");
     expect(xml).toMatch(/<key>ACHORDS_HOME<\/key>\s*<string>\/Users\/x\/.achords<\/string>/);
     expect(xml).toContain("<key>StandardErrorPath</key>");
+    // launchd's default PATH lacks ~/.local/bin etc., where the claude CLI usually lives.
+    expect(xml).toMatch(
+      /<key>PATH<\/key>\s*<string>\/Users\/x\/.local\/bin:\/opt\/homebrew\/bin:\/usr\/bin:\/bin<\/string>/,
+    );
   });
 });
 

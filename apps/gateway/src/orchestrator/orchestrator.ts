@@ -39,6 +39,10 @@ const decisionSchema = z.object({
       title: z.string().min(1),
       description: z.string().min(1).describe("Self-contained instructions for the agent"),
       assignee: z.string().min(1).describe("Agent id from the list"),
+      language: z
+        .string()
+        .min(1)
+        .describe("Language the owner writes in (e.g. Hungarian); the agent reports in it"),
     })
     .optional(),
 });
@@ -160,7 +164,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           }
           enqueue(db, {
             title: task.title,
-            description: task.description,
+            // The sub-agent never sees the conversation, so the reply language travels with the task.
+            description: `${task.description}\n\nWrite your final report for the owner in ${task.language}.`,
             threadId,
             assigneeAgentId: task.assignee,
           });

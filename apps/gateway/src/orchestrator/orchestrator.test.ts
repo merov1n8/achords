@@ -125,7 +125,12 @@ describe("orchestrator", () => {
       boss({
         action: "delegate",
         message: "Rendben, a web-dev megcsinálja.",
-        task: { title: "TODO app for Acme", description: "Build ...", assignee: "web-dev" },
+        task: {
+          title: "TODO app for Acme",
+          description: "Build ...",
+          assignee: "web-dev",
+          language: "Hungarian",
+        },
       }),
     );
     const t = createThread(db, {});
@@ -133,12 +138,38 @@ describe("orchestrator", () => {
     const task = db.prepare("SELECT * FROM tasks").get();
     expect(task).toMatchObject({
       title: "TODO app for Acme",
-      description: "Build ...",
+      description: "Build ...\n\nWrite your final report for the owner in Hungarian.",
       assignee_agent_id: "web-dev",
       thread_id: t.id,
       status: "queued",
     });
     expect(listMessages(db, t.id).at(-1)?.content).toBe("Rendben, a web-dev megcsinálja.");
+  });
+
+  it("passes the owner's language to the sub-agent, which reports in it", async () => {
+    const { orch, calls } = make((req) =>
+      req.jsonSchema
+        ? result({
+            structured: {
+              action: "delegate",
+              message: "Rendben.",
+              task: {
+                title: "X",
+                description: "Build X",
+                assignee: "web-dev",
+                language: "Hungarian",
+              },
+            },
+          })
+        : result({ text: "Kész." }),
+    );
+    const t = createThread(db, {});
+    await orch.handleMessage(t.id, "csináld meg az X-et", "telegram");
+    expect(db.prepare("SELECT description FROM tasks").get()?.description).toContain("Hungarian");
+    await orch.workOnce();
+    expect(calls.at(-1)?.prompt).toMatch(/final report.*Hungarian/s);
+    // The schema asks the boss for the language explicitly.
+    expect(JSON.stringify(calls[0]?.jsonSchema)).toContain("language");
   });
 
   it("refuses to delegate to an agent that does not exist", async () => {

@@ -5,6 +5,7 @@ const input = {
   nodePath: "/usr/bin/node",
   gatewayEntry: "/opt/achords 2/apps/gateway/src/main.ts",
   home: "/home/x/.achords 100%",
+  path: "/home/x/.local/bin:/usr/bin",
 };
 
 describe("systemd unit", () => {
@@ -17,6 +18,7 @@ describe("systemd unit", () => {
     // % is a systemd specifier and must be doubled.
     expect(unit).toContain('Environment="ACHORDS_HOME=/home/x/.achords 100%%"');
     expect(unit).toContain("WantedBy=default.target");
+    expect(unit).toContain('Environment="PATH=/home/x/.local/bin:/usr/bin"');
   });
 
   it("enables and starts as a user service; stop only when active", () => {

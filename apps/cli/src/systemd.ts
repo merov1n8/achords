@@ -10,6 +10,8 @@ export interface UnitInput {
   nodePath: string;
   gatewayEntry: string;
   home: string;
+  /** PATH of the shell running `achords start` (user services get a minimal PATH). */
+  path: string;
 }
 
 // systemd unit quoting: double quotes, escaped backslashes/quotes, and % doubled (specifiers).
@@ -24,6 +26,7 @@ After=network-online.target
 [Service]
 ExecStart=${[i.nodePath, "--disable-warning=ExperimentalWarning", i.gatewayEntry].map(q).join(" ")}
 Environment=${q(`ACHORDS_HOME=${i.home}`)}
+Environment=${q(`PATH=${i.path}`)}
 Restart=on-failure
 RestartSec=10
 
