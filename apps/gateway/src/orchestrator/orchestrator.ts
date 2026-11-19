@@ -19,6 +19,7 @@ import {
   type Task,
   upsertAgent,
 } from "@achords/core";
+import type { Embedder, Memory } from "@achords/memory";
 import { checkModel, loadAgents, type Manifest } from "@achords/policy";
 import type { ModelProvider, RunRequest } from "@achords/providers";
 import { z } from "zod";
@@ -30,6 +31,8 @@ const BOSS_TIMEOUT_MS = 3 * 60_000;
 const RUN_TIMEOUT_MS = 30 * 60_000;
 const HISTORY = 20;
 const MAX_POST = 4000;
+const MEMORY_HITS = 5;
+const SUMMARY_CHARS = 1500;
 
 const decisionSchema = z.object({
   action: z.enum(["answer", "ask", "delegate"]),
@@ -56,6 +59,9 @@ export interface OrchestratorDeps {
   providers: Record<string, ModelProvider>;
   /** Applied to everything posted to threads (ADR-0012). */
   redact?: (text: string) => string;
+  /** Long-term memory (ADR-0008); optional so the hub works without it. */
+  memory?: Memory;
+  embedder?: Embedder;
 }
 
 export interface Orchestrator {
@@ -93,6 +99,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       channel: "system",
       content: redact(content).slice(0, MAX_POST),
     });
+
+  // Relevant memories as a prompt section; empty when there is no memory or nothing matches.
+  const recall = async (query: string, workspaces: string[]) => {
+    if (!deps.memory) return "";
+    const hits = await deps.memory.search(query, { workspaces, limit: MEMORY_HITS }, deps.embedder);
+    if (hits.length === 0) return "";
+    return `Relevant memory (may be outdated):\n${hits.map((h) => `- [${h.workspace}/${h.kind}] ${h.content}`).join("\n")}\n\n`;
+  };
 
   const agentPrompt = (m: Manifest) => {
     const path = join(agentsDir, m.id, "prompt.md");
@@ -149,7 +163,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           .slice(-HISTORY)
           .map((m) => `${m.role === "user" ? "owner" : (m.author ?? m.role)}: ${m.content}`)
           .join("\n");
-        const prompt = `Agents you can delegate to:\n${team || "(none)"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
+        // The boss works for the owner across all business branches.
+        const workspaces = [...new Set([...all.values()].map((m) => m.workspace))];
+        const memories = await recall(text, workspaces);
+        const prompt = `${memories}Agents you can delegate to:\n${team || "(none)"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
 
         const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS);
         // Structured output is an internal tool call, so allow a few turns.
@@ -196,7 +213,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     try {
       manifest = task.assigneeAgentId ? agents().get(task.assigneeAgentId) : undefined;
       if (!manifest) throw new Error(`no agent ${task.assigneeAgentId ?? "(unassigned)"}`);
-      const prompt = `# Task: ${task.title}\n\n${task.description ?? ""}`.trim();
+      // Sub-agents only see their own workspace plus shared knowledge (ADR-0009).
+      const memories = await recall(`${task.title} ${task.description ?? ""}`, [
+        manifest.workspace,
+        "shared",
+      ]);
+      const prompt = `${memories}# Task: ${task.title}\n\n${task.description ?? ""}`.trim();
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS);
     } catch (err) {
       // Policy or configuration problems will not fix themselves: fail without retrying.
@@ -233,6 +255,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       );
       if (res.ok) {
         complete(db, task.id, WORKER_ID, res.text);
+        await deps.memory
+          ?.add(
+            {
+              workspace: manifest.workspace,
+              kind: "summary",
+              content: redact(`Task "${task.title}" (${manifest.id}): ${res.text}`).slice(
+                0,
+                SUMMARY_CHARS,
+              ),
+              source: task.id,
+            },
+            deps.embedder,
+          )
+          .catch(() => {}); // memory is best effort; the task result is already safe
         if (task.threadId) post(task.threadId, `Done: ${task.title}\n\n${res.text}`);
       } else {
         fail(db, task.id, WORKER_ID, res.error ?? res.stopReason);

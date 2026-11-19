@@ -25,6 +25,7 @@ describe("homePaths", () => {
       home: "/h",
       db: "/h/core.db",
       vaultDb: "/h/vault.db",
+      memoryDb: "/h/memory.db",
       masterKeyFile: "/h/master.key",
       runDir: "/h/run",
       pidFile: "/h/run/gateway.pid",

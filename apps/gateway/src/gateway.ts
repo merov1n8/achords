@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { homePaths, openCoreDatabase, readLivePid, setSetting } from "@achords/core";
+import { ollamaEmbedder, openMemory } from "@achords/memory";
 import { cliClaude, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
@@ -18,6 +19,7 @@ const WEB_DIST = new URL("../../web/dist/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
 const TELEGRAM_TOKEN_ID = "telegram.bot-token";
 const POLL_BACKOFF_MAX_MS = 60_000;
+const BACKFILL_EVERY_TICKS = 60;
 
 const log = (msg: string) => console.log(`${new Date().toISOString()} gateway: ${msg}`);
 
@@ -51,9 +53,15 @@ export function runGateway(home: string): Promise<number> {
   const redact = (text: string) =>
     existsSync(paths.vaultDb) ? getVault().redactor()(text) : patternsOnly(text);
 
+  // Embeddings come from the local Ollama only; without it memory falls back to keyword search.
+  const embedder = ollamaEmbedder();
+  const memory = openMemory(paths.memoryDb, { dims: embedder.dims });
+
   const orchestrator = createOrchestrator({
     db,
     home,
+    memory,
+    embedder,
     providers: {
       "cli-claude": cliClaude(),
       // Manifest models "local/<name>" (ADR-0006); ACHORDS_LOCAL_URL points at mlx-lm etc.
@@ -87,6 +95,7 @@ export function runGateway(home: string): Promise<number> {
     let timer: NodeJS.Timeout | undefined;
     let working: Promise<unknown> | undefined;
     let delivering = false;
+    let ticks = 0;
     const cancel = new AbortController();
     const shutdown = async (reason: string) => {
       if (stopped) return;
@@ -101,6 +110,7 @@ export function runGateway(home: string): Promise<number> {
       }
       server.close();
       vault?.close();
+      memory.close();
       db.close();
       // Only remove our own pidfile; a successor may already have written its own.
       if (readLivePid(paths.pidFile) === process.pid) rmSync(paths.pidFile, { force: true });
@@ -111,6 +121,9 @@ export function runGateway(home: string): Promise<number> {
       if (stopped) return;
       if (existsSync(paths.stopFile)) return shutdown("stop marker");
       setSetting(db, HEARTBEAT_KEY, String(Date.now()));
+      if (++ticks % BACKFILL_EVERY_TICKS === 0 && memory.pendingEmbeddings() > 0) {
+        memory.backfill(embedder).catch(() => {});
+      }
       if (telegram && !delivering) {
         delivering = true;
         telegram
