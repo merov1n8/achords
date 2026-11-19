@@ -29,6 +29,7 @@ export interface DoctorEnv {
   /** PATH the installed service runs with (undefined: no service installed yet). */
   servicePath?: string | undefined;
   ramGb: number;
+  hasWhisperModel: boolean;
   /** Models pulled in the local Ollama, or undefined if it is not reachable. */
   ollamaModels: () => Promise<string[] | undefined>;
 }
@@ -181,6 +182,20 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
         : { name: "local models", level: "ok", detail: `Ollama: ${chat}, ${embedding}` },
     );
   }
+  // Optional (ADR-0014): only voice notes need it.
+  const whisper = env.which("whisper-cli");
+  add(
+    whisper && env.hasWhisperModel
+      ? { name: "speech", level: "ok", detail: "local Whisper ready" }
+      : {
+          name: "speech",
+          level: "info",
+          detail: whisper ? "Whisper model missing" : "whisper-cli not found",
+          fix: whisper
+            ? `optional, for voice notes: download ggml-large-v3-turbo-q5_0.bin into ${env.paths.whisperModel.replace(/\/[^/]+$/, "")}`
+            : "optional, for voice notes: brew install whisper-cpp",
+        },
+  );
   return checks;
 }
 
@@ -225,6 +240,7 @@ export function systemDoctorEnv(
     vaultStatus,
     servicePath: process.platform === "darwin" ? installedLaunchdPath() : undefined,
     ramGb: detectPlatform().ramGb,
+    hasWhisperModel: existsSync(paths.whisperModel),
     ollamaModels: async () => {
       try {
         const res = await fetch("http://127.0.0.1:11434/api/tags", {

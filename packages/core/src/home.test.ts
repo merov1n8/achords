@@ -26,6 +26,7 @@ describe("homePaths", () => {
       db: "/h/core.db",
       vaultDb: "/h/vault.db",
       memoryDb: "/h/memory.db",
+      whisperModel: "/h/models/ggml-large-v3-turbo-q5_0.bin",
       masterKeyFile: "/h/master.key",
       runDir: "/h/run",
       pidFile: "/h/run/gateway.pid",

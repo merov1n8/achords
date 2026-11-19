@@ -71,6 +71,19 @@ pnpm achords pair web                           # browser sessions do not travel
 
 Everything under `$ACHORDS_HOME` travels (agents, workspaces, threads, kanban, settings, Telegram pairing, vault secrets). The old machine's queue is paused after export; do not run both at once (Telegram allows only one poller per bot). Without the passphrase the export cannot be opened.
 
+## Voice notes
+
+Telegram voice notes are transcribed on this machine (nothing goes to a cloud model for speech):
+
+```sh
+brew install whisper-cpp
+mkdir -p ~/.achords/models
+curl -L -o ~/.achords/models/ggml-large-v3-turbo-q5_0.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+```
+
+Restart the gateway afterwards; `achords doctor` shows `speech: local Whisper ready`. Voice notes up to 10 minutes; the language is detected automatically. `ACHORDS_WHISPER_MODEL` points to another model file.
+
 ## How the emergency stop holds
 
 - The launchd job respawns the gateway only after a crash (`KeepAlive.SuccessfulExit = false`). The gateway exits 0 when stopped on purpose, and exits 0 at once while `run/STOP` exists, so neither launchd nor a reboot brings it back.

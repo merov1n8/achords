@@ -21,7 +21,9 @@ describe("doctor", () => {
       gatewayEntry: "/Users/x/Code/achords/apps/gateway/src/main.ts",
       userHome: "/Users/x",
       webDist,
-      which: (bin) => (bin === "claude" || bin === "git" ? `/usr/local/bin/${bin}` : undefined),
+      which: (bin) =>
+        ["claude", "git", "whisper-cli"].includes(bin) ? `/usr/local/bin/${bin}` : undefined,
+      hasWhisperModel: true,
       version: (bin) => (bin === "claude" ? "2.1.328 (Claude Code)" : "git version 2.50.0"),
       serviceLoaded: () => true,
       gatewayResponds: async () => true,
@@ -51,6 +53,7 @@ describe("doctor", () => {
       "vault",
       "telegram",
       "local models",
+      "speech",
     ]);
   });
 
@@ -86,6 +89,22 @@ describe("doctor", () => {
     const missing = await byName({ ...env, ollamaModels: async () => ["llama3:8b"] });
     expect(missing["local models"]).toMatchObject({ level: "info" });
     expect(missing["local models"]?.fix).toContain("ollama pull qwen3:8b");
+  });
+
+  it("speech-to-text is optional: missing Whisper or model is a hint with the fix", async () => {
+    const noBin = await byName({
+      ...env,
+      which: (b) => (b === "whisper-cli" ? undefined : `/x/${b}`),
+    });
+    expect(noBin.speech).toMatchObject({
+      level: "info",
+      fix: expect.stringMatching(/brew install whisper-cpp/),
+    });
+    const noModel = await byName({ ...env, hasWhisperModel: false });
+    expect(noModel.speech).toMatchObject({
+      level: "info",
+      fix: expect.stringMatching(/ggml-large-v3-turbo-q5_0\.bin/),
+    });
   });
 
   it("flags a data folder readable by others", async () => {
