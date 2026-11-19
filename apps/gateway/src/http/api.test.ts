@@ -27,6 +27,7 @@ describe("HTTP API", () => {
   const workerCalls: { from: unknown; request: unknown }[] = [];
   const decisions: { id: string; approve: boolean }[] = [];
   const tokens = createRunTokens();
+  const logs: string[] = [];
 
   beforeEach(async () => {
     db = openCoreDatabase(":memory:");
@@ -69,6 +70,7 @@ describe("HTTP API", () => {
           },
         },
         runTokens: tokens,
+        log: (m) => logs.push(m),
       }),
     );
   });
@@ -131,6 +133,19 @@ describe("HTTP API", () => {
       statuses.push(res.status);
     }
     expect(statuses).toEqual([401, 401, 401, 401, 401, 429]);
+  });
+
+  it("logs why a request was not authenticated (never the token itself)", async () => {
+    logs.length = 0;
+    await fetch(`${base}/api/session`);
+    await fetch(`${base}/api/session`, {
+      headers: { cookie: "achords_session=forged-token-value" },
+    });
+    expect(logs).toEqual([
+      expect.stringMatching(/not paired: no session cookie/),
+      expect.stringMatching(/not paired: unknown, revoked or expired session/),
+    ]);
+    expect(logs.join("\n")).not.toContain("forged-token-value");
   });
 
   it("requires a session for everything except pairing", async () => {
