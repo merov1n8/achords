@@ -23,6 +23,7 @@ describe("HTTP API", () => {
   let host: string;
   const handled: { threadId: string; text: string }[] = [];
   const delegations: { from: unknown; request: unknown }[] = [];
+  const questions: { from: unknown; question: string }[] = [];
   const tokens = createRunTokens();
 
   beforeEach(async () => {
@@ -44,6 +45,10 @@ describe("HTTP API", () => {
           handleMessage: async (threadId, text) => {
             handled.push({ threadId, text });
             return "answer";
+          },
+          askOwner: (from, question) => {
+            questions.push({ from, question });
+            return { ok: true };
           },
           delegate: (from, request) => {
             delegations.push({ from, request });
@@ -264,7 +269,7 @@ describe("HTTP API", () => {
 
   it("agent endpoint: caller identity comes only from the run token (no cookie, no CSRF)", async () => {
     delegations.length = 0;
-    const run = tokens.issue("task-7", "web-dev");
+    const run = tokens.issue("task-7", "web-dev", ["delegate", "ask_owner"]);
     const post = (auth: string | undefined, body: unknown) =>
       fetch(`${base}/api/agent/delegate`, {
         method: "POST",
@@ -302,6 +307,25 @@ describe("HTTP API", () => {
       (await post(`Bearer ${run.token}`, { agent: "writer", title: "a", instructions: "b" }))
         .status,
     ).toBe(401);
+  });
+
+  it("agent endpoint: ask_owner, and only tools granted to the run", async () => {
+    const run = tokens.issue("task-9", "writer", ["ask_owner"]);
+    const post = (path: string, body: unknown) =>
+      fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${run.token}` },
+        body: JSON.stringify(body),
+      });
+    const asked = await post("/api/agent/ask_owner", { question: "Melyik ügyfél?" });
+    expect(await asked.json()).toEqual({ ok: true });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-9" },
+      question: "Melyik ügyfél?",
+    });
+    expect(
+      (await post("/api/agent/delegate", { agent: "a", title: "b", instructions: "c" })).status,
+    ).toBe(403);
   });
 
   it("unknown routes are 404", async () => {

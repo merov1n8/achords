@@ -25,7 +25,7 @@ const BODY_LIMIT = 64 * 1024;
 
 export interface ApiDeps {
   db: Db;
-  orchestrator: Pick<Orchestrator, "handleMessage" | "delegate">;
+  orchestrator: Pick<Orchestrator, "handleMessage" | "delegate" | "askOwner">;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
   /** Opened lazily: the master key is only fetched when the vault is actually used. */
@@ -256,18 +256,24 @@ export function createApiHandler(deps: ApiDeps) {
           ? deps.runTokens?.resolve(auth.slice(7))
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
-        if (method !== "POST" || path !== "/api/agent/delegate")
+        const tool = path.slice("/api/agent/".length);
+        if (method !== "POST" || (tool !== "delegate" && tool !== "ask_owner")) {
           throw new HttpError(404, "not found");
+        }
+        if (!caller.tools.includes(tool)) {
+          throw new HttpError(403, `tool ${tool} not granted to this run`);
+        }
         const b = await readJson(req);
         // The calling task comes from the token, never from the body.
-        const out = deps.orchestrator.delegate(
-          { from: "task", taskId: caller.taskId },
-          {
-            agent: str(b.agent, "agent", 64),
-            title: str(b.title, "title", 200),
-            instructions: str(b.instructions, "instructions", 20_000),
-          },
-        );
+        const from = { from: "task" as const, taskId: caller.taskId };
+        const out =
+          tool === "delegate"
+            ? deps.orchestrator.delegate(from, {
+                agent: str(b.agent, "agent", 64),
+                title: str(b.title, "title", 200),
+                instructions: str(b.instructions, "instructions", 20_000),
+              })
+            : deps.orchestrator.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

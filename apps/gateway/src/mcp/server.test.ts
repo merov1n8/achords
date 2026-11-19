@@ -33,7 +33,12 @@ describe("hub MCP server (stdio JSON-RPC)", () => {
     await new Promise<void>((r) => gateway.listen(0, "127.0.0.1", r));
     url = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`;
     child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", SERVER], {
-      env: { ...process.env, ACHORDS_HUB_URL: url, ACHORDS_RUN_TOKEN: "run-token-abc" },
+      env: {
+        ...process.env,
+        ACHORDS_HUB_URL: url,
+        ACHORDS_RUN_TOKEN: "run-token-abc",
+        ACHORDS_TOOLS: "delegate,ask_owner",
+      },
       stdio: ["pipe", "pipe", "inherit"],
     });
     replies = new Map();
@@ -95,6 +100,16 @@ describe("hub MCP server (stdio JSON-RPC)", () => {
     });
   });
 
+  it("ask_owner forwards the question to the hub", async () => {
+    await rpc("initialize", { protocolVersion: "2025-06-18" });
+    const r = (
+      await rpc("tools/call", { name: "ask_owner", arguments: { question: "Kék vagy zöld?" } })
+    ).result as { content: { text: string }[]; isError?: boolean };
+    expect(r.isError).toBeFalsy();
+    expect(r.content[0]?.text).toMatch(/End your turn/);
+    expect(seen.at(-1)?.body).toEqual({ question: "Kék vagy zöld?" });
+  });
+
   it("reports refusals as tool errors, and rejects unknown tools and bad arguments", async () => {
     await rpc("initialize", { protocolVersion: "2025-06-18" });
     const refused = (
@@ -113,5 +128,32 @@ describe("hub MCP server (stdio JSON-RPC)", () => {
     };
     expect(bad.isError).toBe(true);
     expect(await rpc("nope/method")).toMatchObject({ error: { code: -32601 } });
+  });
+});
+
+describe("hub MCP server tool filtering", () => {
+  it("only lists and accepts the tools this run was granted", async () => {
+    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", SERVER], {
+      env: {
+        ...process.env,
+        ACHORDS_HUB_URL: "http://127.0.0.1:1",
+        ACHORDS_RUN_TOKEN: "t",
+        ACHORDS_TOOLS: "ask_owner",
+      },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    const lines: Record<string, unknown>[] = [];
+    createInterface({ input: child.stdout as NodeJS.ReadableStream }).on("line", (l) =>
+      lines.push(JSON.parse(l)),
+    );
+    child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+    child.stdin?.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "delegate", arguments: { agent: "a", title: "b", instructions: "c" } } })}\n`,
+    );
+    await new Promise((r) => setTimeout(r, 500));
+    child.kill();
+    const list = lines.find((l) => l.id === 1)?.result as { tools: { name: string }[] };
+    expect(list.tools.map((t) => t.name)).toEqual(["ask_owner"]);
+    expect(lines.find((l) => l.id === 2)).toMatchObject({ error: { code: -32602 } });
   });
 });

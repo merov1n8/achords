@@ -46,6 +46,7 @@ describe("static web UI", () => {
         orchestrator: {
           handleMessage: async () => "answer",
           delegate: () => ({ ok: false, reason: "n/a" }),
+          askOwner: () => ({ ok: false, reason: "n/a" }),
         },
         allowedHosts: [`127.0.0.1:${port}`],
         staticDir,
