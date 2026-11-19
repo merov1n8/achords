@@ -125,7 +125,10 @@ describe("HTTP API", () => {
       body: JSON.stringify({ code, deviceName: "MacBook" }),
     });
     const setCookie = res.headers.get("set-cookie") ?? "";
-    expect(setCookie).toMatch(/^achords_session=[A-Za-z0-9_-]{43};/);
+    // Named per port: browsers share cookies across ports of one host, so a second gateway
+    // (tests, another instance) on 127.0.0.1 must not overwrite this one's session.
+    const port = new URL(base).port;
+    expect(setCookie).toMatch(new RegExp(`^achords_session_${port}=[A-Za-z0-9_-]{43};`));
     expect(setCookie).toMatch(/HttpOnly/);
     expect(setCookie).toMatch(/Secure/);
     expect(setCookie).toMatch(/SameSite=Strict/);
@@ -151,7 +154,7 @@ describe("HTTP API", () => {
     logs.length = 0;
     await fetch(`${base}/api/session`);
     await fetch(`${base}/api/session`, {
-      headers: { cookie: "achords_session=forged-token-value" },
+      headers: { cookie: `achords_session_${new URL(base).port}=forged-token-value` },
     });
     expect(logs).toEqual([
       expect.stringMatching(/not paired: no session cookie/),
@@ -289,6 +292,19 @@ describe("HTTP API", () => {
     );
     expect((await phone.call("/api/session")).status).toBe(401);
     expect((await mac.call("/api/session")).status).toBe(200);
+  });
+
+  it("ignores a session cookie set by a gateway on another port of the same host", async () => {
+    const { cookie } = await pair();
+    const token = cookie.split("=")[1];
+    const res = await fetch(`${base}/api/session`, {
+      headers: { cookie: `achords_session_1=other; achords_session=${token}` },
+    });
+    expect(res.status).toBe(401);
+    const ok = await fetch(`${base}/api/session`, {
+      headers: { cookie: `achords_session_1=other; ${cookie}` },
+    });
+    expect(ok.status).toBe(200);
   });
 
   it("logout revokes the current session and clears the cookie", async () => {
