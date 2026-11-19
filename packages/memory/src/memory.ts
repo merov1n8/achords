@@ -38,6 +38,11 @@ export interface Memory {
 
 const MIGRATIONS = new URL("./migrations/", import.meta.url);
 const RRF_K = 60;
+// Weighted RRF: trigram keyword hits are noisy on common words, so a semantic match counts double.
+const WEIGHT_KEYWORD = 1;
+const WEIGHT_VECTOR = 2;
+// Measured with bge-m3 on Hungarian notes: relevant 0.48–0.60, irrelevant 0.24–0.48 cosine.
+const SIMILARITY_MARGIN = 0.1;
 const CANDIDATES = 50;
 
 const vec = (v: number[]) => new Uint8Array(new Float32Array(v).buffer);
@@ -114,9 +119,10 @@ export function openMemory(path: string, opts: { dims: number }): Memory {
       if (workspaces.length === 0) return [];
       const inWs = `(${workspaces.map(() => "?").join(",")})`;
       const ranks = new Map<number, number>();
-      const fuse = (ids: number[]) => {
-        for (const [i, id] of ids.entries())
-          ranks.set(id, (ranks.get(id) ?? 0) + 1 / (RRF_K + i + 1));
+      const fuse = (ids: number[], weight: number) => {
+        for (const [i, id] of ids.entries()) {
+          ranks.set(id, (ranks.get(id) ?? 0) + weight / (RRF_K + i + 1));
+        }
       };
 
       const q = ftsQuery(query);
@@ -129,20 +135,26 @@ export function openMemory(path: string, opts: { dims: number }): Memory {
           )
           .all(q, ...workspaces)
           .map((r) => Number(r.id));
-        fuse(ids);
+        fuse(ids, WEIGHT_KEYWORD);
       }
       const [qv] = (query.trim() && (await embedder?.embed([query]))) || [];
       if (qv) {
         // KNN first, then the workspace filter (vec0 has no join pushdown here).
-        const ids = db
+        const rows = db
           .prepare(
-            `SELECT v.rowid AS id FROM memories_vec v JOIN memories m ON m.id = v.rowid
+            `SELECT v.rowid AS id, v.distance FROM memories_vec v JOIN memories m ON m.id = v.rowid
              WHERE v.embedding MATCH ? AND k = ${CANDIDATES} AND m.workspace IN ${inWs}
              ORDER BY v.distance`,
           )
-          .all(vec(qv), ...workspaces)
+          .all(vec(qv), ...workspaces);
+        // KNN returns every stored memory; RRF would reward mere presence. Keep only those close
+        // to the best match (cosine from L2 distance of normalised vectors: cos = 1 - d²/2).
+        const sim = (d: unknown) => 1 - Number(d) ** 2 / 2;
+        const best = rows.length ? sim(rows[0]?.distance) : 0;
+        const ids = rows
+          .filter((r) => sim(r.distance) >= best - SIMILARITY_MARGIN)
           .map((r) => Number(r.id));
-        fuse(ids);
+        fuse(ids, WEIGHT_VECTOR);
       }
 
       const top = [...ranks.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
@@ -174,9 +186,10 @@ export function ollamaEmbedder(
   opts: { baseUrl?: string; model?: string; dims?: number } = {},
 ): Embedder {
   const base = opts.baseUrl ?? "http://127.0.0.1:11434";
-  const model = opts.model ?? "nomic-embed-text";
+  // Multilingual: the owner works in Hungarian; nomic-embed-text scored like no embeddings at all.
+  const model = opts.model ?? "bge-m3";
   return {
-    dims: opts.dims ?? 768,
+    dims: opts.dims ?? 1024,
     async embed(texts) {
       try {
         const res = await fetch(`${base}/api/embed`, {
