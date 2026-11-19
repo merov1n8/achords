@@ -70,6 +70,21 @@ describe("memory", () => {
     m.close();
   });
 
+  it("matches Hungarian suffixed word forms by keyword (no embeddings)", async () => {
+    const m = openMemory(":memory:", { dims: 16 });
+    await m.add({
+      workspace: "w",
+      kind: "fact",
+      content: "A Kovács Bt. WordPress oldala PHP 8.2-n fut.",
+    });
+    await m.add({ workspace: "w", kind: "fact", content: "A játék Unity URP-t használ." });
+    const hits = await m.search("melyik ügyfél használ WordPresst", { workspaces: ["w"] });
+    expect(hits[0]?.content).toContain("WordPress");
+    const kovacs = await m.search("Kovácséknak", { workspaces: ["w"] });
+    expect(kovacs[0]?.content).toContain("Kovács");
+    m.close();
+  });
+
   it("tolerates search syntax in queries (no FTS injection errors)", async () => {
     const m = openMemory(":memory:", { dims: 16 });
     await m.add({ workspace: "w", kind: "note", content: "quotes and stars" }, fakeEmbedder());
