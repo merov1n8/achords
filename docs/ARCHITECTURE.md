@@ -91,6 +91,8 @@ Per agent (declared in `agents/<id>/agent.yaml`):
 - `budget`: token / cost caps per run and per day.
 - `sensitivity`: data tagged `local-only` is always routed to local models; if none is available the task waits (fail-closed).
 
+Manifests are validated strictly (`yaml` + `zod`, ADR-0023): unknown keys are errors and every omitted section means "nothing allowed". Filesystem checks resolve symlinks so a link inside an allowed root cannot escape it; shell commands with metacharacters (chaining, substitution, redirects) always need approval.
+
 ### 4.7 Workspaces (business branches)
 
 Default layout, configurable:
