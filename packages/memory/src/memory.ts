@@ -17,17 +17,25 @@ export interface Hit {
   content: string;
   source: string | null;
   createdAt: number;
+  localOnly: boolean;
   score: number;
 }
 
 export interface Memory {
   add(
-    m: { workspace: string; kind: MemoryKind; content: string; source?: string },
+    m: {
+      workspace: string;
+      kind: MemoryKind;
+      content: string;
+      source?: string;
+      localOnly?: boolean;
+    },
     embedder?: Embedder,
   ): Promise<number>;
   search(
     query: string,
-    opts: { workspaces: string[]; limit?: number },
+    /** includeLocalOnly: only for prompts that go to a local model. Default false (fail-safe). */
+    opts: { workspaces: string[]; limit?: number; includeLocalOnly?: boolean },
     embedder?: Embedder,
   ): Promise<Hit[]>;
   /** Embeds memories stored while the embedding model was unavailable. Returns how many. */
@@ -98,6 +106,7 @@ export function openMemory(path: string, opts: { dims: number }): Memory {
     content: r.content as string,
     source: r.source as string | null,
     createdAt: Number(r.created_at),
+    localOnly: Number(r.local_only) === 1,
     score,
   });
 
@@ -105,19 +114,20 @@ export function openMemory(path: string, opts: { dims: number }): Memory {
     async add(m, embedder) {
       const row = db
         .prepare(
-          `INSERT INTO memories (workspace, kind, content, source, created_at)
-           VALUES (?, ?, ?, ?, ?) RETURNING id`,
+          `INSERT INTO memories (workspace, kind, content, source, local_only, created_at)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
         )
-        .get(m.workspace, m.kind, m.content, m.source ?? null, Date.now());
+        .get(m.workspace, m.kind, m.content, m.source ?? null, m.localOnly ? 1 : 0, Date.now());
       const id = Number(row?.id);
       const [v] = (await embedder?.embed([m.content])) ?? [];
       if (v) storeVector(id, v);
       return id;
     },
 
-    async search(query, { workspaces, limit = 5 }, embedder) {
+    async search(query, { workspaces, limit = 5, includeLocalOnly = false }, embedder) {
       if (workspaces.length === 0) return [];
-      const inWs = `(${workspaces.map(() => "?").join(",")})`;
+      // Filter in SQL for both rankings, so local-only rows can never slip into a result.
+      const inWs = `(${workspaces.map(() => "?").join(",")})${includeLocalOnly ? "" : " AND m.local_only = 0"}`;
       const ranks = new Map<number, number>();
       const fuse = (ids: number[], weight: number) => {
         for (const [i, id] of ids.entries()) {

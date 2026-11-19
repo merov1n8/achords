@@ -106,7 +106,8 @@ describe("local OpenAI-compatible provider (Ollama)", () => {
     expect(res.error).toMatch(/not found/);
 
     const down = await localOpenAI({ baseUrl: "http://127.0.0.1:1/v1" }).run(req());
-    expect(down).toMatchObject({ ok: false, stopReason: "error" });
+    // Distinct from errors: the caller waits for the server instead of failing the task.
+    expect(down).toMatchObject({ ok: false, stopReason: "unavailable" });
     expect(down.error).toMatch(/not reachable/);
   });
 

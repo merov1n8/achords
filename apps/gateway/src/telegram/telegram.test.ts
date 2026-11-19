@@ -8,6 +8,7 @@ import {
   createPairingCode,
   type Db,
   getSetting,
+  getThread,
   homePaths,
   isPaused,
   listMessages,
@@ -169,6 +170,17 @@ describe("telegram channel", () => {
     await channel.pollOnce();
     await channel.pollOnce();
     expect(handled.map((h) => h.text)).toEqual(["once"]);
+  });
+
+  it("/local makes the current thread local-only (one way)", async () => {
+    await pairOwner();
+    tg.sent.length = 0;
+    tg.msg(OWNER, "x");
+    tg.msg(OWNER, "/local");
+    await channel.pollOnce();
+    const threadId = getSetting(db, "telegram.thread_id") as string;
+    expect(getThread(db, threadId)?.sensitivity).toBe("local-only");
+    expect(tg.sent.at(-1)?.text).toMatch(/local-only/);
   });
 
   it("/stop from the owner performs the emergency stop", async () => {

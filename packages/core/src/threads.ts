@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "./db/database.ts";
 import { transaction } from "./db/database.ts";
 
+export type Sensitivity = "normal" | "local-only";
+
 export interface Thread {
   id: string;
   title: string | null;
   workspace: string | null;
+  sensitivity: Sensitivity;
   createdAt: number;
   updatedAt: number;
 }
@@ -33,6 +36,7 @@ const toThread = (r: Row): Thread => ({
   id: r.id as string,
   title: r.title as string | null,
   workspace: r.workspace as string | null,
+  sensitivity: r.sensitivity as Sensitivity,
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at),
 });
@@ -51,16 +55,33 @@ const toMessage = (r: Row): Message => ({
 
 export function createThread(
   db: Db,
-  input: { title?: string; workspace?: string },
+  input: { title?: string; workspace?: string; sensitivity?: Sensitivity },
   now = Date.now(),
 ): Thread {
   const row = db
     .prepare(
-      `INSERT INTO threads (id, title, workspace, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO threads (id, title, workspace, sensitivity, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
     )
-    .get(randomUUID(), input.title ?? null, input.workspace ?? null, now, now);
+    .get(
+      randomUUID(),
+      input.title ?? null,
+      input.workspace ?? null,
+      input.sensitivity ?? "normal",
+      now,
+      now,
+    );
   return toThread(row as Row);
+}
+
+/**
+ * One way on purpose: a thread that was local-only must never become normal, or its history
+ * could reach a frontier model later. Start a new thread for normal work.
+ */
+export function makeThreadLocalOnly(db: Db, id: string): boolean {
+  return (
+    db.prepare("UPDATE threads SET sensitivity = 'local-only' WHERE id = ?").run(id).changes === 1
+  );
 }
 
 export function getThread(db: Db, id: string): Thread | undefined {
