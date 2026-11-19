@@ -15,6 +15,10 @@ export interface Task {
   budgetUsd: number | null;
   spentUsd: number;
   waitingChildren: number;
+  /** An open question to the owner (ask_owner); the task waits for the answer. */
+  waitingOwner: boolean;
+  ownerQuestion: string | null;
+  ownerAnswer: string | null;
   threadId: string | null;
   parentId: string | null;
   title: string;
@@ -41,6 +45,9 @@ const toTask = (r: Record<string, unknown>): Task => ({
   budgetUsd: r.budget_usd === null ? null : Number(r.budget_usd),
   spentUsd: Number(r.spent_usd),
   waitingChildren: Number(r.waiting_children),
+  waitingOwner: Number(r.waiting_owner) === 1,
+  ownerQuestion: r.owner_question as string | null,
+  ownerAnswer: r.owner_answer as string | null,
   threadId: r.thread_id as string | null,
   parentId: r.parent_id as string | null,
   title: r.title as string,
@@ -148,7 +155,7 @@ export function claim(
         `UPDATE tasks SET status = 'claimed', claimed_by = ?, lease_until = ?,
            attempts = attempts + 1, updated_at = ?
          WHERE id = (
-           SELECT id FROM tasks WHERE status = 'queued' AND waiting_children = 0
+           SELECT id FROM tasks WHERE status = 'queued' AND waiting_children = 0 AND waiting_owner = 0
              AND (not_before IS NULL OR not_before <= ?)
            ORDER BY priority DESC, created_at, rowid LIMIT 1
          )

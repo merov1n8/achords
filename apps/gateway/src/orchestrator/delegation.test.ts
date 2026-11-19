@@ -305,18 +305,25 @@ describe("inter-agent delegation (ADR-0029)", () => {
       id: "cli-claude",
       async run(req) {
         const t = db
-          .prepare("SELECT assignee_agent_id AS a FROM tasks WHERE status = 'claimed'")
+          .prepare("SELECT id, assignee_agent_id AS a FROM tasks WHERE status = 'claimed'")
           .get();
         calls.push({ agent: String(t?.a), req });
+        // a delegates to b once, so that b really runs (and its hub tools can be checked).
+        if (t?.a === "a" && !req.prompt.includes("Results from delegated tasks")) {
+          orch.delegate(
+            { from: "task", taskId: String(t.id) },
+            { agent: "b", title: "b", instructions: "x" },
+          );
+        }
         if (req.mcpConfigPath) {
           const cfg = JSON.parse(readFileSync(req.mcpConfigPath, "utf8"));
-          tokenSeen = cfg.mcpServers.achords.env.ACHORDS_RUN_TOKEN;
+          if (!tokenSeen) tokenSeen = cfg.mcpServers.achords.env.ACHORDS_RUN_TOKEN;
           seenDuringRun.push({
             mode: statSync(req.mcpConfigPath).mode & 0o777,
             token: tokenSeen,
             tool: req.allowedTools,
           });
-          expect(tokens.resolve(tokenSeen)).toMatchObject({ agentId: "a" });
+          expect(tokens.resolve(cfg.mcpServers.achords.env.ACHORDS_RUN_TOKEN)).toBeDefined();
         }
         return result();
       },
@@ -332,17 +339,60 @@ describe("inter-agent delegation (ADR-0029)", () => {
     await drain();
     const aReq = calls.find((c) => c.agent === "a")?.req;
     const bReq = calls.find((c) => c.agent === "b")?.req;
-    expect(seenDuringRun).toEqual([
-      { mode: 0o600, token: tokenSeen, tool: expect.arrayContaining(["mcp__achords__delegate"]) },
-    ]);
+    expect(seenDuringRun[0]).toEqual({
+      mode: 0o600,
+      token: seenDuringRun[0]?.token,
+      tool: expect.arrayContaining(["mcp__achords__delegate", "mcp__achords__ask_owner"]),
+    });
     expect(aReq?.prompt).toMatch(/You can delegate to:[\s\S]*- b/);
     // The token is only in the file, never in the request fields that end up on argv.
     expect(JSON.stringify({ ...aReq, mcpConfigPath: undefined })).not.toContain(tokenSeen);
     // After the run: file gone, token revoked.
     expect(existsSync(aReq?.mcpConfigPath as string)).toBe(false);
     expect(tokens.resolve(tokenSeen)).toBeUndefined();
-    // b may not delegate: no hub tool at all.
-    expect(bReq?.mcpConfigPath).toBeUndefined();
+    // b may not delegate: it only gets ask_owner (its file is gone too).
+    expect(bReq?.allowedTools).toContain("mcp__achords__ask_owner");
+    expect(bReq?.allowedTools).not.toContain("mcp__achords__delegate");
+  });
+
+  it("ask_owner from any depth: the question goes to the original thread, the answer back to the asker", async () => {
+    writeAgents(home, { a: { to: ["b"] }, b: { from: ["a"] } });
+    start();
+    behave.a = (req, t) => {
+      if (!req.prompt.includes("Results from delegated tasks")) {
+        orch.delegate(
+          { from: "task", taskId: t.id },
+          { agent: "b", title: "Logo", instructions: "make a logo" },
+        );
+        return result();
+      }
+      return result({ text: "logo delivered" });
+    };
+    behave.b = (req, t) => {
+      if (!req.prompt.includes("Owner's answer")) {
+        expect(orch.askOwner({ from: "task", taskId: t.id }, "Kék vagy zöld legyen?")).toEqual({
+          ok: true,
+        });
+        return result({ text: "asked" });
+      }
+      return result({ text: `logo in ${req.prompt.includes("zöld") ? "green" : "?"}` });
+    };
+    const { thread, task } = root("a");
+    await drain();
+    // b asked; nothing else runs until the owner answers.
+    expect(listMessages(db, thread.id).map((m) => [m.author, m.content])).toEqual([
+      ["b", "Question from b (Logo): Kék vagy zöld legyen?"],
+    ]);
+    expect(await orch.workOnce()).toBe(false);
+
+    const before = calls.length;
+    expect(await orch.handleMessage(thread.id, "zöld", "telegram")).toBe("routed");
+    expect(calls.length).toBe(before); // the boss was not involved
+    await drain();
+    const bLast = calls.filter((c) => c.agent === "b").at(-1)?.req.prompt ?? "";
+    expect(bLast).toMatch(/You asked the owner: Kék vagy zöld legyen\?\nOwner's answer: zöld/);
+    expect(getTask(db, task.id)).toMatchObject({ status: "done", result: "logo delivered" });
+    expect(listMessages(db, thread.id).at(-1)?.content).toMatch(/^Done: root for a/);
   });
 
   it("returns results to the delegating agent; the owner only gets the final result", async () => {

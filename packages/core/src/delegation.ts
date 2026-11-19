@@ -109,3 +109,35 @@ export function waitForChildren(db: Db, id: string, workerId: string, now = Date
     .run(now, id, workerId);
   return r.changes === 1;
 }
+
+/** The task asks the owner something; it is not claimable until `answerOwnerQuestion`. */
+export function askOwner(db: Db, id: string, question: string, now = Date.now()): void {
+  db.prepare(
+    "UPDATE tasks SET waiting_owner = 1, owner_question = ?, owner_answer = NULL, updated_at = ? WHERE id = ?",
+  ).run(question, now, id);
+}
+
+/** The oldest task in the thread still waiting for the owner, if any. */
+export function openQuestion(db: Db, threadId: string): Task | undefined {
+  const row = db
+    .prepare(
+      "SELECT id FROM tasks WHERE thread_id = ? AND waiting_owner = 1 ORDER BY updated_at, rowid LIMIT 1",
+    )
+    .get(threadId);
+  return row ? getTask(db, String(row.id)) : undefined;
+}
+
+/** Routes the owner's message to the oldest open question in the thread (ADR-0029). */
+export function answerOwnerQuestion(
+  db: Db,
+  threadId: string,
+  answer: string,
+  now = Date.now(),
+): Task | undefined {
+  const task = openQuestion(db, threadId);
+  if (!task) return undefined;
+  db.prepare(
+    "UPDATE tasks SET waiting_owner = 0, owner_answer = ?, updated_at = ? WHERE id = ?",
+  ).run(answer, now, task.id);
+  return getTask(db, task.id);
+}

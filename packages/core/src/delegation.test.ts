@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import { openCoreDatabase } from "./db/database.ts";
 import {
   addSpend,
+  answerOwnerQuestion,
+  askOwner,
   childFinished,
   enqueueChild,
   listChildren,
+  openQuestion,
   remainingBudget,
 } from "./delegation.ts";
 import { claim, complete, enqueue, getTask } from "./queue.ts";
+import { createThread } from "./threads.ts";
 
 const LEASE = 60_000;
 
@@ -70,5 +74,24 @@ describe("linked tasks", () => {
     expect(remainingBudget(db, child.rootId ?? child.id)).toBeCloseTo(0.1);
     // Without a budget there is no cap.
     expect(remainingBudget(db, enqueue(db, { title: "x" }).id)).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe("questions to the owner", () => {
+  it("a task with an open question is not claimable until it is answered, oldest first", () => {
+    const db = openCoreDatabase(":memory:");
+    const thread = createThread(db, {});
+    const a = enqueue(db, { title: "a", threadId: thread.id }, 1);
+    const b = enqueue(db, { title: "b", threadId: thread.id }, 2);
+    askOwner(db, a.id, "Melyik színt szeretnéd?", 3);
+    askOwner(db, b.id, "És a betűtípus?", 4);
+    expect(claim(db, { workerId: "w", leaseMs: LEASE })).toBeUndefined();
+    expect(openQuestion(db, thread.id)?.id).toBe(a.id);
+
+    expect(answerOwnerQuestion(db, thread.id, "kék")?.id).toBe(a.id);
+    expect(getTask(db, a.id)).toMatchObject({ waitingOwner: false, ownerAnswer: "kék" });
+    expect(claim(db, { workerId: "w", leaseMs: LEASE })?.id).toBe(a.id);
+    expect(openQuestion(db, thread.id)?.id).toBe(b.id);
+    expect(answerOwnerQuestion(db, createThread(db, {}).id, "x")).toBeUndefined();
   });
 });

@@ -4,7 +4,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   addSpend,
+  answerOwnerQuestion,
   appendMessage,
+  askOwner as askOwnerQuestion,
   type Channel,
   childFinished,
   claim,
@@ -83,7 +85,12 @@ export interface Orchestrator {
     threadId: string,
     text: string,
     channel: Channel,
-  ): Promise<"answer" | "ask" | "delegate" | "error">;
+  ): Promise<"answer" | "ask" | "delegate" | "routed" | "error">;
+  /** An agent asks the owner (ADR-0029): posted to the task's thread; the task waits. */
+  askOwner(
+    from: { from: "task"; taskId: string },
+    question: string,
+  ): { ok: true } | { ok: false; reason: string };
   /** Loads manifests and mirrors them into the DB. Returns the agent ids. */
   syncAgents(): string[];
   /** Claims and runs one task. Returns false if there was nothing to do. */
@@ -234,6 +241,25 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const orchestrator: Orchestrator = {
     syncAgents: () => [...agents().keys()],
 
+    askOwner(from, question) {
+      const task = getTask(db, from.taskId);
+      if (!task?.threadId || !task.assigneeAgentId) {
+        return { ok: false, reason: "this task has no conversation with the owner" };
+      }
+      askOwnerQuestion(db, task.id, question);
+      appendMessage(db, {
+        threadId: task.threadId,
+        role: "agent",
+        author: task.assigneeAgentId,
+        channel: "system",
+        content: redact(`Question from ${task.assigneeAgentId} (${task.title}): ${question}`).slice(
+          0,
+          MAX_POST,
+        ),
+      });
+      return { ok: true };
+    },
+
     delegate(from, request, opts = {}) {
       const all = agents();
       const target = all.get(request.agent);
@@ -272,6 +298,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
     async handleMessage(threadId, text, channel) {
       appendMessage(db, { threadId, role: "user", channel, content: text });
+      // An open question from an agent in this thread takes the owner's reply (not the boss).
+      if (answerOwnerQuestion(db, threadId, text)) return "routed";
       try {
         const all = agents();
         const boss = all.get(BOSS_ID);
@@ -379,12 +407,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             )
             .join("\n")}\nUse these results and finish the task.`
         : "";
+      const answer =
+        task.ownerQuestion && task.ownerAnswer
+          ? `\n\nYou asked the owner: ${task.ownerQuestion}\nOwner's answer: ${task.ownerAnswer}\nContinue the task with this answer.`
+          : "";
       const team =
         delegates.length && deps.hub
           ? `\n\nYou can delegate to:\n${delegates.map((m) => `- ${m.id}: ${m.name} (${m.role})`).join("\n")}\nUse the delegate tool only for work outside your own role.`
           : "";
       const prompt =
-        `${memories}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}`.trim();
+        `${memories}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${answer}`.trim();
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.
       if (Number.isFinite(remaining)) {
@@ -398,8 +430,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
     // Hub tools only for agents that may delegate: a private config file for this run only.
     let hubRun: { file: string; revoke: () => void } | undefined;
-    if (deps.hub && delegates.length) {
-      const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id);
+    // Every run may ask the owner; only agents allowed to delegate get `delegate` too.
+    if (deps.hub) {
+      const hubTools = ["ask_owner", ...(delegates.length ? ["delegate"] : [])];
+      const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id, hubTools);
       const runDir = join(home, "run");
       mkdirSync(runDir, { recursive: true, mode: 0o700 });
       const file = join(runDir, `mcp-${randomUUID()}.json`);
@@ -408,13 +442,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           achords: {
             command: process.execPath,
             args: ["--disable-warning=ExperimentalWarning", deps.hub.serverEntry],
-            env: { ACHORDS_HUB_URL: deps.hub.url, ACHORDS_RUN_TOKEN: token },
+            env: {
+              ACHORDS_HUB_URL: deps.hub.url,
+              ACHORDS_RUN_TOKEN: token,
+              ACHORDS_TOOLS: hubTools.join(","),
+            },
           },
         },
       };
       writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
       built.req.mcpConfigPath = file;
-      built.req.allowedTools = [...built.req.allowedTools, "mcp__achords__delegate"];
+      built.req.allowedTools = [
+        ...built.req.allowedTools,
+        ...hubTools.map((t) => `mcp__achords__${t}`),
+      ];
       hubRun = { file, revoke };
     }
 
@@ -446,8 +487,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (res.stopReason === "unavailable") {
         // Fail-closed: wait for the backend (e.g. local model server), never fall back.
         defer(db, task.id, WORKER_ID, `waiting for the local model: ${res.error ?? ""}`, DEFER_MS);
-      } else if (res.ok && (getTask(db, task.id)?.waitingChildren ?? 0) > 0) {
-        // It delegated during this run: come back when the children are done.
+      } else if (
+        res.ok &&
+        ((getTask(db, task.id)?.waitingChildren ?? 0) > 0 || getTask(db, task.id)?.waitingOwner)
+      ) {
+        // It delegated or asked the owner during this run: resume when that is answered.
         waitForChildren(db, task.id, WORKER_ID);
       } else if (res.ok) {
         complete(db, task.id, WORKER_ID, res.text);
