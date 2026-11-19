@@ -12,7 +12,10 @@ export function updateManifestModels(
 ): void {
   const doc = parseDocument(readFileSync(path, "utf8"));
   doc.setIn(["models", "default"], models.default);
-  doc.setIn(["models", "allowed"], doc.createNode([...models.allowed], { flow: true }));
+  // Keep the list style the owner wrote (block "- x" lines or flow "[x, y]"); flow if new.
+  const old = doc.getIn(["models", "allowed"], true) as { flow?: boolean } | undefined;
+  const flow = old ? old.flow === true : true;
+  doc.setIn(["models", "allowed"], doc.createNode([...models.allowed], { flow }));
   const text = doc.toString({ flowCollectionPadding: false }); // [a, b] like hand-written files
   parseManifest(text, path); // throws with field paths if invalid
   // Atomic replace, same permissions.
