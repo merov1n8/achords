@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- The gateway log now says why a web request was not authenticated (no session cookie vs. unknown/revoked/expired session), never the token itself, to diagnose unexpected pairing screens.
+
 - Manifests reject claude CLI model names that are neither an alias (opus, sonnet, haiku, fable) nor a full name (`cli-claude/claude-opus` used to pass and would only fail at the first model call).
 - Seeded boss manifest comment no longer shows the substituted data path.
 
