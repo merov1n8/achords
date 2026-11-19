@@ -24,6 +24,8 @@ describe("homePaths", () => {
     expect(p).toEqual({
       home: "/h",
       db: "/h/core.db",
+      vaultDb: "/h/vault.db",
+      masterKeyFile: "/h/master.key",
       runDir: "/h/run",
       pidFile: "/h/run/gateway.pid",
       stopFile: "/h/run/STOP",

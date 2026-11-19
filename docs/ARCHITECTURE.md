@@ -139,7 +139,8 @@ Default layout, configurable:
 
 ### 4.15 Secrets vault
 
-- Master key in macOS Keychain (Linux: Secret Service, fallback 0600 file). Secrets encrypted with AES-256-GCM (envelope encryption) in a separate SQLite file.
+- Master key in macOS Keychain (Linux: Secret Service, fallback 0600 file). Secrets encrypted with AES-256-GCM (envelope encryption) in a separate SQLite file (`vault.db`).
+- Each secret has its own data key; ciphertexts are bound to their secret id (GCM AAD), so rows cannot be swapped. The master key is passed to `security` on stdin, never argv (visible in `ps`). `last4` is only kept for values of 12+ characters.
 - Write-only in UI and API: the server never returns a secret value, only `set/unset`, last 4 chars, updated date. Nothing secret is ever rendered into HTML.
 - Config files reference `vault:<id>` only.
 - Injection: preferably a broker adds credentials to outbound requests so agents never see values; otherwise injected into the single process env at spawn time.

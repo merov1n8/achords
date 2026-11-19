@@ -49,7 +49,11 @@ importers:
 
   packages/providers: {}
 
-  packages/secrets: {}
+  packages/secrets:
+    dependencies:
+      '@achords/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 
