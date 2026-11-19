@@ -14,6 +14,7 @@ const TICK_MS = 1000;
 // Upper bound for a cancelled run to finish killing its process group on shutdown.
 const SHUTDOWN_WAIT_MS = 5000;
 const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
+const WEB_DIST = new URL("../../web/dist/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
 const TELEGRAM_TOKEN_ID = "telegram.bot-token";
 const POLL_BACKOFF_MAX_MS = 60_000;
@@ -140,6 +141,7 @@ export function runGateway(home: string): Promise<number> {
           orchestrator,
           vault: getVault,
           allowedHosts: [`127.0.0.1:${actual}`, `localhost:${actual}`],
+          staticDir: WEB_DIST,
           log,
         }),
       );
