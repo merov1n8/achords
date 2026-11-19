@@ -177,7 +177,7 @@ Default layout, configurable:
 
 ### 4.20 Machine migration (export / import)
 
-Status: planned, to ship together with the production-grade `achords init` (see ADR-0021).
+Status: implemented (`achords export|import`, ADR-0021).
 
 - All state lives under one root (`ACHORDS_HOME`, default `~/.achords`): config, agent manifests, skills, schedules, SQLite databases, MD vaults, logs. Only the vault master key lives outside (Keychain).
 - `achords export <file>` writes one archive, fully encrypted with a user passphrase (memory and threads may hold `local-only` data). Includes: config, agents, skills, schedules, workspaces, MD vaults, databases (threads, kanban, memory), schema version.

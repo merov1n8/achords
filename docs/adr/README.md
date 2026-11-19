@@ -20,7 +20,7 @@
 - [ADR-0018: Apache-2.0 core, closed premium plugins](0018-apache-2-0-core-closed-premium-plugins.md)
 - [ADR-0019: Default MCP catalog](0019-default-mcp-catalog.md)
 - [ADR-0020: Publishing mode configurable per channel and agent](0020-publishing-mode-configurable-per-channel-and-agent.md)
-- [ADR-0021: Machine migration via encrypted export/import](0021-machine-migration-via-encrypted-export-import.md) (Proposed)
+- [ADR-0021: Machine migration via encrypted export/import](0021-machine-migration-via-encrypted-export-import.md)
 - [ADR-0022: SQLite driver is `node:sqlite`](0022-sqlite-driver-node-sqlite.md)
 - [ADR-0023: Manifest parsing with `yaml` and `zod`](0023-manifest-parsing-yaml-and-zod.md)
 - [ADR-0024: CLI agent runs are isolated from the user's Claude config](0024-cli-agent-runs-isolated-from-user-claude-config.md)

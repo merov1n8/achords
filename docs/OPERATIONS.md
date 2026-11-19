@@ -50,6 +50,27 @@ On macOS the vault's master key is in the login Keychain (item `achords` / `mast
 
 From then on the bot only accepts your Telegram user id, in private chats. Others get no reply (see `logs/gateway.log`). Commands: `/stop` (emergency stop), `/new` (new thread). Anything else goes to the boss agent; replies and `Done:` reports come back in the chat and are also visible in the web UI thread.
 
+## Moving to another machine (or backup)
+
+On the old machine:
+
+```sh
+pnpm achords stop
+pnpm achords export ~/achords-backup.achords   # asks for a passphrase twice (12+ characters)
+```
+
+Copy the file over, then on the new machine (after `pnpm install && pnpm build`):
+
+```sh
+pnpm achords import ~/achords-backup.achords   # into an empty data folder
+claude                                          # log in: CLI logins never travel
+pnpm achords doctor
+pnpm achords resume && pnpm achords start       # the queue starts paused
+pnpm achords pair web                           # browser sessions do not travel
+```
+
+Everything under `$ACHORDS_HOME` travels (agents, workspaces, threads, kanban, settings, Telegram pairing, vault secrets). The old machine's queue is paused after export; do not run both at once (Telegram allows only one poller per bot). Without the passphrase the export cannot be opened.
+
 ## How the emergency stop holds
 
 - The launchd job respawns the gateway only after a crash (`KeepAlive.SuccessfulExit = false`). The gateway exits 0 when stopped on purpose, and exits 0 at once while `run/STOP` exists, so neither launchd nor a reboot brings it back.

@@ -11,6 +11,7 @@ import { runInit } from "./init.ts";
 import { launchdService, protectedFolderOf, unsupportedService } from "./launchd.ts";
 import { createPrompter, readSecret } from "./secret-input.ts";
 import { systemdService } from "./systemd.ts";
+import { exportHome, importHome } from "./transfer.ts";
 
 const USAGE = `usage: achords <command>
 
@@ -22,6 +23,8 @@ const USAGE = `usage: achords <command>
   resume   clear an emergency stop (then run: achords start)
   status   show service, gateway, queue and run state
 
+  export <file>          encrypted backup / move to another machine (gateway must be stopped)
+  import <file>          restore an export into an empty data folder (starts paused)
   pair web               print a one-time code to pair a browser (valid 10 minutes)
   pair telegram          print a one-time code; send "/pair <code>" to your bot
   secret set <id>        store a secret; the value is read from stdin (hidden when typing)
@@ -69,6 +72,40 @@ async function run(command: string | undefined, args: string[]): Promise<number>
   const doctorEnv = () =>
     systemDoctorEnv(ctx.paths, gatewayEntry, () => ctx.service.isLoaded(), vaultStatus(ctx.paths));
   switch (command) {
+    case "export": {
+      const file = args[0];
+      if (!file) throw new Error("usage: achords export <file>");
+      const ask = createPrompter();
+      const pass = await ask("Passphrase for the export (12+ characters, hidden):", {
+        secret: true,
+      });
+      if ((await ask("Repeat the passphrase:", { secret: true })) !== pass) {
+        throw new Error("passphrases do not match");
+      }
+      const r = exportHome(ctx.paths.home, file, pass);
+      console.log(
+        `Exported ${r.files} files and ${r.secrets} secrets to ${file} (encrypted, 0600).`,
+      );
+      console.log(
+        "This machine's queue is now paused. Keep the passphrase: without it the export is unreadable.",
+      );
+      return 0;
+    }
+    case "import": {
+      const file = args[0];
+      if (!file) throw new Error("usage: achords import <file>");
+      const pass = await createPrompter()("Passphrase of the export (hidden):", { secret: true });
+      const r = importHome(ctx.paths.home, file, pass);
+      console.log(`Imported ${r.files} files and ${r.secrets} secrets into ${ctx.paths.home}.`);
+      console.log("Next steps on this machine:");
+      console.log("  1. log in to the claude CLI (`claude`), logins do not travel");
+      console.log("  2. achords doctor");
+      console.log("  3. achords resume && achords start   (the queue starts paused)");
+      console.log(
+        "  4. achords pair web   (browser sessions do not travel; Telegram pairing does)",
+      );
+      return 0;
+    }
     case "doctor": {
       const icon = { ok: "✓", info: "·", warn: "!", fail: "✗" } as const;
       const checks = await runDoctor(doctorEnv());
