@@ -21,3 +21,4 @@
 - [ADR-0019: Default MCP catalog](0019-default-mcp-catalog.md)
 - [ADR-0020: Publishing mode configurable per channel and agent](0020-publishing-mode-configurable-per-channel-and-agent.md)
 - [ADR-0021: Machine migration via encrypted export/import](0021-machine-migration-via-encrypted-export-import.md) (Proposed)
+- [ADR-0022: SQLite driver is `node:sqlite`](0022-sqlite-driver-node-sqlite.md)

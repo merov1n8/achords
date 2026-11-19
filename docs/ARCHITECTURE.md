@@ -100,7 +100,7 @@ Default layout, configurable:
 
 ### 4.8 Memory
 
-- **Fast memory**: SQLite with FTS5 + `sqlite-vec`. Hybrid retrieval fused with Reciprocal Rank Fusion.
+- **Fast memory**: SQLite (`node:sqlite`, ADR-0022) with FTS5 + `sqlite-vec`. Hybrid retrieval fused with Reciprocal Rank Fusion.
 - Tiers: hot / warm / cold / shared. Salience decay (never auto-delete).
 - Embeddings computed locally (Ollama embedding model), never sent to frontier providers.
 - **MD vault**: per workspace, Obsidian-compatible (frontmatter, `[[links]]`). Holds decisions, daily journals, project notes, skills.
