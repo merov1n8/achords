@@ -10,3 +10,14 @@ export {
   manifestSchema,
   parseManifest,
 } from "./manifest.ts";
+export {
+  checkMove,
+  DEFAULT_WORKFLOW_YAML,
+  loadWorkflow,
+  type MoveCheck,
+  type Mover,
+  parseWorkflow,
+  permissionMatrix,
+  type Workflow,
+  workflowSchema,
+} from "./workflow.ts";

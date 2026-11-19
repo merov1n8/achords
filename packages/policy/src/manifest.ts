@@ -38,6 +38,8 @@ export const manifestSchema = z
     id: z.string().regex(ID, "lowercase letters, digits and dashes"),
     name: z.string().min(1),
     role: z.string().min(1),
+    // Workflow roles (ADR-0030), e.g. [dev] or [qa]: who may move which kanban card.
+    roles: z.array(z.string().regex(ID)).default([]),
     workspace: z.string().min(1),
     models: z
       .object({
