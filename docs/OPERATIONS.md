@@ -35,4 +35,4 @@ Remove `~/.achords/run/STOP` (or run `achords resume`) to allow starting again.
 
 ## macOS: privacy-protected folders
 
-launchd jobs cannot read `~/Documents`, `~/Desktop`, `~/Downloads` or iCloud Drive without an explicit privacy grant, so a dev checkout there fails to start as a service (`EPERM` in `logs/gateway.log`). `achords start` warns about this. Fix: keep the checkout elsewhere (e.g. `~/Code/achords`), or grant `node` access under System Settings > Privacy & Security > Files and Folders. Running the gateway in the foreground (`node apps/gateway/src/main.ts`) is not affected.
+launchd jobs cannot read `~/Documents`, `~/Desktop`, `~/Downloads` or iCloud Drive without an explicit privacy grant, so a dev checkout there fails to start as a service (`EPERM` in `logs/gateway.log`). If `achords start` fails for this reason it says so. Fix: keep the checkout elsewhere (e.g. `~/Code/achords`), or grant `node` access under System Settings > Privacy & Security > Files and Folders. Running the gateway in the foreground (`node apps/gateway/src/main.ts`) is not affected.
