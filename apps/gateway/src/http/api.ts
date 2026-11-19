@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import {
   AuthError,
   createSession,
@@ -15,6 +17,7 @@ import {
   validateSession,
 } from "@achords/core";
 import { t } from "@achords/i18n";
+import { loadManifest, updateManifestModels } from "@achords/policy";
 import type { Vault } from "@achords/secrets";
 import type { RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
@@ -23,6 +26,12 @@ import { serveStatic } from "./static.ts";
 const COOKIE = "achords_session";
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
 const BODY_LIMIT = 64 * 1024;
+const CLAUDE_ALIASES = [
+  "cli-claude/opus",
+  "cli-claude/sonnet",
+  "cli-claude/haiku",
+  "cli-claude/fable",
+];
 
 export interface ApiDeps {
   db: Db;
@@ -36,6 +45,10 @@ export interface ApiDeps {
   vault?: () => Vault;
   /** Exact Host header values accepted (DNS-rebinding protection). */
   allowedHosts: string[];
+  /** Agent manifests ($ACHORDS_HOME/agents) for the model settings. */
+  agentsDir?: string;
+  /** Chat models pulled in the local model server (suggestions only). */
+  localModels?: () => Promise<string[]>;
   /** Built web UI (apps/web/dist). Non-API GETs are served from here. */
   staticDir?: string;
   log?: (msg: string) => void;
@@ -249,6 +262,41 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
+    [
+      "GET",
+      /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})$/,
+      async ({ params }) => {
+        const m = loadManifest(manifestPath(params[0] as string));
+        const local = (await deps.localModels?.().catch(() => [])) ?? [];
+        return {
+          id: m.id,
+          name: m.name,
+          role: m.role,
+          workspace: m.workspace,
+          models: m.models,
+          // Aliases always run the newest model of a family; local models as pulled.
+          suggestions: [...CLAUDE_ALIASES, ...local.map((x) => `local/${x}`)],
+        };
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})\/models$/,
+      async ({ params, body }) => {
+        const path = manifestPath(params[0] as string);
+        const b = await body();
+        try {
+          updateManifestModels(path, {
+            default: str(b.default, "default", 200),
+            allowed: strList(b.allowed, "allowed"),
+          });
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(400, (err as Error).message);
+        }
+        return { ok: true, models: loadManifest(path).models };
+      },
+    ],
     ["GET", /^\/api\/vault$/, () => vault().list()],
     [
       "PUT",
@@ -276,6 +324,12 @@ export function createApiHandler(deps: ApiDeps) {
   ];
 
   const deviceOf = (s: Session) => ({ id: s.id, deviceName: s.deviceName });
+
+  const manifestPath = (id: string) => {
+    const path = join(deps.agentsDir ?? "", id, "agent.yaml");
+    if (!deps.agentsDir || !existsSync(path)) throw new HttpError(404, "no such agent");
+    return path;
+  };
 
   // Same-origin check for state-changing requests: the Origin must name this very host.
   const sameOrigin = (req: IncomingMessage) => {

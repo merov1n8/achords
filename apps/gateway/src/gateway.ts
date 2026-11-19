@@ -174,6 +174,17 @@ export function runGateway(home: string): Promise<number> {
           orchestrator,
           vault: getVault,
           runTokens,
+          agentsDir: join(home, "agents"),
+          // Suggestions only: chat models pulled in Ollama (embedding models filtered out).
+          localModels: async () => {
+            const res = await fetch("http://127.0.0.1:11434/api/tags", {
+              signal: AbortSignal.timeout(1500),
+            });
+            const body = (await res.json()) as { models?: { name: string }[] };
+            return (body.models ?? [])
+              .map((m) => m.name.replace(/:latest$/, ""))
+              .filter((n) => !/embed|bge|minilm/i.test(n));
+          },
           allowedHosts: [`127.0.0.1:${actual}`, `localhost:${actual}`],
           staticDir: WEB_DIST,
           log,
