@@ -75,7 +75,7 @@ Single interface `ModelProvider { run(task, tools, limits) }` with adapters:
 - `cli-claude`, `cli-codex`: invoke the official binaries only. Never read, extract or proxy OAuth tokens.
 - CLI runs are isolated from the user's own CLI config: no MCP servers or connectors, no user/project settings or hooks, only the manifest's tools; prompt on stdin; own process group (ADR-0024).
 - `api-anthropic`, `api-openai`, `api-google`, `api-openrouter`.
-- `local-openai-compatible`: Ollama (default, MLX engine on Apple Silicon), `mlx-lm` server optional.
+- `local-openai-compatible`: Ollama (default, MLX engine on Apple Silicon), `mlx-lm` server optional. Manifest models `local/<name>`; `keep_alive` frees RAM when idle; structured output via `response_format`. Text only for now: a run that needs tools is refused, never run without them. `packages/platform` recommends a model by RAM (24 GB → `qwen3:8b`, embeddings `nomic-embed-text`).
   Usage meters per provider:
 - CLI mode: rolling window usage (5h / weekly) as reported by the CLI (`rate_limit_event` in stream-json, recorded after each run).
 - API mode: spend and remaining balance/credits from the provider's billing/usage endpoints where available; otherwise locally computed cost from token counts.

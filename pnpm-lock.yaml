@@ -26,6 +26,9 @@ importers:
       '@achords/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@achords/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@achords/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets

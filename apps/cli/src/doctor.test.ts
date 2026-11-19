@@ -27,6 +27,8 @@ describe("doctor", () => {
       gatewayResponds: async () => true,
       vaultStatus: () => ({ ok: true, telegram: true }),
       servicePath: "/usr/local/bin:/usr/bin",
+      ramGb: 24,
+      ollamaModels: async () => ["qwen3:8b", "nomic-embed-text:latest"],
     };
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -48,6 +50,7 @@ describe("doctor", () => {
       "gateway",
       "vault",
       "telegram",
+      "local models",
     ]);
   });
 
@@ -74,6 +77,15 @@ describe("doctor", () => {
     });
     expect(c["claude CLI"]).toMatchObject({ level: "fail" });
     expect(c["claude CLI"]?.fix).toMatch(/achords start/);
+  });
+
+  it("local models are optional: missing Ollama or model is a hint, never a failure", async () => {
+    const down = await byName({ ...env, ollamaModels: async () => undefined });
+    expect(down["local models"]).toMatchObject({ level: "info" });
+    expect(down["local models"]?.fix).toMatch(/ollama/i);
+    const missing = await byName({ ...env, ollamaModels: async () => ["llama3:8b"] });
+    expect(missing["local models"]).toMatchObject({ level: "info" });
+    expect(missing["local models"]?.fix).toContain("ollama pull qwen3:8b");
   });
 
   it("flags a data folder readable by others", async () => {
