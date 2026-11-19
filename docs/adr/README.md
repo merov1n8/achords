@@ -23,3 +23,4 @@
 - [ADR-0021: Machine migration via encrypted export/import](0021-machine-migration-via-encrypted-export-import.md) (Proposed)
 - [ADR-0022: SQLite driver is `node:sqlite`](0022-sqlite-driver-node-sqlite.md)
 - [ADR-0023: Manifest parsing with `yaml` and `zod`](0023-manifest-parsing-yaml-and-zod.md)
+- [ADR-0024: CLI agent runs are isolated from the user's Claude config](0024-cli-agent-runs-isolated-from-user-claude-config.md)
