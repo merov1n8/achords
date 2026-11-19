@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openCoreDatabase } from "./db/database.ts";
 import {
   appendMessage,
+  clearActions,
   createThread,
   getThread,
   listMessages,
@@ -94,6 +95,30 @@ describe("threads", () => {
     expect(
       appendMessage(db, { threadId: t.id, role: "user", channel: "web", content: "x" }).actions,
     ).toBeNull();
+  });
+
+  it("clears an action everywhere once it has been decided", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = createThread(db, {});
+    appendMessage(db, {
+      threadId: t.id,
+      role: "agent",
+      channel: "system",
+      content: "approve?",
+      actions: [
+        { label: "ok", data: "proposal:approve:ab12" },
+        { label: "no", data: "proposal:reject:ab12" },
+      ],
+    });
+    appendMessage(db, {
+      threadId: t.id,
+      role: "agent",
+      channel: "system",
+      content: "other",
+      actions: [{ label: "ok", data: "proposal:approve:cd34" }],
+    });
+    expect(clearActions(db, "proposal:", "ab12")).toBe(1);
+    expect(listMessages(db, t.id).map((m) => m.actions?.length ?? 0)).toEqual([0, 1]);
   });
 
   it("rejects messages for unknown threads and invalid enums", () => {

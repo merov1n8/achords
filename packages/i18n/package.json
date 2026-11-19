@@ -1,0 +1,11 @@
+{
+  "name": "@achords/i18n",
+  "version": "0.0.0",
+  "private": true,
+  "description": "User-facing text catalogs (web, Telegram) and t()",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

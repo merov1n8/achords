@@ -218,6 +218,10 @@ describe("ephemeral workers and agent proposals (ADR-0029)", () => {
     expect(msg?.content).toMatch(/tester[\s\S]*tools: Read[\s\S]*\/approve/);
 
     expect(orch.decideProposal(proposal.proposalId as string, true)).toMatchObject({ ok: true });
+    // The buttons disappear everywhere (web and Telegram read the same message).
+    expect(
+      listMessages(db, thread.id).find((m) => m.content.includes("proposes"))?.actions,
+    ).toBeNull();
     expect(existsSync(join(home, "agents", "tester", "agent.yaml"))).toBe(true);
     expect(orch.syncAgents()).toContain("tester");
     // Decided once only.

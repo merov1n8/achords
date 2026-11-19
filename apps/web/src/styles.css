@@ -531,3 +531,9 @@ main {
   align-items: center;
   gap: 6px;
 }
+.msg .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}

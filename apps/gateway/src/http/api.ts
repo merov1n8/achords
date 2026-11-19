@@ -14,6 +14,7 @@ import {
   revokeSession,
   validateSession,
 } from "@achords/core";
+import { t } from "@achords/i18n";
 import type { Vault } from "@achords/secrets";
 import type { RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
@@ -210,6 +211,23 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Message actions (buttons) from the web; same meaning as on Telegram.
+    [
+      "POST",
+      /^\/api\/actions$/,
+      async ({ body }) => {
+        const data = str((await body()).data, "data", 64);
+        const m = /^proposal:(approve|reject):([\w-]{1,32})$/.exec(data);
+        if (!m) throw new HttpError(400, "unknown action");
+        const approve = m[1] === "approve";
+        const out = deps.orchestrator.decideProposal(m[2] as string, approve);
+        if (!out.ok) throw new HttpError(409, out.reason);
+        return {
+          ok: true,
+          message: t(approve ? "action.approved" : "action.rejected", { agent: out.agentId }),
+        };
+      },
+    ],
     // Agent proposals: owner-only (session + CSRF); agents can only file them.
     [
       "GET",
