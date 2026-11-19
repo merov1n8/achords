@@ -48,7 +48,8 @@ describe("export / import", () => {
     mkdirSync(join(a, "workspaces", "web-clients", "acme"), { recursive: true });
     writeFileSync(join(a, "workspaces", "web-clients", "acme", "index.html"), "<h1>acme</h1>");
     mkdirSync(join(a, "run"), { recursive: true });
-    writeFileSync(join(a, "run", "gateway.pid"), "123");
+    // Any runtime file; not a pidfile, since a real PID there could belong to a live process.
+    writeFileSync(join(a, "run", "scratch.tmp"), "runtime");
     mkdirSync(join(a, "logs"));
     writeFileSync(join(a, "logs", "gateway.log"), "log");
     const db = openCoreDatabase(join(a, "core.db"));
