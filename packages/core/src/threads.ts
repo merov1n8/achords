@@ -17,6 +17,12 @@ export type MessageRole = "user" | "agent" | "system";
 export type Channel = "web" | "telegram" | "system";
 export type Visibility = "normal" | "trace";
 
+/** An action a channel may render as a button; `data` is "<kind>:<verb>:<id>" (≤ 64 bytes). */
+export interface MessageAction {
+  label: string;
+  data: string;
+}
+
 export interface Message {
   id: string;
   /** Monotonic insertion order (SQLite rowid); channels use it as a delivery cursor. */
@@ -27,6 +33,7 @@ export interface Message {
   channel: Channel;
   content: string;
   visibility: Visibility;
+  actions: MessageAction[] | null;
   createdAt: number;
 }
 
@@ -50,6 +57,7 @@ const toMessage = (r: Row): Message => ({
   channel: r.channel as Channel,
   content: r.content as string,
   visibility: r.visibility as Visibility,
+  actions: r.actions ? (JSON.parse(String(r.actions)) as MessageAction[]) : null,
   createdAt: Number(r.created_at),
 });
 
@@ -105,14 +113,16 @@ export function appendMessage(
     channel: Channel;
     content: string;
     visibility?: Visibility;
+    actions?: MessageAction[];
   },
   now = Date.now(),
 ): Message {
   return transaction(db, () => {
     const row = db
       .prepare(
-        `INSERT INTO messages (id, thread_id, role, author, channel, content, visibility, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING rowid AS seq, *`,
+        `INSERT INTO messages (id, thread_id, role, author, channel, content, visibility, actions,
+           created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING rowid AS seq, *`,
       )
       .get(
         randomUUID(),
@@ -122,6 +132,7 @@ export function appendMessage(
         input.channel,
         input.content,
         input.visibility ?? "normal",
+        input.actions?.length ? JSON.stringify(input.actions) : null,
         now,
       );
     db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(now, input.threadId);

@@ -55,6 +55,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - Default output policy: agent asks clarifying questions if needed, then reports "done" with a result summary. Traces are stored but hidden; viewable on demand in the web UI.
 - Each agent may have its own Telegram bot; the boss bot can route to sub-agents.
 - Telegram is bound to one owner user id via a pairing code; private chats only; unknown users are ignored silently; `/stop` = emergency stop, `/new` = new thread (ADR-0027).
+- Messages can carry actions (`{label, data}`, data `<kind>:<verb>:<id>`); Telegram renders them as inline buttons, accepts presses only from the paired owner in a private chat and removes the buttons once decided. This is the shared approval mechanism (agent proposals now; publishing in review mode and non-allow-listed shell commands later).
 - Everything goes to the thread; web and Telegram are only views onto it. This includes local-only threads: local-only governs which models may process the data, not which of the owner's channels show it (maintainer decision, 2026-11-19).
 
 ### 4.3 Orchestrator (boss agent)

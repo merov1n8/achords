@@ -346,8 +346,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           author: task.assigneeAgentId,
           channel: "system",
           content: redact(
-            `${task.assigneeAgentId} proposes a new agent '${m.id}' (${m.role}): ${request.reason}\n${summary}\nApprove: /approve ${id} · Reject: /reject ${id}`,
+            `${task.assigneeAgentId} proposes a new agent '${m.id}' (${m.role}): ${request.reason}\n${summary}\n(or reply /approve ${id} or /reject ${id})`,
           ).slice(0, MAX_POST),
+          actions: [
+            { label: "✅ Approve", data: `proposal:approve:${id}` },
+            { label: "❌ Reject", data: `proposal:reject:${id}` },
+          ],
         });
       }
       return { ok: true, proposalId: id };
