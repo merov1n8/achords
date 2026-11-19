@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HomePaths } from "@achords/core";
-import { protectedFolderOf } from "./launchd.ts";
+import { installedLaunchdPath, protectedFolderOf } from "./launchd.ts";
 
 export interface Check {
   name: string;
@@ -25,6 +25,8 @@ export interface DoctorEnv {
   serviceLoaded: () => boolean;
   gatewayResponds: () => Promise<boolean>;
   vaultStatus: () => { ok: true; telegram: boolean } | { ok: false; error: string };
+  /** PATH the installed service runs with (undefined: no service installed yet). */
+  servicePath?: string | undefined;
 }
 
 // node:sqlite with extension loading needs 22.13+ (ADR-0022).
@@ -51,15 +53,25 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
   );
 
   const claude = env.which("claude");
+  const claudeDir = claude?.slice(0, claude.lastIndexOf("/"));
+  const serviceSeesClaude =
+    env.servicePath === undefined || !claudeDir || env.servicePath.split(":").includes(claudeDir);
   add(
-    claude
-      ? { name: "claude CLI", level: "ok", detail: env.version("claude") ?? claude }
-      : {
+    claude && !serviceSeesClaude
+      ? {
           name: "claude CLI",
           level: "fail",
-          detail: "not found on PATH",
-          fix: "install Claude Code (https://claude.com/claude-code) and log in with `claude`",
-        },
+          detail: `found at ${claude}, but the service's PATH does not include ${claudeDir}`,
+          fix: "run `achords stop && achords start` from your normal shell (it records your PATH)",
+        }
+      : claude
+        ? { name: "claude CLI", level: "ok", detail: env.version("claude") ?? claude }
+        : {
+            name: "claude CLI",
+            level: "fail",
+            detail: "not found on PATH",
+            fix: "install Claude Code (https://claude.com/claude-code) and log in with `claude`",
+          },
   );
 
   add(
@@ -183,5 +195,6 @@ export function systemDoctorEnv(
       }
     },
     vaultStatus,
+    servicePath: process.platform === "darwin" ? installedLaunchdPath() : undefined,
   };
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
 
@@ -10,6 +10,8 @@ export interface PlistInput {
   gatewayEntry: string;
   home: string;
   logFile: string;
+  /** PATH of the shell running `achords start`; launchd's default lacks ~/.local/bin etc. */
+  path: string;
 }
 
 /** Manages the always-on gateway as an OS service. */
@@ -44,6 +46,8 @@ ${args}
   <dict>
     <key>ACHORDS_HOME</key>
     <string>${esc(i.home)}</string>
+    <key>PATH</key>
+    <string>${esc(i.path)}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -121,6 +125,17 @@ export const unsupportedService: ServiceManager = {
   },
   stop: () => false,
 };
+
+const LAUNCHD_DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/** PATH the installed launchd job runs with, or undefined if no job file exists. */
+export function installedLaunchdPath(
+  plistPath = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`),
+): string | undefined {
+  if (!existsSync(plistPath)) return undefined;
+  const m = /<key>PATH<\/key>\s*<string>([^<]*)<\/string>/.exec(readFileSync(plistPath, "utf8"));
+  return m?.[1] ?? LAUNCHD_DEFAULT_PATH;
+}
 
 // macOS privacy (TCC) folders: a launchd job cannot read them without an explicit grant.
 const PROTECTED = ["Documents", "Desktop", "Downloads", join("Library", "Mobile Documents")];
