@@ -167,7 +167,7 @@ Default layout, configurable:
 
 - `achords init`: dependency check, platform detection, provider mode (CLI or API), CLI login handoff, Telegram bot setup, workspace and agent templates, local model pull, service install.
 - `achords doctor`, `achords update`, `achords start|stop|status|kill|resume`. Everything set at install is editable later in the engine room.
-- Emergency stop (`achords kill`) must work even if the gateway is hung: it unloads the launchd/systemd service (so `KeepAlive` cannot restart it), kills every agent run's process group (PIDs recorded in `runs`), pauses the task queue and writes a STOP marker the gateway refuses to start past. `achords resume` clears it. Telegram `/stop` from the paired owner chat triggers the same path.
+- Emergency stop (`achords kill`) must work even if the gateway is hung: it unloads the launchd/systemd service (so `KeepAlive` cannot restart it), kills every agent run's process group (PIDs recorded in `runs`), pauses the task queue and writes a STOP marker the gateway refuses to start past. `achords resume` clears it (details and manual fallback: `docs/OPERATIONS.md`). Telegram `/stop` from the paired owner chat triggers the same path.
 
 ### 4.20 Machine migration (export / import)
 

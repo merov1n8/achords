@@ -10,5 +10,8 @@
   },
   "bin": {
     "achords": "./src/index.ts"
+  },
+  "dependencies": {
+    "@achords/core": "workspace:*"
   }
 }
