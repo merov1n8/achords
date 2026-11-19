@@ -19,6 +19,8 @@ export interface Task {
   waitingOwner: boolean;
   ownerQuestion: string | null;
   ownerAnswer: string | null;
+  /** Set on ephemeral worker tasks: the restricted permissions they run with. */
+  workerSpec: { tools: string[]; paths: string[] } | null;
   threadId: string | null;
   parentId: string | null;
   title: string;
@@ -48,6 +50,7 @@ const toTask = (r: Record<string, unknown>): Task => ({
   waitingOwner: Number(r.waiting_owner) === 1,
   ownerQuestion: r.owner_question as string | null,
   ownerAnswer: r.owner_answer as string | null,
+  workerSpec: r.worker_spec ? (JSON.parse(String(r.worker_spec)) as Task["workerSpec"]) : null,
   threadId: r.thread_id as string | null,
   parentId: r.parent_id as string | null,
   title: r.title as string,

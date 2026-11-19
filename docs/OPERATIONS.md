@@ -48,7 +48,7 @@ On macOS the vault's master key is in the login Keychain (item `achords` / `mast
 3. Restart the gateway (`pnpm achords stop && pnpm achords start`); the log says `telegram: polling`.
 4. `pnpm achords pair telegram`, then send `/pair <code>` to your bot in a private chat.
 
-From then on the bot only accepts your Telegram user id, in private chats. Others get no reply (see `logs/gateway.log`). Commands: `/stop` (emergency stop), `/new` (new thread), `/local` (make the current thread local-only: local models only, never the cloud; one way, use `/new` for normal work). Anything else goes to the boss agent; replies and `Done:` reports come back in the chat and are also visible in the web UI thread.
+From then on the bot only accepts your Telegram user id, in private chats. Others get no reply (see `logs/gateway.log`). Commands: `/stop` (emergency stop), `/new` (new thread), `/local` (make the current thread local-only: local models only, never the cloud; one way, use `/new` for normal work), `/approve <id>` / `/reject <id>` (an agent's proposal for a new agent; nothing is created before you approve). Anything else goes to the boss agent; replies and `Done:` reports come back in the chat and are also visible in the web UI thread.
 
 ## Moving to another machine (or backup)
 

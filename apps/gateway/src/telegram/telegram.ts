@@ -28,7 +28,7 @@ export interface TelegramDeps {
   apiBase?: string;
   /** Long-poll timeout in seconds (0 in tests). */
   pollTimeoutS?: number;
-  orchestrator: Pick<Orchestrator, "handleMessage">;
+  orchestrator: Pick<Orchestrator, "handleMessage" | "decideProposal">;
   /** Called after an owner-issued /stop has paused the queue and killed runs. */
   onEmergencyStop: (lines: string[]) => void;
   log: (msg: string) => void;
@@ -127,6 +127,20 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       await send(
         m.chat.id,
         `Emergency stop: ${lines.length - 1} run(s) killed, queue paused. The gateway is shutting down; run \`achords resume\` and \`achords start\` on the host to continue.`,
+      );
+      return;
+    }
+    const decision = /^\/(approve|reject)\s+([\w-]{1,32})$/.exec(text);
+    if (decision) {
+      const out = deps.orchestrator.decideProposal(
+        decision[2] as string,
+        decision[1] === "approve",
+      );
+      await send(
+        m.chat.id,
+        out.ok
+          ? `${decision[1] === "approve" ? "Approved" : "Rejected"}: agent ${out.agentId}.`
+          : out.reason,
       );
       return;
     }

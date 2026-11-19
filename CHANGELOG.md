@@ -19,6 +19,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Ephemeral workers (`spawn_worker`: subset of the caller's tools and write paths, rejected if beyond them, max 3 per task, no hub tools) and agent proposals (`propose_agent`: strict validation, full permission summary in the thread, created only after the owner's `/approve` or web approval). Verified with the real `claude` CLI.
+
 - `ask_owner`: any agent, at any delegation depth, can ask the owner a question; it appears in the original thread, the task waits, and the owner's reply is routed back to that agent (not the boss). Run tokens are scoped to the granted hub tools. Verified with the real `claude` CLI.
 
 - Hub MCP server with the `delegate` tool: agents allowed to delegate get it through a private per-run config file and a run token (revoked after the run); verified with the real `claude` CLI (planner → writer → planner resumes with the result, only the final result posted). A child that dies with its worker now still wakes its parent.
