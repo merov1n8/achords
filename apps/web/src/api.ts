@@ -58,3 +58,19 @@ export async function logout(): Promise<void> {
   await api("/api/logout", { method: "POST" });
   csrf = undefined;
 }
+
+/** Sends a recorded voice note; the gateway transcribes it locally and returns the text. */
+export async function transcribe(audio: Blob): Promise<string> {
+  const res = await fetch("/api/transcribe", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "content-type": audio.type || "audio/webm",
+      ...(csrf ? { "x-achords-csrf": csrf } : {}),
+    },
+    body: audio,
+  });
+  const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
+  if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText);
+  return data.text ?? "";
+}

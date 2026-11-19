@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Voice notes in the web chat: the mic button records in the browser, the gateway transcribes on this machine with Whisper (audio never leaves the host, temp files removed), and the text lands in the message box to review before sending.
+
 - Per-agent model settings in the web Agents view: tick allowed models (aliases, pulled local models or any `provider/model`) and pick the default. Saved to `agent.yaml` with comments and layout kept, validated before writing (an invalid change leaves the file untouched); applies to the next run without a restart.
 
 - Approval buttons in the web chat (same actions as on Telegram); deciding in either place removes the buttons everywhere.

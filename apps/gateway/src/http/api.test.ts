@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -32,10 +32,13 @@ describe("HTTP API", () => {
   const tokens = createRunTokens();
   const logs: string[] = [];
   let agentsDir: string;
+  let runDir: string;
+  const heard: number[] = [];
 
   beforeEach(async () => {
     db = openCoreDatabase(":memory:");
     agentsDir = mkdtempSync(join(tmpdir(), "achords-api-agents-"));
+    runDir = mkdtempSync(join(tmpdir(), "achords-api-run-"));
     mkdirSync(join(agentsDir, "boss"));
     writeFileSync(
       join(agentsDir, "boss", "agent.yaml"),
@@ -81,6 +84,14 @@ describe("HTTP API", () => {
         },
         runTokens: tokens,
         agentsDir,
+        runDir,
+        transcriber: {
+          available: () => ({ ok: true }),
+          transcribe: async (path) => {
+            heard.push(readFileSync(path).length);
+            return { ok: true, text: "hello from whisper" };
+          },
+        },
         localModels: async () => ["qwen3:8b"],
         log: (m) => logs.push(m),
       }),
@@ -305,6 +316,29 @@ describe("HTTP API", () => {
       headers: { cookie: `achords_session_1=other; ${cookie}` },
     });
     expect(ok.status).toBe(200);
+  });
+
+  it("transcribes a recorded voice note on this machine (owner only, size-limited)", async () => {
+    const { cookie, csrf } = await pair();
+    const post = (body: Uint8Array<ArrayBuffer>, headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/transcribe`, {
+        method: "POST",
+        headers: {
+          cookie,
+          origin: base,
+          "x-achords-csrf": csrf,
+          "content-type": "audio/webm",
+          ...headers,
+        },
+        body,
+      });
+    const ok = await post(new Uint8Array([1, 2, 3]));
+    expect(await ok.json()).toEqual({ text: "hello from whisper" });
+    expect(heard).toEqual([3]); // the audio reached the transcriber; temp file removed after
+    expect(readdirSync(runDir)).toEqual([]);
+    expect((await post(new Uint8Array(3), { "content-type": "text/plain" })).status).toBe(415);
+    expect((await post(new Uint8Array(11 * 1024 * 1024))).status).toBe(413);
+    expect((await post(new Uint8Array(3), { "x-achords-csrf": "wrong" })).status).toBe(403);
   });
 
   it("logout revokes the current session and clears the cookie", async () => {

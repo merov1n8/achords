@@ -89,5 +89,7 @@
   "agents.default": "default",
   "agents.add": "Add",
   "agents.saved": "Saved to agent.yaml.",
-  "common.close": "Close"
+  "common.close": "Close",
+  "chat.mic": "Record a voice note (transcribed on this machine)",
+  "chat.micStop": "Stop recording"
 }
