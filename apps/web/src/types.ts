@@ -3,6 +3,7 @@
 export interface Thread {
   id: string;
   title: string | null;
+  sensitivity: "normal" | "local-only";
   updatedAt: number;
 }
 

@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { pair } from "../api.ts";
+import { t } from "../i18n.ts";
 
 export function Pair({ onPaired }: { onPaired: () => void }) {
   const [code, setCode] = useState("");
@@ -22,15 +23,16 @@ export function Pair({ onPaired }: { onPaired: () => void }) {
   };
 
   return (
-    <main class="pair">
-      <h1>achords</h1>
-      <p>
-        Pair this browser. On the host, run <code>achords pair web</code> and enter the code.
-      </p>
+    <main class="pair panel">
+      <div class="brand">
+        <span class="logo">a</span>achords
+      </div>
+      <p class="muted">{t("pair.intro")}</p>
       <form onSubmit={submit}>
-        <label>
-          Pairing code
+        <label class="field">
+          {t("pair.code")}
           <input
+            class="input"
             value={code}
             onInput={(e) => setCode(e.currentTarget.value)}
             placeholder="ABCD-EF23"
@@ -39,12 +41,17 @@ export function Pair({ onPaired }: { onPaired: () => void }) {
             required
           />
         </label>
-        <label>
-          Device name
-          <input value={name} onInput={(e) => setName(e.currentTarget.value)} maxlength={100} />
+        <label class="field">
+          {t("pair.deviceName")}
+          <input
+            class="input"
+            value={name}
+            onInput={(e) => setName(e.currentTarget.value)}
+            maxlength={100}
+          />
         </label>
-        <button type="submit" disabled={busy}>
-          Pair
+        <button type="submit" class="btn primary" disabled={busy}>
+          {t("pair.submit")}
         </button>
         {error && <p class="error">{error}</p>}
       </form>

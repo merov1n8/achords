@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import type { Task } from "./types.ts";
 
 export interface Column {
@@ -6,17 +7,17 @@ export interface Column {
 }
 
 const COLUMNS: [string, Task["status"][]][] = [
-  ["To do", ["queued"]],
-  ["In progress", ["claimed"]],
-  ["Done", ["done"]],
-  ["Failed", ["failed", "cancelled"]],
+  ["kanban.todo", ["queued"]],
+  ["kanban.inProgress", ["claimed"]],
+  ["kanban.done", ["done"]],
+  ["kanban.failed", ["failed", "cancelled"]],
 ];
 
 export function groupTasks(tasks: Task[]): Column[] {
-  return COLUMNS.map(([title, statuses]) => ({
-    title,
+  return COLUMNS.map(([key, statuses]) => ({
+    title: t(key),
     tasks: tasks
-      .filter((t) => statuses.includes(t.status))
+      .filter((task) => statuses.includes(task.status))
       .sort((a, b) => b.updatedAt - a.updatedAt),
   }));
 }
@@ -24,8 +25,8 @@ export function groupTasks(tasks: Task[]): Column[] {
 /** Compact age for cards and lists ("card aging"). */
 export function ago(then: number, now = Date.now()): string {
   const s = Math.max(0, Math.floor((now - then) / 1000));
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
+  if (s < 60) return t("time.justNow");
+  if (s < 3600) return t("time.minutes", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("time.hours", { n: Math.floor(s / 3600) });
+  return t("time.days", { n: Math.floor(s / 86400) });
 }
