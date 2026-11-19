@@ -1,16 +1,15 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
-  finishRun,
   getSetting,
   type HomePaths,
   isPaused,
+  killActiveRuns,
   listActiveRuns,
   openCoreDatabase,
-  processAgeMs,
   readLivePid,
   setPaused,
-  startedAfter,
+  writeStopMarker,
 } from "@achords/core";
 import type { ServiceManager } from "./launchd.ts";
 
@@ -83,8 +82,7 @@ export function kill({ paths, service }: ControlContext): KillReport {
   };
 
   step("stop marker", () => {
-    mkdirSync(paths.runDir, { recursive: true, mode: 0o700 });
-    writeFileSync(paths.stopFile, `${new Date().toISOString()}\n`);
+    writeStopMarker(paths);
     return "STOP marker written";
   });
   step("service", () => (service.stop() ? "service unloaded" : "service was not loaded"));
@@ -96,32 +94,11 @@ export function kill({ paths, service }: ControlContext): KillReport {
   });
   step("runs", () =>
     withDb(paths, (db) => {
-      setPaused(db, true);
-      report.steps.push("queue paused");
-      for (const run of listActiveRuns(db)) {
-        report.steps.push(killRun(run.pid, run.pgid, run.startedAt));
-        finishRun(db, run.id, "cancelled", { error: "emergency stop" });
-      }
+      report.steps.push(...killActiveRuns(db));
       return undefined;
     }),
   );
   return report;
-}
-
-function killRun(pid: number | null, pgid: number | null, startedAt: number): string {
-  const probe = pgid ?? pid;
-  if (probe === null) return "run without pid: marked cancelled";
-  const age = processAgeMs(probe);
-  if (age === undefined) return `run ${probe}: already gone`;
-  // Never SIGKILL a process that started after the run was recorded: its PID was reused.
-  if (startedAfter(age, startedAt)) return `run ${probe}: PID reused by another process, skipped`;
-  try {
-    // Negative PID = whole process group, so agent subprocesses die too.
-    process.kill(pgid !== null ? -pgid : probe, "SIGKILL");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ESRCH") throw err;
-  }
-  return `run ${probe}: killed`;
 }
 
 export function resume({ paths }: ControlContext): string {

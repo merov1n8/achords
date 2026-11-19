@@ -4,13 +4,13 @@
 
 Run from the repo root during development (`pnpm achords <command>`), or as `achords <command>` once installed.
 
-| Command  | What it does                                                                                                                                                                                                                                               |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start`  | Installs/refreshes the launchd job (`~/Library/LaunchAgents/dev.achords.gateway.plist`) and starts the gateway. Waits up to 5 s for it to come up; if it does not, unloads the job again and points to the log. Refused while an emergency stop is active. |
-| `stop`   | Graceful stop: unloads the service (SIGTERM). Queue state is kept.                                                                                                                                                                                         |
-| `kill`   | **Emergency stop.** Writes the STOP marker, unloads the service, SIGKILLs the gateway and every running agent's process group, pauses the queue, marks runs cancelled. Works with a hung or dead gateway.                                                  |
-| `resume` | Clears the STOP marker and unpauses the queue. Does not start the gateway.                                                                                                                                                                                 |
-| `status` | Service, gateway PID, heartbeat age, queue, emergency stop, active runs.                                                                                                                                                                                   |
+| Command  | What it does                                                                                                                                                                                                                                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start`  | Installs/refreshes the service (macOS: launchd job `~/Library/LaunchAgents/dev.achords.gateway.plist`; Linux: systemd user unit `achords-gateway.service`) and starts the gateway. Waits up to 5 s for it to come up; if it does not, unloads the job again and points to the log. Refused while an emergency stop is active. |
+| `stop`   | Graceful stop: unloads the service (SIGTERM). Queue state is kept.                                                                                                                                                                                                                                                            |
+| `kill`   | **Emergency stop.** Writes the STOP marker, unloads the service, SIGKILLs the gateway and every running agent's process group, pauses the queue, marks runs cancelled. Works with a hung or dead gateway.                                                                                                                     |
+| `resume` | Clears the STOP marker and unpauses the queue. Does not start the gateway.                                                                                                                                                                                                                                                    |
+| `status` | Service, gateway PID, heartbeat age, queue, emergency stop, active runs.                                                                                                                                                                                                                                                      |
 
 All state lives under `$ACHORDS_HOME` (default `~/.achords`): `core.db`, `run/gateway.pid`, `run/STOP`, `logs/gateway.log`.
 
@@ -26,6 +26,15 @@ pnpm achords secret rm telegram.bot-token
 The API listens on `http://127.0.0.1:7420` (`ACHORDS_PORT` to change). Five wrong pairing codes within 15 minutes lock pairing and invalidate all open codes; create a new one afterwards. Safari may refuse the `Secure` session cookie on plain `http://localhost`; use Chrome/Firefox locally or the Tailscale HTTPS URL. Paired devices can be listed and revoked (`GET/DELETE /api/devices`, web UI in step 7).
 
 On macOS the vault's master key is in the login Keychain (item `achords` / `master-key`). `ACHORDS_KEYSTORE=file` uses `$ACHORDS_HOME/master.key` (0600) instead, e.g. on headless hosts.
+
+## Telegram
+
+1. Create a bot with @BotFather and copy its token.
+2. `pnpm achords secret set telegram.bot-token` (paste the token; it is not shown).
+3. Restart the gateway (`pnpm achords stop && pnpm achords start`); the log says `telegram: polling`.
+4. `pnpm achords pair telegram`, then send `/pair <code>` to your bot in a private chat.
+
+From then on the bot only accepts your Telegram user id, in private chats. Others get no reply (see `logs/gateway.log`). Commands: `/stop` (emergency stop), `/new` (new thread). Anything else goes to the boss agent; replies and `Done:` reports come back in the chat and are also visible in the web UI thread.
 
 ## How the emergency stop holds
 
