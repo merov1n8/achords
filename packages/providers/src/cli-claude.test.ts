@@ -89,6 +89,13 @@ describe("cli-claude adapter", () => {
     expect(res.structured).toEqual({ action: "delegate" });
   });
 
+  it("uses an MCP config file (never inline JSON with secrets on argv) when given", async () => {
+    await provider().run(req({ mcpConfigPath: "/tmp/run-x/mcp.json" }));
+    const { argv } = JSON.parse(readFileSync(record, "utf8"));
+    expect(argv[argv.indexOf("--mcp-config") + 1]).toBe("/tmp/run-x/mcp.json");
+    expect(argv).toContain("--strict-mcp-config");
+  });
+
   it("passes an empty tool list as no tools at all", async () => {
     await provider().run(req({ tools: [], allowedTools: [] }));
     const { argv } = JSON.parse(readFileSync(record, "utf8"));

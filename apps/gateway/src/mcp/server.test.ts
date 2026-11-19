@@ -1,0 +1,117 @@
+import { type ChildProcess, spawn } from "node:child_process";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { createInterface } from "node:readline";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+const SERVER = new URL("./server.ts", import.meta.url).pathname;
+
+describe("hub MCP server (stdio JSON-RPC)", () => {
+  let gateway: Server;
+  let url: string;
+  let seen: { auth?: string | undefined; body: unknown }[];
+  let child: ChildProcess;
+  let replies: Map<number, Record<string, unknown>>;
+  let waiters: Map<number, (r: Record<string, unknown>) => void>;
+
+  beforeEach(async () => {
+    seen = [];
+    gateway = createServer(async (req, res) => {
+      let body = "";
+      for await (const c of req) body += c;
+      seen.push({ auth: req.headers.authorization, body: JSON.parse(body) });
+      const parsed = JSON.parse(body);
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify(
+          parsed.agent === "nope"
+            ? { ok: false, reason: "no agent nope" }
+            : { ok: true, taskId: "t-123" },
+        ),
+      );
+    });
+    await new Promise<void>((r) => gateway.listen(0, "127.0.0.1", r));
+    url = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`;
+    child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", SERVER], {
+      env: { ...process.env, ACHORDS_HUB_URL: url, ACHORDS_RUN_TOKEN: "run-token-abc" },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    replies = new Map();
+    waiters = new Map();
+    createInterface({ input: child.stdout as NodeJS.ReadableStream }).on("line", (line) => {
+      const msg = JSON.parse(line);
+      waiters.get(msg.id)?.(msg);
+      replies.set(msg.id, msg);
+    });
+  });
+  afterEach(async () => {
+    child.kill();
+    await new Promise((r) => gateway.close(r));
+  });
+
+  let nextId = 1;
+  const rpc = (method: string, params: unknown = {}) =>
+    new Promise<Record<string, unknown>>((resolve) => {
+      const id = nextId++;
+      waiters.set(id, resolve);
+      child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    });
+
+  it("initializes, lists tools and forwards delegate calls with the run token", async () => {
+    const init = await rpc("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "t" },
+    });
+    expect(init.result).toMatchObject({
+      protocolVersion: "2025-06-18",
+      capabilities: { tools: {} },
+      serverInfo: { name: "achords" },
+    });
+    child.stdin?.write(
+      `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
+    );
+
+    const list = (await rpc("tools/list")).result as {
+      tools: { name: string; inputSchema: unknown }[];
+    };
+    expect(list.tools.map((t) => t.name)).toContain("delegate");
+    expect(list.tools[0]?.inputSchema).toMatchObject({
+      type: "object",
+      required: ["agent", "title", "instructions"],
+    });
+
+    const call = (
+      await rpc("tools/call", {
+        name: "delegate",
+        arguments: { agent: "writer", title: "Draft", instructions: "Write it" },
+      })
+    ).result as { content: { text: string }[]; isError?: boolean };
+    expect(call.isError).toBeFalsy();
+    expect(call.content[0]?.text).toMatch(/t-123/);
+    expect(seen[0]).toEqual({
+      auth: "Bearer run-token-abc",
+      body: { agent: "writer", title: "Draft", instructions: "Write it" },
+    });
+  });
+
+  it("reports refusals as tool errors, and rejects unknown tools and bad arguments", async () => {
+    await rpc("initialize", { protocolVersion: "2025-06-18" });
+    const refused = (
+      await rpc("tools/call", {
+        name: "delegate",
+        arguments: { agent: "nope", title: "x", instructions: "y" },
+      })
+    ).result as { content: { text: string }[]; isError?: boolean };
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]?.text).toMatch(/no agent nope/);
+
+    const unknown = await rpc("tools/call", { name: "rm_rf", arguments: {} });
+    expect(unknown.error).toMatchObject({ code: -32602 });
+    const bad = (await rpc("tools/call", { name: "delegate", arguments: { agent: 1 } })).result as {
+      isError?: boolean;
+    };
+    expect(bad.isError).toBe(true);
+    expect(await rpc("nope/method")).toMatchObject({ error: { code: -32601 } });
+  });
+});

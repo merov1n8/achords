@@ -38,6 +38,19 @@ describe("linked tasks", () => {
     expect(listChildren(db, root.id).map((c) => c.result)).toEqual(["child result"]);
   });
 
+  it("a child that fails by lease expiry (worker crash) still wakes its parent", () => {
+    const db = openCoreDatabase(":memory:");
+    const root = enqueue(db, { title: "root" }, 0);
+    const child = enqueueChild(db, root, { title: "c", caller: "boss", maxAttempts: 1 }, 0);
+    db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(root.id);
+    db.prepare("UPDATE tasks SET status = 'queued' WHERE id = ?").run(root.id);
+    claim(db, { workerId: "dead", leaseMs: 10 }, 0); // claims the child
+    expect(getTask(db, root.id)?.waitingChildren).toBe(1);
+    claim(db, { workerId: "w", leaseMs: 10 }, 100); // reclaim: child fails (last attempt)
+    expect(getTask(db, child.id)?.status).toBe("failed");
+    expect(getTask(db, root.id)?.waitingChildren).toBe(0);
+  });
+
   it("grandchildren keep the root, extend the chain and can only be more sensitive", () => {
     const db = openCoreDatabase(":memory:");
     const root = enqueue(db, { title: "root", sensitivity: "local-only" });
