@@ -19,6 +19,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Voice notes (ADR-0014): the owner's Telegram voice notes are downloaded (owner only, max 10 min), transcribed on the host with whisper.cpp (large-v3-turbo, language auto-detect) and handled like typed text; audio files are deleted afterwards. `achords doctor` checks Whisper and the model. Real Hungarian test: near-perfect transcript in ~6 s.
+
 - Approval buttons: messages can carry actions; Telegram shows them as inline buttons (✅ Approve / ❌ Reject for agent proposals), accepts presses only from the paired owner in a private chat, and removes the buttons after the decision. `/approve` / `/reject` remain as a fallback.
 
 - Ephemeral workers (`spawn_worker`: subset of the caller's tools and write paths, rejected if beyond them, max 3 per task, no hub tools) and agent proposals (`propose_agent`: strict validation, full permission summary in the thread, created only after the owner's `/approve` or web approval). Verified with the real `claude` CLI.

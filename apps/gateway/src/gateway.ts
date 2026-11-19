@@ -10,6 +10,7 @@ import { createRunTokens } from "./mcp/tokens.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents } from "./orchestrator/seed.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
+import { whisperTranscriber } from "./voice/transcribe.ts";
 
 export const HEARTBEAT_KEY = "gateway.heartbeat";
 const TICK_MS = 1000;
@@ -89,6 +90,11 @@ export function runGateway(home: string): Promise<number> {
       token: getVault().resolve(TELEGRAM_TOKEN_ID, "gateway"),
       orchestrator,
       onEmergencyStop: (lines) => log(`emergency stop via Telegram: ${lines.join("; ")}`),
+      // Voice notes are transcribed on this machine (ADR-0014).
+      transcriber: whisperTranscriber({
+        model: process.env.ACHORDS_WHISPER_MODEL ?? paths.whisperModel,
+        workDir: paths.runDir,
+      }),
       log,
     });
   }
