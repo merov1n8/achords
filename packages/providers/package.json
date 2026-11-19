@@ -1,0 +1,11 @@
+{
+  "name": "@achords/providers",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Model adapters and usage meters",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

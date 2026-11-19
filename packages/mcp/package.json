@@ -1,0 +1,11 @@
+{
+  "name": "@achords/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP client, catalog, own MCP server",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
