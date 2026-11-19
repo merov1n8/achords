@@ -81,6 +81,12 @@ export function runGateway(home: string): Promise<number> {
   });
   orchestrator.syncAgents();
 
+  // Voice notes (Telegram and web) are transcribed on this machine (ADR-0014).
+  const transcriber = whisperTranscriber({
+    model: process.env.ACHORDS_WHISPER_MODEL ?? paths.whisperModel,
+    workDir: paths.runDir,
+  });
+
   // Telegram runs only when its bot token is in the vault.
   let telegram: TelegramChannel | undefined;
   if (existsSync(paths.vaultDb) && getVault().status(TELEGRAM_TOKEN_ID).set) {
@@ -90,11 +96,7 @@ export function runGateway(home: string): Promise<number> {
       token: getVault().resolve(TELEGRAM_TOKEN_ID, "gateway"),
       orchestrator,
       onEmergencyStop: (lines) => log(`emergency stop via Telegram: ${lines.join("; ")}`),
-      // Voice notes are transcribed on this machine (ADR-0014).
-      transcriber: whisperTranscriber({
-        model: process.env.ACHORDS_WHISPER_MODEL ?? paths.whisperModel,
-        workDir: paths.runDir,
-      }),
+      transcriber,
       log,
     });
   }
@@ -175,6 +177,8 @@ export function runGateway(home: string): Promise<number> {
           vault: getVault,
           runTokens,
           agentsDir: join(home, "agents"),
+          transcriber,
+          runDir: paths.runDir,
           // Suggestions only: chat models pulled in Ollama (embedding models filtered out).
           localModels: async () => {
             const res = await fetch("http://127.0.0.1:11434/api/tags", {
