@@ -74,6 +74,21 @@ describe("cli-claude adapter", () => {
     ]);
   });
 
+  it("adds extra directories and a JSON schema, and returns the structured output", async () => {
+    const schema = { type: "object", properties: { action: { type: "string" } } };
+    const res = await provider("structured").run(
+      req({ addDirs: ["/a", "/b"], jsonSchema: schema }),
+    );
+    const { argv } = JSON.parse(readFileSync(record, "utf8"));
+    expect(argv.slice(argv.indexOf("--add-dir"), argv.indexOf("--add-dir") + 3)).toEqual([
+      "--add-dir",
+      "/a",
+      "/b",
+    ]);
+    expect(argv[argv.indexOf("--json-schema") + 1]).toBe(JSON.stringify(schema));
+    expect(res.structured).toEqual({ action: "delegate" });
+  });
+
   it("passes an empty tool list as no tools at all", async () => {
     await provider().run(req({ tools: [], allowedTools: [] }));
     const { argv } = JSON.parse(readFileSync(record, "utf8"));

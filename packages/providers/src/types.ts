@@ -8,6 +8,10 @@ export interface RunRequest {
   tools: string[];
   /** Tool rules that run without asking, e.g. "Read" or "Bash(git status:*)". */
   allowedTools: string[];
+  /** Directories beyond cwd the tools may access (from the manifest's fs roots). */
+  addDirs?: string[];
+  /** JSON Schema the final answer must match; the parsed value is returned as `structured`. */
+  jsonSchema?: object;
   appendSystemPrompt?: string;
   maxTurns?: number;
   maxBudgetUsd?: number;
@@ -43,6 +47,7 @@ export interface RunResult {
   usage: Usage;
   windows: UsageWindow[];
   sessionId?: string;
+  structured?: unknown;
   durationMs: number;
 }
 
