@@ -5,6 +5,7 @@ export * from "./agents.ts";
 export * from "./auth.ts";
 export { type Db, openCoreDatabase, openDatabase, transaction } from "./db/database.ts";
 export { type Migration, migrate, migrationsFromDir } from "./db/migrate.ts";
+export * from "./delegation.ts";
 export * from "./emergency.ts";
 export { type HomePaths, homePaths, resolveHome } from "./home.ts";
 export * from "./proc.ts";

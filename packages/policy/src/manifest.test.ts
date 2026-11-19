@@ -35,6 +35,19 @@ describe("parseManifest", () => {
     expect(m.models.allowed).toEqual(["local/x"]);
   });
 
+  it("delegation is deny by default and accepts explicit lists", () => {
+    const base = "id: a\nname: A\nrole: r\nworkspace: w\nmodels: {default: local/x}\n";
+    expect(parseManifest(base, "x").delegation).toEqual({ can_delegate_to: [], accepts_from: [] });
+    const m = parseManifest(
+      `${base}delegation:\n  can_delegate_to: [b]\n  accepts_from: [boss, c]\n`,
+      "x",
+    );
+    expect(m.delegation).toEqual({ can_delegate_to: ["b"], accepts_from: ["boss", "c"] });
+    expect(() => parseManifest(`${base}delegation:\n  can_delegate: [b]\n`, "x")).toThrow(
+      /can_delegate/,
+    );
+  });
+
   it("rejects unknown keys, so typos cannot silently widen or drop a rule", () => {
     expect(() => parseManifest(`${WEB_DEV}\ntool: [Bash]\n`, "agent.yaml")).toThrow(
       /agent\.yaml.*tool/s,
