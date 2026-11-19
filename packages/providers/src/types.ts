@@ -41,7 +41,8 @@ export interface UsageWindow {
 
 export interface RunResult {
   ok: boolean;
-  stopReason: "completed" | "error" | "timeout" | "cancelled";
+  /** "unavailable": the backend could not be reached (e.g. local model server down); retry later. */
+  stopReason: "completed" | "error" | "timeout" | "cancelled" | "unavailable";
   text: string;
   error?: string;
   usage: Usage;

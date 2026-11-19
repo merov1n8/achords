@@ -74,7 +74,7 @@ async function runOnce(base: string, keepAlive: string, req: RunRequest): Promis
   } catch {
     if (req.signal?.aborted) return fail("cancelled", "cancelled");
     if (timeout.aborted) return fail("timeout", "timeout");
-    return fail("error", `local model server not reachable at ${base} (is Ollama running?)`);
+    return fail("unavailable", `local model server not reachable at ${base} (is Ollama running?)`);
   }
 
   let body: {

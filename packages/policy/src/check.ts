@@ -23,7 +23,7 @@ export function checkMcp(m: Manifest, server: string): Decision {
     : deny(`mcp ${server} not in allow-list`);
 }
 
-const isLocalModel = (model: string) => /^local(-[a-z0-9-]+)?\//.test(model);
+export const isLocalModel = (model: string) => /^local(-[a-z0-9-]+)?\//.test(model);
 
 /**
  * Model choice. `local-only` (on the agent or on the data) restricts to local models and never

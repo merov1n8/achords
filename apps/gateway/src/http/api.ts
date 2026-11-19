@@ -154,7 +154,17 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/threads$/,
       async ({ res, body }) => {
         const b = await body();
-        const thread = createThread(db, b.title ? { title: str(b.title, "title", 200) } : {});
+        if (
+          b.sensitivity !== undefined &&
+          b.sensitivity !== "normal" &&
+          b.sensitivity !== "local-only"
+        ) {
+          throw new HttpError(400, "sensitivity must be normal or local-only");
+        }
+        const thread = createThread(db, {
+          ...(b.title ? { title: str(b.title, "title", 200) } : {}),
+          ...(b.sensitivity === "local-only" ? { sensitivity: "local-only" as const } : {}),
+        });
         send(res, 201, thread);
       },
     ],

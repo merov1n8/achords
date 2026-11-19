@@ -8,6 +8,7 @@ import {
   cancel,
   claim,
   complete,
+  defer,
   enqueue,
   extendLease,
   fail,
@@ -80,6 +81,26 @@ describe("task queue", () => {
     expect(claim(db, { workerId: "w", leaseMs: LEASE })).toBeUndefined();
     setPaused(db, false);
     expect(claim(db, { workerId: "w", leaseMs: LEASE })).toBeDefined();
+  });
+
+  it("carries task sensitivity", () => {
+    const db = openCoreDatabase(":memory:");
+    expect(enqueue(db, { title: "a" }).sensitivity).toBe("normal");
+    expect(enqueue(db, { title: "b", sensitivity: "local-only" }).sensitivity).toBe("local-only");
+  });
+
+  it("defers a task: not claimable until later, and the attempt does not count", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = enqueue(db, { title: "t", maxAttempts: 1 }, 0);
+    claim(db, { workerId: "w", leaseMs: LEASE }, 0);
+    expect(defer(db, t.id, "w", "waiting for local model", 60_000, 10)).toBe(true);
+    expect(getTask(db, t.id)).toMatchObject({
+      status: "queued",
+      attempts: 0,
+      error: "waiting for local model",
+    });
+    expect(claim(db, { workerId: "w", leaseMs: LEASE }, 30_000)).toBeUndefined();
+    expect(claim(db, { workerId: "w", leaseMs: LEASE }, 60_011)?.id).toBe(t.id);
   });
 
   it("lists tasks for the kanban, most recently updated first", () => {

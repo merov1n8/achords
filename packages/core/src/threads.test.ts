@@ -7,6 +7,7 @@ import {
   listMessages,
   listMessagesAfter,
   listThreads,
+  makeThreadLocalOnly,
 } from "./threads.ts";
 
 describe("threads", () => {
@@ -66,6 +67,16 @@ describe("threads", () => {
     expect(c.seq).toBeGreaterThan(a.seq);
     expect(listMessagesAfter(db, t.id, a.seq).map((m) => m.content)).toEqual(["c"]);
     expect(listMessagesAfter(db, t.id, c.seq)).toEqual([]);
+  });
+
+  it("marks threads local-only, one way (history must never reach a frontier model later)", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = createThread(db, {});
+    expect(t.sensitivity).toBe("normal");
+    const local = createThread(db, { sensitivity: "local-only" });
+    expect(getThread(db, local.id)?.sensitivity).toBe("local-only");
+    makeThreadLocalOnly(db, t.id);
+    expect(getThread(db, t.id)?.sensitivity).toBe("local-only");
   });
 
   it("rejects messages for unknown threads and invalid enums", () => {
