@@ -45,9 +45,15 @@ function context(): ControlContext {
           gatewayEntry,
           home: paths.home,
           logFile: `${paths.logDir}/gateway.log`,
+          path: process.env.PATH ?? "/usr/bin:/bin",
         })
       : process.platform === "linux"
-        ? systemdService({ nodePath: process.execPath, gatewayEntry, home: paths.home })
+        ? systemdService({
+            nodePath: process.execPath,
+            gatewayEntry,
+            home: paths.home,
+            path: process.env.PATH ?? "/usr/bin:/bin",
+          })
         : unsupportedService;
   return { paths, service };
 }
