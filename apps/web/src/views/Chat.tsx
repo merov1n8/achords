@@ -1,9 +1,10 @@
-import { Send } from "lucide-preact";
+import { LoaderCircle, Mic, Send, Square } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
+import { useRecorder } from "../recorder.ts";
 import type { Message, Thread } from "../types.ts";
 
 export function Chat(props: { threadId?: string | undefined; onThread: (id: string) => void }) {
@@ -28,6 +29,10 @@ function Conversation({ threadId, thread }: { threadId: string; thread?: Thread 
   const [text, setText] = useState("");
   const [waitingAfter, setWaitingAfter] = useState<number>();
   const [error, setError] = useState<string>();
+  const mic = useRecorder(
+    (spoken) => setText((cur) => (cur ? `${cur} ${spoken}` : spoken)),
+    (msg) => setError(msg),
+  );
   const end = useRef<HTMLDivElement>(null);
 
   const list = messages.data ?? [];
@@ -109,6 +114,26 @@ function Conversation({ threadId, thread }: { threadId: string; thread?: Thread 
           placeholder={t("chat.placeholder")}
           rows={2}
         />
+        <button
+          type="button"
+          class={`btn ${mic.state === "recording" ? "danger" : ""}`}
+          title={t(mic.state === "recording" ? "chat.micStop" : "chat.mic")}
+          aria-label={t(mic.state === "recording" ? "chat.micStop" : "chat.mic")}
+          disabled={mic.state === "transcribing"}
+          onClick={() => {
+            setError(undefined);
+            if (mic.state === "recording") mic.stop();
+            else mic.start();
+          }}
+        >
+          {mic.state === "recording" ? (
+            <Square class="icon" />
+          ) : mic.state === "transcribing" ? (
+            <LoaderCircle class="icon spin" />
+          ) : (
+            <Mic class="icon" />
+          )}
+        </button>
         <button type="submit" class="btn primary">
           <Send class="icon" />
           {t("chat.send")}

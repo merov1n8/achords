@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import {
@@ -21,6 +22,7 @@ import { loadManifest, updateManifestModels } from "@achords/policy";
 import type { Vault } from "@achords/secrets";
 import type { RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
+import type { Transcriber } from "../voice/transcribe.ts";
 import { serveStatic } from "./static.ts";
 
 // Browsers share cookies across all ports of a host, so the name carries the port this gateway
@@ -28,6 +30,8 @@ import { serveStatic } from "./static.ts";
 const cookieName = (req: IncomingMessage) => `achords_session_${req.socket.localPort}`;
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
 const BODY_LIMIT = 64 * 1024;
+// About 10 minutes of Opus audio, like the Telegram voice limit.
+const AUDIO_LIMIT = 10 * 1024 * 1024;
 const CLAUDE_ALIASES = [
   "cli-claude/opus",
   "cli-claude/sonnet",
@@ -47,6 +51,9 @@ export interface ApiDeps {
   vault?: () => Vault;
   /** Exact Host header values accepted (DNS-rebinding protection). */
   allowedHosts: string[];
+  /** Local speech to text for web voice notes (ADR-0014) and its scratch folder. */
+  transcriber?: Transcriber;
+  runDir?: string;
   /** Agent manifests ($ACHORDS_HOME/agents) for the model settings. */
   agentsDir?: string;
   /** Chat models pulled in the local model server (suggestions only). */
@@ -108,19 +115,26 @@ function readCookie(req: IncomingMessage): string | undefined {
   return undefined;
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  if (!(req.headers["content-type"] ?? "").startsWith("application/json")) {
-    throw new HttpError(415, "expected application/json");
-  }
+async function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+  if (Number(req.headers["content-length"] ?? 0) > limit)
+    throw new HttpError(413, "body too large");
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > BODY_LIMIT) throw new HttpError(413, "body too large");
+    if (size > limit) throw new HttpError(413, "body too large");
     chunks.push(chunk as Buffer);
   }
+  return Buffer.concat(chunks);
+}
+
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  if (!(req.headers["content-type"] ?? "").startsWith("application/json")) {
+    throw new HttpError(415, "expected application/json");
+  }
+  const raw = await readBody(req, BODY_LIMIT);
   try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    const parsed = JSON.parse(raw.toString("utf8") || "{}");
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error();
     return parsed;
   } catch {
@@ -226,6 +240,30 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Web voice note → text on this machine; the browser puts it in the composer to review.
+    [
+      "POST",
+      /^\/api\/transcribe$/,
+      async ({ req }) => {
+        if (!/^audio\/[\w.+-]+/.test(req.headers["content-type"] ?? "")) {
+          throw new HttpError(415, "expected audio");
+        }
+        const stt = deps.transcriber;
+        if (!stt?.available().ok || !deps.runDir)
+          throw new HttpError(503, t("telegram.voiceNoWhisper"));
+        const audio = await readBody(req, AUDIO_LIMIT);
+        mkdirSync(deps.runDir, { recursive: true, mode: 0o700 });
+        const path = join(deps.runDir, `voice-${randomUUID()}.audio`);
+        writeFileSync(path, audio, { mode: 0o600 });
+        try {
+          const out = await stt.transcribe(path);
+          if (!out.ok) throw new HttpError(422, t("telegram.voiceFailed", { reason: out.reason }));
+          return { text: out.text };
+        } finally {
+          rmSync(path, { force: true });
+        }
+      },
+    ],
     // Message actions (buttons) from the web; same meaning as on Telegram.
     [
       "POST",
