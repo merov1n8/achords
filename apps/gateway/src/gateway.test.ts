@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getSetting, homePaths, openCoreDatabase } from "@achords/core";
+import { getSetting, homePaths, listAgents, openCoreDatabase } from "@achords/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { HEARTBEAT_KEY } from "./gateway.ts";
 
@@ -47,6 +47,12 @@ describe("gateway process", () => {
       db.close();
       return beat !== undefined;
     });
+
+    // Startup seeds the default agents and mirrors them into the DB.
+    expect(existsSync(join(home, "agents", "boss", "agent.yaml"))).toBe(true);
+    const db = openCoreDatabase(paths.db);
+    expect(listAgents(db).map((a) => a.id)).toEqual(["boss", "web-dev"]);
+    db.close();
 
     const exited = exitCode(child);
     child.kill("SIGTERM");

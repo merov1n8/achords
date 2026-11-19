@@ -1,0 +1,13 @@
+# Orchestrator. Decides: answer, ask a clarifying question, or delegate to a sub-agent.
+# {{ACHORDS_HOME}} is replaced when the agent is seeded into $ACHORDS_HOME/agents.
+id: boss
+name: Boss
+role: orchestrator
+workspace: shared
+models:
+  default: cli-claude/sonnet
+tools: []
+fs:
+  write: ["{{ACHORDS_HOME}}/agents/boss/work"]
+budget:
+  per_run_usd: 0.5

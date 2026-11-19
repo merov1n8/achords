@@ -1,8 +1,15 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { homePaths, openCoreDatabase, readLivePid, setSetting } from "@achords/core";
+import { cliClaude } from "@achords/providers";
+import { createOrchestrator } from "./orchestrator/orchestrator.ts";
+import { seedAgents } from "./orchestrator/seed.ts";
 
 export const HEARTBEAT_KEY = "gateway.heartbeat";
 const TICK_MS = 1000;
+// Upper bound for a cancelled run to finish killing its process group on shutdown.
+const SHUTDOWN_WAIT_MS = 5000;
+const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
 
 const log = (msg: string) => console.log(`${new Date().toISOString()} gateway: ${msg}`);
 
@@ -24,16 +31,27 @@ export function runGateway(home: string): Promise<number> {
     return Promise.resolve(0);
   }
   const db = openCoreDatabase(paths.db);
+  const seeded = seedAgents(SEED_AGENTS, join(home, "agents"), home);
+  if (seeded.length) log(`seeded agents: ${seeded.join(", ")}`);
+  const orchestrator = createOrchestrator({ db, home, providers: { "cli-claude": cliClaude() } });
+  orchestrator.syncAgents();
 
   return new Promise((resolve) => {
     let stopped = false;
     let timer: NodeJS.Timeout | undefined;
-    const shutdown = (reason: string) => {
+    let working: Promise<unknown> | undefined;
+    const cancel = new AbortController();
+    const shutdown = async (reason: string) => {
       if (stopped) return;
       stopped = true;
       clearInterval(timer);
       process.off("SIGTERM", onTerm);
       process.off("SIGINT", onInt);
+      // Cancel the in-flight agent run and let it kill its process group before we exit.
+      cancel.abort();
+      if (working) {
+        await Promise.race([working, new Promise((r) => setTimeout(r, SHUTDOWN_WAIT_MS))]);
+      }
       db.close();
       // Only remove our own pidfile; a successor may already have written its own.
       if (readLivePid(paths.pidFile) === process.pid) rmSync(paths.pidFile, { force: true });
@@ -41,8 +59,17 @@ export function runGateway(home: string): Promise<number> {
       resolve(0);
     };
     const tick = () => {
+      if (stopped) return;
       if (existsSync(paths.stopFile)) return shutdown("stop marker");
       setSetting(db, HEARTBEAT_KEY, String(Date.now()));
+      if (!working) {
+        working = orchestrator
+          .workOnce(cancel.signal)
+          .catch((err) => log(`worker error: ${(err as Error).message}`))
+          .finally(() => {
+            working = undefined;
+          });
+      }
     };
     const onTerm = () => shutdown("SIGTERM");
     const onInt = () => shutdown("SIGINT");

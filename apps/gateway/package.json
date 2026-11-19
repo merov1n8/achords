@@ -9,6 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@achords/core": "workspace:*"
+    "@achords/core": "workspace:*",
+    "@achords/policy": "workspace:*",
+    "@achords/providers": "workspace:*",
+    "zod": "^4.6.7"
   }
 }
