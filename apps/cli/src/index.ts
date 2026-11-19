@@ -37,16 +37,21 @@ function run(command: string | undefined): number {
   const ctx = context();
   switch (command) {
     case "start": {
-      const folder = process.platform === "darwin" ? protectedFolderOf(gatewayEntry) : undefined;
-      if (folder) {
-        console.warn(
-          `warning: the code is in ~/${folder}, which macOS blocks for background services.\n` +
-            "  Move the checkout (e.g. ~/Code/achords) or grant node access under\n" +
-            "  System Settings > Privacy & Security > Files and Folders.",
-        );
+      try {
+        console.log(start(ctx));
+        return 0;
+      } catch (err) {
+        // Access may have been granted, so only mention privacy folders when the start failed.
+        const folder = process.platform === "darwin" ? protectedFolderOf(gatewayEntry) : undefined;
+        if (folder) {
+          console.error(
+            `hint: the code is in ~/${folder}, which macOS blocks for background services.\n` +
+              "  Move the checkout (e.g. ~/Code/achords) or grant node access under\n" +
+              "  System Settings > Privacy & Security > Files and Folders.",
+          );
+        }
+        throw err;
       }
-      console.log(start(ctx));
-      return 0;
     }
     case "stop":
       console.log(stop(ctx));
