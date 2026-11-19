@@ -15,6 +15,7 @@ agents/*/runtime/
 *.sqlite
 *.sqlite-*
 *.db
+.achords-dev/
 
 # Private dev notes (context, phase plans): not published
 .dev/

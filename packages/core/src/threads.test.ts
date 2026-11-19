@@ -1,0 +1,61 @@
+import { describe, expect, it } from "vitest";
+import { openCoreDatabase } from "./db/database.ts";
+import { appendMessage, createThread, getThread, listMessages, listThreads } from "./threads.ts";
+
+describe("threads", () => {
+  it("creates and fetches a thread", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = createThread(db, { title: "TODO app", workspace: "web-clients" });
+    expect(getThread(db, t.id)).toEqual(t);
+    expect(getThread(db, "missing")).toBeUndefined();
+  });
+
+  it("lists threads by most recent activity", () => {
+    const db = openCoreDatabase(":memory:");
+    const a = createThread(db, { title: "a" }, 1);
+    const b = createThread(db, { title: "b" }, 2);
+    appendMessage(db, { threadId: a.id, role: "user", channel: "web", content: "hi" }, 3);
+    expect(listThreads(db).map((t) => t.id)).toEqual([a.id, b.id]);
+  });
+
+  it("hides trace messages unless asked", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = createThread(db, {});
+    appendMessage(db, { threadId: t.id, role: "user", channel: "telegram", content: "do X" }, 1);
+    appendMessage(
+      db,
+      {
+        threadId: t.id,
+        role: "agent",
+        channel: "system",
+        content: "tool call",
+        visibility: "trace",
+      },
+      2,
+    );
+    appendMessage(
+      db,
+      { threadId: t.id, role: "agent", author: "boss", channel: "telegram", content: "done" },
+      3,
+    );
+    expect(listMessages(db, t.id).map((m) => m.content)).toEqual(["do X", "done"]);
+    expect(listMessages(db, t.id, { includeTraces: true })).toHaveLength(3);
+  });
+
+  it("rejects messages for unknown threads and invalid enums", () => {
+    const db = openCoreDatabase(":memory:");
+    expect(() =>
+      appendMessage(db, { threadId: "nope", role: "user", channel: "web", content: "x" }),
+    ).toThrow();
+    const t = createThread(db, {});
+    expect(() =>
+      appendMessage(db, {
+        threadId: t.id,
+        // @ts-expect-error invalid on purpose
+        role: "robot",
+        channel: "web",
+        content: "x",
+      }),
+    ).toThrow();
+  });
+});
