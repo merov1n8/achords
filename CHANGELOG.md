@@ -19,6 +19,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Approval buttons: messages can carry actions; Telegram shows them as inline buttons (✅ Approve / ❌ Reject for agent proposals), accepts presses only from the paired owner in a private chat, and removes the buttons after the decision. `/approve` / `/reject` remain as a fallback.
+
 - Ephemeral workers (`spawn_worker`: subset of the caller's tools and write paths, rejected if beyond them, max 3 per task, no hub tools) and agent proposals (`propose_agent`: strict validation, full permission summary in the thread, created only after the owner's `/approve` or web approval). Verified with the real `claude` CLI.
 
 - `ask_owner`: any agent, at any delegation depth, can ask the owner a question; it appears in the original thread, the task waits, and the owner's reply is routed back to that agent (not the boss). Run tokens are scoped to the granted hub tools. Verified with the real `claude` CLI.
