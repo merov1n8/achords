@@ -48,6 +48,24 @@ describe("parseManifest", () => {
     );
   });
 
+  it("rejects claude CLI model names that are neither an alias nor a full model name", () => {
+    const base =
+      "id: a\nname: A\nrole: r\nworkspace: w\nmodels:\n  default: cli-claude/sonnet\n  allowed: [cli-claude/sonnet, MODEL]\n";
+    for (const ok of [
+      "cli-claude/opus",
+      "cli-claude/fable",
+      "cli-claude/claude-opus-5-5",
+      "cli-claude/claude-haiku-5-5-20261101",
+      "local/qwen3:8b",
+    ]) {
+      expect(() => parseManifest(base.replace("MODEL", ok), "x")).not.toThrow();
+    }
+    // Real mistake from editing a manifest by hand: the version removed, the prefix kept.
+    expect(() => parseManifest(base.replace("MODEL", "cli-claude/claude-opus"), "x")).toThrow(
+      /claude-opus.*alias.*opus/s,
+    );
+  });
+
   it("rejects unknown keys, so typos cannot silently widen or drop a rule", () => {
     expect(() => parseManifest(`${WEB_DEV}\ntool: [Bash]\n`, "agent.yaml")).toThrow(
       /agent\.yaml.*tool/s,

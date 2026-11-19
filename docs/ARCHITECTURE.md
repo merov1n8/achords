@@ -138,6 +138,8 @@ Default layout, configurable:
 
 ### 4.11 Kanban
 
+- Workflow per workspace (ADR-0030, planned): `workflow.yaml` with columns, transitions (`by: assignee | role:<x> | owner`, `not: assignee` for four-eyes) and `on_enter` automation (`assign: role:qa`, `approve: owner`). Agents move cards via the `move_task` hub tool only; the owner may drag & drop anything (Pointer Events, touch-friendly), logged. A permission matrix view shows who may do what.
+
 - Cards created by the user or the orchestrator; AI breakdown into subtasks, swimlanes by owner/priority, per-column WIP limits, card aging.
 
 ### 4.12 Dashboard
