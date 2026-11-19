@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Workflow rules (ADR-0030), groundwork: `workflow.yaml` schema with columns, transitions (`by: owner | assignee | role:<name>`, `not: assignee` four-eyes check) and `on_enter` automation; default workflow backlog → todo → in_progress → review → done → deployed; `roles` in agent.yaml; every card move is logged (owner overrides flagged). Not wired into the gateway and web yet.
+
 - Voice notes in the web chat: the mic button records in the browser, the gateway transcribes on this machine with Whisper (audio never leaves the host, temp files removed), and the text lands in the message box to review before sending.
 
 - Per-agent model settings in the web Agents view: tick allowed models (aliases, pulled local models or any `provider/model`) and pick the default. Saved to `agent.yaml` with comments and layout kept, validated before writing (an invalid change leaves the file untouched); applies to the next run without a restart.

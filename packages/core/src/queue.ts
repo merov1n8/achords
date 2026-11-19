@@ -36,10 +36,13 @@ export interface Task {
   error: string | null;
   createdAt: number;
   updatedAt: number;
+  /** Kanban column (ADR-0030); null = no card of its own (child tasks, helpers). */
+  column: string | null;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
   id: r.id as string,
+  column: (r.board_column as string | null) ?? null,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),
