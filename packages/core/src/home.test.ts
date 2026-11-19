@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveHome } from "./home.ts";
+import { homePaths, resolveHome } from "./home.ts";
 
 describe("resolveHome", () => {
   it("defaults to ~/.achords", () => {
@@ -15,5 +15,19 @@ describe("resolveHome", () => {
 
   it("ignores an empty ACHORDS_HOME", () => {
     expect(resolveHome({ ACHORDS_HOME: "" })).toBe(join(homedir(), ".achords"));
+  });
+});
+
+describe("homePaths", () => {
+  it("keeps every runtime file under the home directory", () => {
+    const p = homePaths("/h");
+    expect(p).toEqual({
+      home: "/h",
+      db: "/h/core.db",
+      runDir: "/h/run",
+      pidFile: "/h/run/gateway.pid",
+      stopFile: "/h/run/STOP",
+      logDir: "/h/logs",
+    });
   });
 });

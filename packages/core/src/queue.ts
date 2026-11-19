@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "./db/database.ts";
 import { transaction } from "./db/database.ts";
+import { getSetting, setSetting } from "./settings.ts";
 
 export type TaskStatus = "queued" | "claimed" | "done" | "failed" | "cancelled";
 
@@ -183,13 +184,9 @@ export function cancel(db: Db, id: string, now = Date.now()): boolean {
 }
 
 export function isPaused(db: Db): boolean {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(PAUSED_KEY);
-  return row?.value === "true";
+  return getSetting(db, PAUSED_KEY) === "true";
 }
 
 export function setPaused(db: Db, paused: boolean): void {
-  db.prepare(
-    `INSERT INTO settings (key, value) VALUES (?, ?)
-     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-  ).run(PAUSED_KEY, String(paused));
+  setSetting(db, PAUSED_KEY, String(paused));
 }
