@@ -1,0 +1,11 @@
+{
+  "name": "@achords/platform",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Platform layer (apple-silicon / generic)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "achords",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "prepare": "git config core.hooksPath .githooks || true"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2",
+    "typescript": "^5",
+    "vitest": "^3",
+    "@types/node": "^22"
+  }
+}
