@@ -345,7 +345,13 @@ export function createApiHandler(deps: ApiDeps) {
 
       const token = readCookie(req);
       const session = token ? validateSession(db, token) : undefined;
-      if (!session) throw new HttpError(401, "not paired");
+      if (!session) {
+        // Says which case it is (browser sent nothing vs. a dead session), never the token.
+        log(
+          `web: not paired: ${token ? "unknown, revoked or expired session" : "no session cookie"} (${method} ${path}, ${req.headers["user-agent"]?.slice(0, 60) ?? "no user agent"})`,
+        );
+        throw new HttpError(401, "not paired");
+      }
       if (mutating && req.headers["x-achords-csrf"] !== session.csrf) {
         throw new HttpError(403, "missing or wrong CSRF token");
       }
