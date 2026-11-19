@@ -10,3 +10,4 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - CI on Linux and macOS, gitleaks secret scanning (CI and pre-commit hook).
 - Architecture document and ADR-0001 to ADR-0020.
 - Apache-2.0 license, README, CONTRIBUTING (CLA), SECURITY policy.
+- Architecture: emergency stop (`achords kill`) and machine migration (export/import) design notes; ADR-0021 (Proposed).

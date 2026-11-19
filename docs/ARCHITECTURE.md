@@ -144,7 +144,16 @@ Each workspace has its own memory namespace, MD vault folder, MCP set and secret
 
 ### 4.19 Install
 - `achords init`: dependency check, platform detection, provider mode (CLI or API), CLI login handoff, Telegram bot setup, workspace and agent templates, local model pull, service install.
-- `achords doctor`, `achords update`, `achords start|stop`. Everything set at install is editable later in the engine room.
+- `achords doctor`, `achords update`, `achords start|stop|status|kill|resume`. Everything set at install is editable later in the engine room.
+- Emergency stop (`achords kill`) must work even if the gateway is hung: it unloads the launchd/systemd service (so `KeepAlive` cannot restart it), kills every agent run's process group (PIDs recorded in `runs`), pauses the task queue and writes a STOP marker the gateway refuses to start past. `achords resume` clears it. Telegram `/stop` from the paired owner chat triggers the same path.
+
+### 4.20 Machine migration (export / import)
+Status: planned, to ship together with the production-grade `achords init` (see ADR-0021).
+- All state lives under one root (`ACHORDS_HOME`, default `~/.achords`): config, agent manifests, skills, schedules, SQLite databases, MD vaults, logs. Only the vault master key lives outside (Keychain).
+- `achords export <file>` writes one archive, fully encrypted with a user passphrase (memory and threads may hold `local-only` data). Includes: config, agents, skills, schedules, workspaces, MD vaults, databases (threads, kanban, memory), schema version.
+- Vault secrets (API keys, Telegram tokens, MCP credentials) are re-wrapped with the export passphrase; on import they are re-wrapped with the target machine's Keychain key. Values are never decrypted to disk or shown.
+- Not exportable, must be redone on the target: subscription CLI logins (`claude`, `codex`; OAuth tokens are never touched, ADR-0004), Tailscale node identity, local model weights (the model list is exported, `achords doctor` re-pulls).
+- `achords import <file>` refuses newer schema versions, runs migrations for older ones, rewrites machine-specific paths, and starts paused. Export leaves the source paused, because a Telegram bot can only be long-polled by one install at a time.
 
 ## 5. Repo layout (monorepo)
 
@@ -166,7 +175,7 @@ docs/adr/           decision records
 
 ## 6. Delivery phases
 
-1. **MVP**: gateway, boss + 1 sub-agent, CLI-claude adapter, Telegram, web threads + kanban, SQLite memory, vault, `achords init`.
+1. **MVP**: gateway, boss + 1 sub-agent, CLI-claude adapter, Telegram, web threads + kanban, SQLite memory, vault, `achords init`, start/stop/kill control, export/import.
 2. Local models (Ollama), sensitivity routing, voice, usage meters, scheduler UI.
 3. Marketing stack MCPs, publish review/auto, heartbeat.
 4. API mode adapters and billing meters, signed updates, fleet MCP.
