@@ -27,3 +27,4 @@
 - [ADR-0025: Orchestrator lives in the gateway; boss decides via structured output](0025-orchestrator-lives-in-the-gateway.md)
 - [ADR-0026: Web access via one-time pairing codes and session cookies](0026-web-access-via-pairing-codes-and-session-cookies.md)
 - [ADR-0027: Telegram is bound to one owner user id; everyone else is ignored](0027-telegram-owner-binding.md)
+- [ADR-0028: Web UI with Vite + Preact + TypeScript](0028-web-ui-vite-preact-typescript.md)

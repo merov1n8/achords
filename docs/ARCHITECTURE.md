@@ -189,7 +189,7 @@ Status: planned, to ship together with the production-grade `achords init` (see 
 
 ```
 apps/gateway        daemon: channels, scheduler, API, orchestrator (ADR-0025)
-apps/web            dashboard (localhost)
+apps/web            dashboard (Vite + Preact + TS, served by the gateway; ADR-0028)
 apps/cli            achords init / doctor / update
 packages/core       data layer: threads, task queue, runs, agents
 packages/policy     policy engine
