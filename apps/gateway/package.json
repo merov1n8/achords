@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@achords/core": "workspace:*",
+    "@achords/i18n": "workspace:*",
     "@achords/memory": "workspace:*",
     "@achords/policy": "workspace:*",
     "@achords/providers": "workspace:*",

@@ -1,7 +1,6 @@
 {
   "app.loading": "Loading…",
   "app.unreachable": "Cannot reach the gateway.",
-
   "nav.main": "Main navigation",
   "nav.menu": "Menu",
   "nav.chat": "Chat",
@@ -12,7 +11,6 @@
   "nav.vault": "Vault",
   "nav.devices": "Devices",
   "nav.connected": "Connected · {device}",
-
   "chat.untitled": "Untitled",
   "chat.newThread": "New thread",
   "chat.empty": "No threads yet. Start one from the menu.",
@@ -21,24 +19,20 @@
   "chat.placeholder": "Message the boss (Enter to send, Shift+Enter for a new line)",
   "chat.send": "Send",
   "chat.localOnly": "Local-only",
-
   "kanban.todo": "To do",
   "kanban.inProgress": "In progress",
   "kanban.done": "Done",
   "kanban.failed": "Failed",
   "kanban.unassigned": "unassigned",
-
   "status.queued": "To do",
   "status.claimed": "In progress",
   "status.done": "Done",
   "status.failed": "Failed",
   "status.cancelled": "Cancelled",
-
   "agents.id": "Agent",
   "agents.name": "Name",
   "agents.role": "Role",
   "agents.workspace": "Workspace",
-
   "appearance.theme": "Theme",
   "appearance.themeHint": "System follows macOS day and night automatically.",
   "appearance.theme.system": "System",
@@ -47,7 +41,6 @@
   "appearance.accent": "Accent colour",
   "appearance.accent.violet": "Violet",
   "appearance.accent.teal": "Teal",
-
   "vault.hint": "Secrets are write-only: they can be set or replaced, never shown.",
   "vault.secret": "Secret",
   "vault.value": "Value",
@@ -56,7 +49,6 @@
   "vault.confirmDelete": "Delete",
   "vault.setTitle": "Set or replace a secret",
   "vault.id": "Id",
-
   "devices.device": "Device",
   "devices.paired": "Paired",
   "devices.lastSeen": "Last seen",
@@ -64,17 +56,31 @@
   "devices.logout": "Log out",
   "devices.revoke": "Revoke",
   "devices.pairHint": "To pair another device, run `achords pair web` on the host.",
-
   "pair.intro": "Pair this browser: run `achords pair web` on the host and enter the code.",
   "pair.code": "Pairing code",
   "pair.deviceName": "Device name",
   "pair.submit": "Pair",
-
   "common.save": "Save",
   "common.cancel": "Cancel",
-
   "time.justNow": "just now",
   "time.minutes": "{n}m",
   "time.hours": "{n}h",
-  "time.days": "{n}d"
+  "time.days": "{n}d",
+  "thread.done": "Done: {title}\n\n{result}",
+  "thread.failed": "Failed: {title}\n\n{error}",
+  "thread.bossError": "Sorry, I could not handle that ({reason}).",
+  "thread.question": "Question from {agent} ({title}): {question}",
+  "thread.proposal": "{agent} proposes a new agent '{id}' ({role}): {reason}\n{summary}\n(or reply /approve {pid} or /reject {pid})",
+  "action.approve": "✅ Approve",
+  "action.reject": "❌ Reject",
+  "action.approved": "Approved: agent {agent}.",
+  "action.rejected": "Rejected: agent {agent}.",
+  "action.unknown": "Unknown action.",
+  "telegram.paired": "Paired. I only listen to you from now on.",
+  "telegram.stopped": "Emergency stop: {runs} run(s) killed, queue paused. The gateway is shutting down; run `achords resume` and `achords start` on the host to continue.",
+  "telegram.localOnly": "This thread is now local-only: it runs on local models only and never reaches a cloud model. This cannot be undone; use /new for normal work.",
+  "telegram.newThread": "New thread started.",
+  "telegram.voiceNoWhisper": "Voice notes need local Whisper on the host (run `achords doctor`).",
+  "telegram.voiceTooLong": "That voice note is too long (max {minutes} min).",
+  "telegram.voiceFailed": "Could not transcribe the voice note: {reason}"
 }

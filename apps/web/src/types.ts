@@ -14,6 +14,7 @@ export interface Message {
   author: string | null;
   channel: "web" | "telegram" | "system";
   content: string;
+  actions: { label: string; data: string }[] | null;
   createdAt: number;
 }
 

@@ -38,6 +38,16 @@ function Conversation({ threadId, thread }: { threadId: string; thread?: Thread 
 
   useEffect(() => end.current?.scrollIntoView({ block: "end" }), [list.length, waiting]);
 
+  const runAction = async (data: string) => {
+    setError(undefined);
+    try {
+      await api("/api/actions", { method: "POST", body: { data } });
+      messages.refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   const send = async (e: Event) => {
     e.preventDefault();
     const body = text.trim();
@@ -69,6 +79,20 @@ function Conversation({ threadId, thread }: { threadId: string; thread?: Thread 
               {ago(m.createdAt)}
             </div>
             <div class="content">{m.content}</div>
+            {m.actions && (
+              <div class="actions">
+                {m.actions.map((a, i) => (
+                  <button
+                    key={a.data}
+                    type="button"
+                    class={`btn ${i === 0 ? "primary" : ""}`}
+                    onClick={() => runAction(a.data)}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {waiting && <div class="msg agent muted">{t("chat.thinking")}</div>}

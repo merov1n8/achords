@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { catalog as en } from "@achords/i18n";
 import { describe, expect, it } from "vitest";
 import { t } from "./i18n.ts";
-import en from "./locales/en.json" with { type: "json" };
 
 const SRC = new URL(".", import.meta.url).pathname;
 
