@@ -82,5 +82,12 @@
   "telegram.newThread": "New thread started.",
   "telegram.voiceNoWhisper": "Voice notes need local Whisper on the host (run `achords doctor`).",
   "telegram.voiceTooLong": "That voice note is too long (max {minutes} min).",
-  "telegram.voiceFailed": "Could not transcribe the voice note: {reason}"
+  "telegram.voiceFailed": "Could not transcribe the voice note: {reason}",
+  "agents.models": "Models",
+  "agents.modelsOf": "Models of {agent}",
+  "agents.allowedHelp": "Ticked models are allowed for this agent; the dot marks the default. Aliases (opus, sonnet, haiku, fable) always use the newest version.",
+  "agents.default": "default",
+  "agents.add": "Add",
+  "agents.saved": "Saved to agent.yaml.",
+  "common.close": "Close"
 }

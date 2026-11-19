@@ -1,6 +1,9 @@
 import { randomBytes } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createPairingCode,
   createThread,
@@ -28,9 +31,16 @@ describe("HTTP API", () => {
   const decisions: { id: string; approve: boolean }[] = [];
   const tokens = createRunTokens();
   const logs: string[] = [];
+  let agentsDir: string;
 
   beforeEach(async () => {
     db = openCoreDatabase(":memory:");
+    agentsDir = mkdtempSync(join(tmpdir(), "achords-api-agents-"));
+    mkdirSync(join(agentsDir, "boss"));
+    writeFileSync(
+      join(agentsDir, "boss", "agent.yaml"),
+      "id: boss\nname: Boss\nrole: orchestrator\nworkspace: shared\nmodels:\n  default: cli-claude/sonnet\n",
+    );
     vault = openVault(":memory:", randomBytes(32));
     handled.length = 0;
     server = createServer();
@@ -70,6 +80,8 @@ describe("HTTP API", () => {
           },
         },
         runTokens: tokens,
+        agentsDir,
+        localModels: async () => ["qwen3:8b"],
         log: (m) => logs.push(m),
       }),
     );
@@ -385,6 +397,43 @@ describe("HTTP API", () => {
       body: '{"data":"proposal:approve:p9"}',
     });
     expect(noCsrf.status).toBe(401);
+  });
+
+  it("agent model settings: read and update through the manifest, owner only", async () => {
+    const { call } = await pair();
+    const agent = (await (await call("/api/agents/boss")).json()) as {
+      models: { default: string; allowed: string[] };
+      suggestions: string[];
+    };
+    expect(agent.models.default).toBe("cli-claude/sonnet");
+    expect(agent.suggestions).toEqual(
+      expect.arrayContaining(["cli-claude/opus", "cli-claude/fable"]),
+    );
+
+    const put = await call("/api/agents/boss/models", {
+      method: "PUT",
+      body: JSON.stringify({
+        default: "cli-claude/opus",
+        allowed: ["cli-claude/opus", "cli-claude/sonnet"],
+      }),
+    });
+    expect(put.status).toBe(200);
+    expect(readFileSync(join(agentsDir, "boss", "agent.yaml"), "utf8")).toContain(
+      "default: cli-claude/opus",
+    );
+
+    const bad = await call("/api/agents/boss/models", {
+      method: "PUT",
+      body: JSON.stringify({
+        default: "cli-claude/claude-opus",
+        allowed: ["cli-claude/claude-opus"],
+      }),
+    });
+    expect(bad.status).toBe(400);
+    expect((await call("/api/agents/..%2Fevil/models", { method: "PUT", body: "{}" })).status).toBe(
+      404,
+    );
+    expect((await call("/api/agents/nobody")).status).toBe(404);
   });
 
   it("only the owner (paired session + CSRF) decides proposals; agents cannot", async () => {

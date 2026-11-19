@@ -2,6 +2,7 @@
 export const PACKAGE_NAME = "@achords/policy";
 
 export * from "./check.ts";
+export { updateManifestModels } from "./edit.ts";
 export {
   loadAgents,
   loadManifest,
