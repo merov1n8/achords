@@ -34,3 +34,35 @@ export async function readSecret(prompt: string): Promise<string> {
     stdin.resume();
   });
 }
+
+/**
+ * Question/answer prompter. On a terminal: line input, hidden for secrets. When piped: answers
+ * are taken line by line from stdin, so scripts and tests can drive interactive commands.
+ */
+export function createPrompter() {
+  let piped: Promise<string[]> | undefined;
+  const nextPiped = async () => {
+    piped ??= (async () => {
+      let data = "";
+      for await (const chunk of process.stdin) data += chunk;
+      return data.split(/\r?\n/);
+    })();
+    return (await piped).shift() ?? "";
+  };
+  return async (question: string, opts: { secret?: boolean } = {}): Promise<string> => {
+    if (!process.stdin.isTTY) {
+      process.stderr.write(`${question} `);
+      const answer = await nextPiped();
+      process.stderr.write("\n");
+      return answer;
+    }
+    if (opts.secret) return readSecret(`${question} `);
+    const { createInterface } = await import("node:readline/promises");
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    try {
+      return await rl.question(`${question} `);
+    } finally {
+      rl.close();
+    }
+  };
+}
