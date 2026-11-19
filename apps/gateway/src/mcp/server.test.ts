@@ -37,7 +37,7 @@ describe("hub MCP server (stdio JSON-RPC)", () => {
         ...process.env,
         ACHORDS_HUB_URL: url,
         ACHORDS_RUN_TOKEN: "run-token-abc",
-        ACHORDS_TOOLS: "delegate,ask_owner",
+        ACHORDS_TOOLS: "delegate,ask_owner,spawn_worker,propose_agent",
       },
       stdio: ["pipe", "pipe", "inherit"],
     });
@@ -108,6 +108,32 @@ describe("hub MCP server (stdio JSON-RPC)", () => {
     expect(r.isError).toBeFalsy();
     expect(r.content[0]?.text).toMatch(/End your turn/);
     expect(seen.at(-1)?.body).toEqual({ question: "Kék vagy zöld?" });
+  });
+
+  it("spawn_worker validates arrays; propose_agent forwards the manifest", async () => {
+    await rpc("initialize", { protocolVersion: "2025-06-18" });
+    const bad = (
+      await rpc("tools/call", {
+        name: "spawn_worker",
+        arguments: { instructions: "x", tools: "Bash", paths: [] },
+      })
+    ).result as { isError?: boolean; content: { text: string }[] };
+    expect(bad.isError).toBe(true);
+    expect(bad.content[0]?.text).toMatch(/tools must be a list of strings/);
+    await rpc("tools/call", {
+      name: "spawn_worker",
+      arguments: { instructions: "run tests", tools: ["Read"], paths: ["/w/site"] },
+    });
+    expect(seen.at(-1)?.body).toEqual({
+      instructions: "run tests",
+      tools: ["Read"],
+      paths: ["/w/site"],
+    });
+    await rpc("tools/call", {
+      name: "propose_agent",
+      arguments: { manifest_yaml: "id: x", reason: "need" },
+    });
+    expect(seen.at(-1)?.body).toEqual({ manifest_yaml: "id: x", reason: "need" });
   });
 
   it("reports refusals as tool errors, and rejects unknown tools and bad arguments", async () => {
