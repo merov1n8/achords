@@ -5,6 +5,8 @@ import { createInterface } from "node:readline";
 
 const HUB = process.env.ACHORDS_HUB_URL ?? "";
 const TOKEN = process.env.ACHORDS_RUN_TOKEN ?? "";
+// Tools granted to this run; the gateway checks again, this only keeps the model's view honest.
+const GRANTED = new Set((process.env.ACHORDS_TOOLS ?? "").split(",").filter(Boolean));
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 const TOOLS = [
@@ -26,8 +28,24 @@ const TOOLS = [
       additionalProperties: false,
     },
     endpoint: "/api/agent/delegate",
+    done: "Delegated as task {taskId}. End your turn now; you will be resumed with the result.",
+  },
+  {
+    name: "ask_owner",
+    description:
+      "Ask the owner a question you cannot answer yourself (missing decision or information). It reaches them in the original conversation; your task resumes with their answer.",
+    inputSchema: {
+      type: "object",
+      properties: { question: { type: "string", description: "One short, specific question" } },
+      required: ["question"],
+      additionalProperties: false,
+    },
+    endpoint: "/api/agent/ask_owner",
+    done: "Question sent to the owner. End your turn now; you will be resumed with the answer.",
   },
 ] as const;
+
+const granted = () => TOOLS.filter((t) => GRANTED.has(t.name));
 
 type Json = Record<string, unknown>;
 
@@ -38,7 +56,7 @@ const text = (t: string, isError = false) => ({
 });
 
 async function callTool(name: string, args: Json): Promise<Json> {
-  const tool = TOOLS.find((t) => t.name === name);
+  const tool = granted().find((t) => t.name === name);
   if (!tool) throw Object.assign(new Error(`unknown tool ${name}`), { code: -32602 });
   for (const key of tool.inputSchema.required) {
     if (typeof args[key] !== "string" || !(args[key] as string).trim()) {
@@ -62,11 +80,7 @@ async function callTool(name: string, args: Json): Promise<Json> {
       reason?: string;
       error?: string;
     };
-    if (out.ok) {
-      return text(
-        `Delegated as task ${out.taskId}. End your turn now; you will be resumed with the result.`,
-      );
-    }
+    if (out.ok) return text(tool.done.replace("{taskId}", out.taskId ?? ""));
     return text(`Refused: ${out.reason ?? out.error ?? `HTTP ${res.status}`}`, true);
   } catch (err) {
     return text(`hub not reachable: ${(err as Error).name}`, true);
@@ -95,7 +109,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       });
     }
     if (method === "tools/list") {
-      return send({ id, result: { tools: TOOLS.map(({ endpoint: _, ...t }) => t) } });
+      return send({
+        id,
+        result: { tools: granted().map(({ endpoint: _e, done: _d, ...t }) => t) },
+      });
     }
     if (method === "tools/call") {
       return send({
