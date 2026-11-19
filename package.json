@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "prepare": "git config core.hooksPath .githooks || true",
-    "achords": "node --disable-warning=ExperimentalWarning apps/cli/src/index.ts"
+    "achords": "node --disable-warning=ExperimentalWarning apps/cli/src/index.ts",
+    "build": "pnpm --filter @achords/web build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2",

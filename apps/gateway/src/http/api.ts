@@ -16,6 +16,7 @@ import {
 } from "@achords/core";
 import type { Vault } from "@achords/secrets";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
+import { serveStatic } from "./static.ts";
 
 const COOKIE = "achords_session";
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
@@ -28,6 +29,8 @@ export interface ApiDeps {
   vault?: () => Vault;
   /** Exact Host header values accepted (DNS-rebinding protection). */
   allowedHosts: string[];
+  /** Built web UI (apps/web/dist). Non-API GETs are served from here. */
+  staticDir?: string;
   log?: (msg: string) => void;
 }
 
@@ -228,6 +231,11 @@ export function createApiHandler(deps: ApiDeps) {
       const method = req.method ?? "GET";
       const path = new URL(req.url ?? "/", "http://x").pathname;
       const mutating = method !== "GET" && method !== "HEAD";
+      if (!path.startsWith("/api/")) {
+        if (mutating || !deps.staticDir) throw new HttpError(404, "not found");
+        serveStatic(deps.staticDir, path, res);
+        return;
+      }
       if (mutating && !sameOrigin(req)) throw new HttpError(403, "cross-origin request");
 
       if (method === "POST" && path === "/api/pair") {

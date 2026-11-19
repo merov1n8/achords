@@ -105,7 +105,8 @@ describe("control", () => {
     const paths = homePaths(home);
     const main = new URL("../../gateway/src/main.ts", import.meta.url).pathname;
     const gw = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", main], {
-      env: { ...process.env, ACHORDS_HOME: home },
+      // Port 0 and file key store: never collide with a real gateway or touch the Keychain.
+      env: { ...process.env, ACHORDS_HOME: home, ACHORDS_PORT: "0", ACHORDS_KEYSTORE: "file" },
       stdio: "ignore",
     });
     children.push(gw);

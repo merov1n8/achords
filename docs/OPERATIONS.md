@@ -14,6 +14,10 @@ Run from the repo root during development (`pnpm achords <command>`), or as `ach
 
 All state lives under `$ACHORDS_HOME` (default `~/.achords`): `core.db`, `run/gateway.pid`, `run/STOP`, `logs/gateway.log`.
 
+## Web UI
+
+Build it once (and after updates): `pnpm build`. Then open http://127.0.0.1:7420, run `pnpm achords pair web` and enter the code. For UI development: `pnpm --filter @achords/web dev` (Vite on :5173, proxying `/api` to the running gateway).
+
 ## Pairing a browser and storing secrets
 
 ```sh
