@@ -41,6 +41,23 @@ describe("updateManifestModels", () => {
     });
   });
 
+  it("keeps a block-style allowed list block-style", () => {
+    writeFileSync(
+      path,
+      YAML.replace(
+        "allowed: [cli-claude/sonnet, local/qwen3:8b]",
+        "allowed:\n    - cli-claude/sonnet\n    - local/qwen3:8b",
+      ),
+    );
+    updateManifestModels(path, {
+      default: "cli-claude/opus",
+      allowed: ["cli-claude/opus", "local/qwen3:8b"],
+    });
+    expect(readFileSync(path, "utf8")).toContain(
+      "allowed:\n    - cli-claude/opus\n    - local/qwen3:8b\n",
+    );
+  });
+
   it("validates before writing: an invalid change leaves the file untouched", () => {
     expect(() =>
       updateManifestModels(path, {
