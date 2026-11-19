@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HomePaths } from "@achords/core";
+import { detectPlatform, recommendModels } from "@achords/platform";
 import { installedLaunchdPath, protectedFolderOf } from "./launchd.ts";
 
 export interface Check {
@@ -27,6 +28,9 @@ export interface DoctorEnv {
   vaultStatus: () => { ok: true; telegram: boolean } | { ok: false; error: string };
   /** PATH the installed service runs with (undefined: no service installed yet). */
   servicePath?: string | undefined;
+  ramGb: number;
+  /** Models pulled in the local Ollama, or undefined if it is not reachable. */
+  ollamaModels: () => Promise<string[] | undefined>;
 }
 
 // node:sqlite with extension loading needs 22.13+ (ADR-0022).
@@ -153,6 +157,30 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
           },
     );
   }
+  // Optional (ADR-0006): only `local-only` work needs it, so never a failure.
+  const { chat, embedding } = recommendModels(env.ramGb);
+  const pulled = await env.ollamaModels();
+  const has = (m: string) => pulled?.some((p) => p === m || p === `${m}:latest`) ?? false;
+  if (pulled === undefined) {
+    add({
+      name: "local models",
+      level: "info",
+      detail: "Ollama not running",
+      fix: `optional, for local-only work: install Ollama (https://ollama.com), then \`ollama pull ${chat}\` and \`ollama pull ${embedding}\``,
+    });
+  } else {
+    const missing = [chat, embedding].filter((m) => !has(m));
+    add(
+      missing.length
+        ? {
+            name: "local models",
+            level: "info",
+            detail: `Ollama running; recommended for ${env.ramGb} GB RAM: ${chat}`,
+            fix: missing.map((m) => `ollama pull ${m}`).join(" && "),
+          }
+        : { name: "local models", level: "ok", detail: `Ollama: ${chat}, ${embedding}` },
+    );
+  }
   return checks;
 }
 
@@ -196,5 +224,17 @@ export function systemDoctorEnv(
     },
     vaultStatus,
     servicePath: process.platform === "darwin" ? installedLaunchdPath() : undefined,
+    ramGb: detectPlatform().ramGb,
+    ollamaModels: async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:11434/api/tags", {
+          signal: AbortSignal.timeout(2000),
+        });
+        const body = (await res.json()) as { models?: { name: string }[] };
+        return (body.models ?? []).map((m) => m.name);
+      } catch {
+        return undefined;
+      }
+    },
   };
 }

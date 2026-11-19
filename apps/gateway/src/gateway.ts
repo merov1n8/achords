@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { homePaths, openCoreDatabase, readLivePid, setSetting } from "@achords/core";
-import { cliClaude } from "@achords/providers";
+import { cliClaude, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
@@ -54,7 +54,13 @@ export function runGateway(home: string): Promise<number> {
   const orchestrator = createOrchestrator({
     db,
     home,
-    providers: { "cli-claude": cliClaude() },
+    providers: {
+      "cli-claude": cliClaude(),
+      // Manifest models "local/<name>" (ADR-0006); ACHORDS_LOCAL_URL points at mlx-lm etc.
+      local: localOpenAI(
+        process.env.ACHORDS_LOCAL_URL ? { baseUrl: process.env.ACHORDS_LOCAL_URL } : {},
+      ),
+    },
     redact,
   });
   orchestrator.syncAgents();
