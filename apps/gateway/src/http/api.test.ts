@@ -12,6 +12,7 @@ import {
 } from "@achords/core";
 import { openVault, type Vault } from "@achords/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRunTokens } from "../mcp/tokens.ts";
 import { createApiHandler } from "./api.ts";
 
 describe("HTTP API", () => {
@@ -21,6 +22,8 @@ describe("HTTP API", () => {
   let base: string;
   let host: string;
   const handled: { threadId: string; text: string }[] = [];
+  const delegations: { from: unknown; request: unknown }[] = [];
+  const tokens = createRunTokens();
 
   beforeEach(async () => {
     db = openCoreDatabase(":memory:");
@@ -42,7 +45,14 @@ describe("HTTP API", () => {
             handled.push({ threadId, text });
             return "answer";
           },
+          delegate: (from, request) => {
+            delegations.push({ from, request });
+            return request.agent === "nope"
+              ? { ok: false, reason: "no agent nope" }
+              : { ok: true, taskId: "child-1" };
+          },
         },
+        runTokens: tokens,
       }),
     );
   });
@@ -250,6 +260,48 @@ describe("HTTP API", () => {
     expect((await call("/api/threads", { method: "POST", body: "{nope" })).status).toBe(400);
     const big = JSON.stringify({ title: "x".repeat(70_000) });
     expect((await call("/api/threads", { method: "POST", body: big })).status).toBe(413);
+  });
+
+  it("agent endpoint: caller identity comes only from the run token (no cookie, no CSRF)", async () => {
+    delegations.length = 0;
+    const run = tokens.issue("task-7", "web-dev");
+    const post = (auth: string | undefined, body: unknown) =>
+      fetch(`${base}/api/agent/delegate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) },
+        body: JSON.stringify(body),
+      });
+    const ok = await post(`Bearer ${run.token}`, {
+      agent: "writer",
+      title: "Draft",
+      instructions: "x",
+      taskId: "someone-elses-task",
+      tools: ["Bash"],
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true, taskId: "child-1" });
+    // The task in the body is ignored; only the token's task counts; extra fields are dropped.
+    expect(delegations[0]).toEqual({
+      from: { from: "task", taskId: "task-7" },
+      request: { agent: "writer", title: "Draft", instructions: "x" },
+    });
+    expect((await post(undefined, { agent: "writer", title: "a", instructions: "b" })).status).toBe(
+      401,
+    );
+    expect(
+      (await post("Bearer forged", { agent: "writer", title: "a", instructions: "b" })).status,
+    ).toBe(401);
+    const refused = await post(`Bearer ${run.token}`, {
+      agent: "nope",
+      title: "a",
+      instructions: "b",
+    });
+    expect(await refused.json()).toEqual({ ok: false, reason: "no agent nope" });
+    run.revoke();
+    expect(
+      (await post(`Bearer ${run.token}`, { agent: "writer", title: "a", instructions: "b" }))
+        .status,
+    ).toBe(401);
   });
 
   it("unknown routes are 404", async () => {

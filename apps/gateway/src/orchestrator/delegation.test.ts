@@ -1,9 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createThread, getTask, listMessages, openCoreDatabase, type Task } from "@achords/core";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRunTokens } from "../mcp/tokens.ts";
 import { createOrchestrator, type Orchestrator } from "./orchestrator.ts";
 
 const result = (over: Partial<RunResult> = {}): RunResult => ({
@@ -285,6 +294,55 @@ describe("inter-agent delegation (ADR-0029)", () => {
     root("a");
     await drain(30);
     expect(results).toEqual([true, true, true, true, true, false]);
+  });
+
+  it("gives agents that may delegate the hub MCP tool via a private, short-lived config file", async () => {
+    writeAgents(home, { a: { to: ["b"] }, b: { from: ["a"] } });
+    const tokens = createRunTokens();
+    const seenDuringRun: { mode: number; token: string; tool: string[] }[] = [];
+    let tokenSeen = "";
+    const cloud: ModelProvider = {
+      id: "cli-claude",
+      async run(req) {
+        const t = db
+          .prepare("SELECT assignee_agent_id AS a FROM tasks WHERE status = 'claimed'")
+          .get();
+        calls.push({ agent: String(t?.a), req });
+        if (req.mcpConfigPath) {
+          const cfg = JSON.parse(readFileSync(req.mcpConfigPath, "utf8"));
+          tokenSeen = cfg.mcpServers.achords.env.ACHORDS_RUN_TOKEN;
+          seenDuringRun.push({
+            mode: statSync(req.mcpConfigPath).mode & 0o777,
+            token: tokenSeen,
+            tool: req.allowedTools,
+          });
+          expect(tokens.resolve(tokenSeen)).toMatchObject({ agentId: "a" });
+        }
+        return result();
+      },
+    };
+    orch = createOrchestrator({
+      db,
+      home,
+      providers: { "cli-claude": cloud, local: cloud },
+      hub: { url: "http://127.0.0.1:7420", tokens, serverEntry: "/x/server.ts" },
+    });
+    orch.syncAgents();
+    root("a");
+    await drain();
+    const aReq = calls.find((c) => c.agent === "a")?.req;
+    const bReq = calls.find((c) => c.agent === "b")?.req;
+    expect(seenDuringRun).toEqual([
+      { mode: 0o600, token: tokenSeen, tool: expect.arrayContaining(["mcp__achords__delegate"]) },
+    ]);
+    expect(aReq?.prompt).toMatch(/You can delegate to:[\s\S]*- b/);
+    // The token is only in the file, never in the request fields that end up on argv.
+    expect(JSON.stringify({ ...aReq, mcpConfigPath: undefined })).not.toContain(tokenSeen);
+    // After the run: file gone, token revoked.
+    expect(existsSync(aReq?.mcpConfigPath as string)).toBe(false);
+    expect(tokens.resolve(tokenSeen)).toBeUndefined();
+    // b may not delegate: no hub tool at all.
+    expect(bReq?.mcpConfigPath).toBeUndefined();
   });
 
   it("returns results to the delegating agent; the owner only gets the final result", async () => {

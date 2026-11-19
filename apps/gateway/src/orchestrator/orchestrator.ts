@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,6 +33,7 @@ import type { Embedder, Memory } from "@achords/memory";
 import { checkModel, isLocalModel, loadAgents, type Manifest } from "@achords/policy";
 import type { ModelProvider, RunRequest } from "@achords/providers";
 import { z } from "zod";
+import type { RunTokens } from "../mcp/tokens.ts";
 
 const BOSS_ID = "boss";
 const WORKER_ID = "gateway";
@@ -72,6 +74,8 @@ export interface OrchestratorDeps {
   /** Long-term memory (ADR-0008); optional so the hub works without it. */
   memory?: Memory;
   embedder?: Embedder;
+  /** The hub's own MCP server for agent runs (ADR-0029); `url` is set once the API listens. */
+  hub?: { url: string; tokens: RunTokens; serverEntry: string };
 }
 
 export interface Orchestrator {
@@ -350,9 +354,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
     let built: ReturnType<typeof toRequest>;
     let manifest: Manifest | undefined;
+    let delegates: Manifest[] = [];
     try {
-      manifest = task.assigneeAgentId ? agents().get(task.assigneeAgentId) : undefined;
+      const all = agents();
+      manifest = task.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
       if (!manifest) throw new Error(`no agent ${task.assigneeAgentId ?? "(unassigned)"}`);
+      delegates = manifest.delegation.can_delegate_to
+        .map((id) => all.get(id))
+        .filter((m): m is Manifest => m !== undefined);
       // Sub-agents only see their own workspace plus shared knowledge (ADR-0009).
       const local = isLocalModel(pickModel(manifest, task.sensitivity));
       const memories = await recall(
@@ -370,8 +379,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             )
             .join("\n")}\nUse these results and finish the task.`
         : "";
+      const team =
+        delegates.length && deps.hub
+          ? `\n\nYou can delegate to:\n${delegates.map((m) => `- ${m.id}: ${m.name} (${m.role})`).join("\n")}\nUse the delegate tool only for work outside your own role.`
+          : "";
       const prompt =
-        `${memories}# Task: ${task.title}\n\n${task.description ?? ""}${results}`.trim();
+        `${memories}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}`.trim();
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.
       if (Number.isFinite(remaining)) {
@@ -381,6 +394,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // Policy or configuration problems will not fix themselves: fail without retrying.
       failFinal((err as Error).message);
       return;
+    }
+
+    // Hub tools only for agents that may delegate: a private config file for this run only.
+    let hubRun: { file: string; revoke: () => void } | undefined;
+    if (deps.hub && delegates.length) {
+      const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id);
+      const runDir = join(home, "run");
+      mkdirSync(runDir, { recursive: true, mode: 0o700 });
+      const file = join(runDir, `mcp-${randomUUID()}.json`);
+      const config = {
+        mcpServers: {
+          achords: {
+            command: process.execPath,
+            args: ["--disable-warning=ExperimentalWarning", deps.hub.serverEntry],
+            env: { ACHORDS_HUB_URL: deps.hub.url, ACHORDS_RUN_TOKEN: token },
+          },
+        },
+      };
+      writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
+      built.req.mcpConfigPath = file;
+      built.req.allowedTools = [...built.req.allowedTools, "mcp__achords__delegate"];
+      hubRun = { file, revoke };
     }
 
     const run = startRun(db, {
@@ -442,6 +477,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
     } finally {
       clearInterval(keepAlive);
+      hubRun?.revoke();
+      if (hubRun) rmSync(hubRun.file, { force: true });
     }
   }
 }

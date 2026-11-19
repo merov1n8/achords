@@ -6,6 +6,7 @@ import { ollamaEmbedder, openMemory } from "@achords/memory";
 import { cliClaude, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
+import { createRunTokens } from "./mcp/tokens.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents } from "./orchestrator/seed.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
@@ -15,6 +16,7 @@ const TICK_MS = 1000;
 // Upper bound for a cancelled run to finish killing its process group on shutdown.
 const SHUTDOWN_WAIT_MS = 5000;
 const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
+const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const WEB_DIST = new URL("../../web/dist/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
 const TELEGRAM_TOKEN_ID = "telegram.bot-token";
@@ -57,9 +59,14 @@ export function runGateway(home: string): Promise<number> {
   const embedder = ollamaEmbedder();
   const memory = openMemory(paths.memoryDb, { dims: embedder.dims });
 
+  // The hub MCP server's URL is known once the API listens (port 0 in tests).
+  const runTokens = createRunTokens();
+  const hub = { url: "", tokens: runTokens, serverEntry: HUB_MCP_SERVER };
+
   const orchestrator = createOrchestrator({
     db,
     home,
+    hub,
     memory,
     embedder,
     providers: {
@@ -153,12 +160,14 @@ export function runGateway(home: string): Promise<number> {
     });
     server.listen(port, "127.0.0.1", () => {
       const actual = (server.address() as { port: number }).port;
+      hub.url = `http://127.0.0.1:${actual}`;
       server.on(
         "request",
         createApiHandler({
           db,
           orchestrator,
           vault: getVault,
+          runTokens,
           allowedHosts: [`127.0.0.1:${actual}`, `localhost:${actual}`],
           staticDir: WEB_DIST,
           log,
