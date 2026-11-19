@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Memory keyword search matches Hungarian suffixed word forms (trigram index): "WordPresst" finds "WordPress", "Kovácséknak" finds "Kovács".
+
 - Gateway service could not find the `claude` CLI (`spawn claude ENOENT`): launchd/systemd jobs now get the PATH of the shell that ran `achords start`; `achords doctor` checks the installed service's PATH.
 
 ### Changed
