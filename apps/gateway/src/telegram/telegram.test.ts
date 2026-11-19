@@ -23,12 +23,14 @@ const OWNER = 1001;
 interface Sent {
   chat_id: number;
   text: string;
+  reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] };
 }
 
 /** Minimal fake of the Bot API: queued updates for getUpdates, records sendMessage. */
 function fakeTelegram() {
   const queue: unknown[] = [];
   const sent: Sent[] = [];
+  const calls: { method: string; body: Record<string, unknown> }[] = [];
   let nextId = 1;
   const server: Server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -45,8 +47,17 @@ function fakeTelegram() {
       res.end(JSON.stringify({ ok: true, result: ready }));
       return;
     }
+    if (method === "answerCallbackQuery" || method === "editMessageReplyMarkup") {
+      calls.push({ method, body });
+      res.end(JSON.stringify({ ok: true, result: true }));
+      return;
+    }
     if (method === "sendMessage") {
-      sent.push({ chat_id: body.chat_id, text: body.text });
+      sent.push({
+        chat_id: body.chat_id,
+        text: body.text,
+        ...(body.reply_markup ? { reply_markup: body.reply_markup } : {}),
+      });
       res.end(JSON.stringify({ ok: true, result: {} }));
       return;
     }
@@ -63,7 +74,18 @@ function fakeTelegram() {
       },
     });
   };
-  return { server, sent, msg, queue };
+  const press = (from: number, data: string, chatType = "private") => {
+    queue.push({
+      update_id: nextId++,
+      callback_query: {
+        id: `cb${nextId}`,
+        from: { id: from },
+        data,
+        message: { message_id: 77, chat: { id: from, type: chatType } },
+      },
+    });
+  };
+  return { server, sent, msg, press, queue, calls };
 }
 
 describe("telegram channel", () => {
@@ -203,6 +225,47 @@ describe("telegram channel", () => {
       expect.stringMatching(/approved.*tester/i),
       expect.stringMatching(/no pending proposal/),
     ]);
+  });
+
+  it("delivers message actions as buttons and acts on the owner's press only", async () => {
+    await pairOwner();
+    tg.sent.length = 0;
+    const threadId = getSetting(db, "telegram.thread_id") as string;
+    appendMessage(db, {
+      threadId,
+      role: "agent",
+      author: "dev",
+      channel: "system",
+      content: "dev proposes a new agent 'tester'",
+      actions: [
+        { label: "✅ Approve", data: "proposal:approve:abc123" },
+        { label: "❌ Reject", data: "proposal:reject:abc123" },
+      ],
+    });
+    await channel.deliver();
+    expect(tg.sent[0]?.reply_markup).toEqual({
+      inline_keyboard: [
+        [
+          { text: "✅ Approve", callback_data: "proposal:approve:abc123" },
+          { text: "❌ Reject", callback_data: "proposal:reject:abc123" },
+        ],
+      ],
+    });
+
+    tg.press(2002, "proposal:approve:abc123"); // someone else: ignored silently
+    tg.press(OWNER, "proposal:approve:abc123");
+    await channel.pollOnce();
+    expect(decided).toEqual(["abc123:true"]);
+    // The press is acknowledged and the buttons removed, so it cannot be pressed twice.
+    expect(tg.calls.map((c) => c.method)).toEqual([
+      "answerCallbackQuery",
+      "editMessageReplyMarkup",
+    ]);
+    expect(tg.calls[1]?.body).toMatchObject({
+      message_id: 77,
+      reply_markup: { inline_keyboard: [] },
+    });
+    expect(tg.sent.at(-1)?.text).toMatch(/Approved: agent tester/);
   });
 
   it("/stop from the owner performs the emergency stop", async () => {

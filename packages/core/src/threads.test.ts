@@ -79,6 +79,23 @@ describe("threads", () => {
     expect(getThread(db, t.id)?.sensitivity).toBe("local-only");
   });
 
+  it("messages can carry actions (rendered as buttons by channels)", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = createThread(db, {});
+    const m = appendMessage(db, {
+      threadId: t.id,
+      role: "agent",
+      channel: "system",
+      content: "approve?",
+      actions: [{ label: "✅ Approve", data: "proposal:approve:ab12" }],
+    });
+    expect(m.actions).toEqual([{ label: "✅ Approve", data: "proposal:approve:ab12" }]);
+    expect(listMessages(db, t.id)[0]?.actions).toEqual(m.actions);
+    expect(
+      appendMessage(db, { threadId: t.id, role: "user", channel: "web", content: "x" }).actions,
+    ).toBeNull();
+  });
+
   it("rejects messages for unknown threads and invalid enums", () => {
     const db = openCoreDatabase(":memory:");
     expect(() =>
