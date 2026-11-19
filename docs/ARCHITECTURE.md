@@ -186,10 +186,10 @@ Status: planned, to ship together with the production-grade `achords init` (see 
 ## 5. Repo layout (monorepo)
 
 ```
-apps/gateway        daemon: channels, scheduler, API
+apps/gateway        daemon: channels, scheduler, API, orchestrator (ADR-0025)
 apps/web            dashboard (localhost)
 apps/cli            achords init / doctor / update
-packages/core       orchestrator, task queue, threads
+packages/core       data layer: threads, task queue, runs, agents
 packages/policy     policy engine
 packages/providers  model adapters + usage meters
 packages/memory     SQLite fast memory + MD vault sync

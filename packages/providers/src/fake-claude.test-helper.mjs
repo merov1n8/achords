@@ -2,7 +2,7 @@
 // Stand-in for the `claude` CLI in tests. Emits stream-json in the shape of claude 2.1.x
 // (recorded from a real `claude -p --output-format stream-json --verbose` run, ids replaced).
 // FAKE_CLAUDE_RECORD: file to write {argv, stdin, cwd, env subset} into.
-// FAKE_CLAUDE_MODE: ok | error | crash | hang | hang-child
+// FAKE_CLAUDE_MODE: ok | structured | error | crash | hang | hang-child
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
@@ -74,6 +74,7 @@ process.stdin.on("end", () => {
       output_tokens: 4,
     },
     permission_denials: [],
+    ...(mode === "structured" ? { structured_output: { action: "delegate" } } : {}),
     terminal_reason: mode === "error" ? "max_turns" : "completed",
   });
 });

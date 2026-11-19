@@ -57,6 +57,11 @@ export function startRun(
   return toRun(row as Record<string, unknown>);
 }
 
+/** Spawned runs lead their own process group, so pgid = pid. */
+export function setRunPid(db: Db, id: string, pid: number): void {
+  db.prepare("UPDATE runs SET pid = ?, pgid = ? WHERE id = ?").run(pid, pid, id);
+}
+
 export function listActiveRuns(db: Db): Run[] {
   return db
     .prepare("SELECT * FROM runs WHERE status = 'running' ORDER BY started_at, rowid")
