@@ -54,6 +54,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - A **thread** is the unit of conversation; channels (web, Telegram) are views onto it. Start on Telegram, continue on the web.
 - Default output policy: agent asks clarifying questions if needed, then reports "done" with a result summary. Traces are stored but hidden; viewable on demand in the web UI.
 - Each agent may have its own Telegram bot; the boss bot can route to sub-agents.
+- Telegram is bound to one owner user id via a pairing code; private chats only; unknown users are ignored silently; `/stop` = emergency stop, `/new` = new thread (ADR-0027).
 
 ### 4.3 Orchestrator (boss agent)
 

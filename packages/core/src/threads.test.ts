@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { openCoreDatabase } from "./db/database.ts";
-import { appendMessage, createThread, getThread, listMessages, listThreads } from "./threads.ts";
+import {
+  appendMessage,
+  createThread,
+  getThread,
+  listMessages,
+  listMessagesAfter,
+  listThreads,
+} from "./threads.ts";
 
 describe("threads", () => {
   it("creates and fetches a thread", () => {
@@ -40,6 +47,25 @@ describe("threads", () => {
     );
     expect(listMessages(db, t.id).map((m) => m.content)).toEqual(["do X", "done"]);
     expect(listMessages(db, t.id, { includeTraces: true })).toHaveLength(3);
+  });
+
+  it("lists normal messages after a sequence cursor (for channel delivery)", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = createThread(db, {});
+    const a = appendMessage(db, { threadId: t.id, role: "user", channel: "web", content: "a" }, 1);
+    appendMessage(
+      db,
+      { threadId: t.id, role: "agent", channel: "system", content: "x", visibility: "trace" },
+      1,
+    );
+    const c = appendMessage(
+      db,
+      { threadId: t.id, role: "agent", channel: "system", content: "c" },
+      1,
+    );
+    expect(c.seq).toBeGreaterThan(a.seq);
+    expect(listMessagesAfter(db, t.id, a.seq).map((m) => m.content)).toEqual(["c"]);
+    expect(listMessagesAfter(db, t.id, c.seq)).toEqual([]);
   });
 
   it("rejects messages for unknown threads and invalid enums", () => {

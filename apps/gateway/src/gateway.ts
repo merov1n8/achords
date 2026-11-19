@@ -7,6 +7,7 @@ import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents } from "./orchestrator/seed.ts";
+import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
 
 export const HEARTBEAT_KEY = "gateway.heartbeat";
 const TICK_MS = 1000;
@@ -14,6 +15,8 @@ const TICK_MS = 1000;
 const SHUTDOWN_WAIT_MS = 5000;
 const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
+const TELEGRAM_TOKEN_ID = "telegram.bot-token";
+const POLL_BACKOFF_MAX_MS = 60_000;
 
 const log = (msg: string) => console.log(`${new Date().toISOString()} gateway: ${msg}`);
 
@@ -55,6 +58,19 @@ export function runGateway(home: string): Promise<number> {
   });
   orchestrator.syncAgents();
 
+  // Telegram runs only when its bot token is in the vault.
+  let telegram: TelegramChannel | undefined;
+  if (existsSync(paths.vaultDb) && getVault().status(TELEGRAM_TOKEN_ID).set) {
+    telegram = createTelegramChannel({
+      db,
+      paths,
+      token: getVault().resolve(TELEGRAM_TOKEN_ID, "gateway"),
+      orchestrator,
+      onEmergencyStop: (lines) => log(`emergency stop via Telegram: ${lines.join("; ")}`),
+      log,
+    });
+  }
+
   // Loopback only; remote access goes through a local HTTPS proxy (tailscale serve).
   const port = Number(process.env.ACHORDS_PORT ?? DEFAULT_PORT);
   const server = createServer();
@@ -63,6 +79,7 @@ export function runGateway(home: string): Promise<number> {
     let stopped = false;
     let timer: NodeJS.Timeout | undefined;
     let working: Promise<unknown> | undefined;
+    let delivering = false;
     const cancel = new AbortController();
     const shutdown = async (reason: string) => {
       if (stopped) return;
@@ -87,6 +104,15 @@ export function runGateway(home: string): Promise<number> {
       if (stopped) return;
       if (existsSync(paths.stopFile)) return shutdown("stop marker");
       setSetting(db, HEARTBEAT_KEY, String(Date.now()));
+      if (telegram && !delivering) {
+        delivering = true;
+        telegram
+          .deliver()
+          .catch((err) => log((err as Error).message))
+          .finally(() => {
+            delivering = false;
+          });
+      }
       if (!working) {
         working = orchestrator
           .workOnce(cancel.signal)
@@ -122,6 +148,23 @@ export function runGateway(home: string): Promise<number> {
       log(`started (pid ${process.pid}, home ${home}, http://127.0.0.1:${actual})`);
       timer = setInterval(tick, TICK_MS);
       tick();
+      if (telegram) void pollLoop(telegram);
     });
+
+    async function pollLoop(channel: TelegramChannel) {
+      log("telegram: polling");
+      let backoff = 1000;
+      while (!stopped) {
+        try {
+          await channel.pollOnce(cancel.signal);
+          backoff = 1000;
+        } catch (err) {
+          if (stopped) return;
+          log((err as Error).message);
+          await new Promise((r) => setTimeout(r, backoff));
+          backoff = Math.min(backoff * 2, POLL_BACKOFF_MAX_MS);
+        }
+      }
+    }
   });
 }
