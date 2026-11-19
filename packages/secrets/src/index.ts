@@ -2,6 +2,7 @@
 export const PACKAGE_NAME = "@achords/secrets";
 
 export { open, seal } from "./crypto.ts";
+export { defaultKeyStore, openHomeVault } from "./home.ts";
 export {
   fileKeyStore,
   type KeyStore,
