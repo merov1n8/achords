@@ -110,7 +110,7 @@ export function launchdService(input: PlistInput, deps: LaunchdDeps = realDeps()
   };
 }
 
-/** Placeholder until the systemd unit lands (Phase 1, step 6). */
+/** Hosts with neither launchd nor systemd. */
 export const unsupportedService: ServiceManager = {
   kind: "none",
   isLoaded: () => false,

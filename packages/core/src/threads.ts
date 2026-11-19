@@ -16,6 +16,8 @@ export type Visibility = "normal" | "trace";
 
 export interface Message {
   id: string;
+  /** Monotonic insertion order (SQLite rowid); channels use it as a delivery cursor. */
+  seq: number;
   threadId: string;
   role: MessageRole;
   author: string | null;
@@ -37,6 +39,7 @@ const toThread = (r: Row): Thread => ({
 
 const toMessage = (r: Row): Message => ({
   id: r.id as string,
+  seq: Number(r.seq),
   threadId: r.thread_id as string,
   role: r.role as MessageRole,
   author: r.author as string | null,
@@ -88,7 +91,7 @@ export function appendMessage(
     const row = db
       .prepare(
         `INSERT INTO messages (id, thread_id, role, author, channel, content, visibility, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING rowid AS seq, *`,
       )
       .get(
         randomUUID(),
@@ -112,7 +115,19 @@ export function listMessages(
 ): Message[] {
   const filter = opts.includeTraces ? "" : "AND visibility = 'normal'";
   return db
-    .prepare(`SELECT * FROM messages WHERE thread_id = ? ${filter} ORDER BY created_at, rowid`)
+    .prepare(
+      `SELECT rowid AS seq, * FROM messages WHERE thread_id = ? ${filter} ORDER BY created_at, rowid`,
+    )
     .all(threadId)
+    .map(toMessage);
+}
+
+export function listMessagesAfter(db: Db, threadId: string, seq: number): Message[] {
+  return db
+    .prepare(
+      `SELECT rowid AS seq, * FROM messages
+       WHERE thread_id = ? AND rowid > ? AND visibility = 'normal' ORDER BY rowid`,
+    )
+    .all(threadId, seq)
     .map(toMessage);
 }

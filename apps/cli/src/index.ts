@@ -7,6 +7,7 @@ import { openHomeVault } from "@achords/secrets";
 import { type ControlContext, kill, resume, start, status, stop } from "./control.ts";
 import { launchdService, protectedFolderOf, unsupportedService } from "./launchd.ts";
 import { readSecret } from "./secret-input.ts";
+import { systemdService } from "./systemd.ts";
 
 const USAGE = `usage: achords <command>
 
@@ -17,6 +18,7 @@ const USAGE = `usage: achords <command>
   status   show service, gateway, queue and run state
 
   pair web               print a one-time code to pair a browser (valid 10 minutes)
+  pair telegram          print a one-time code; send "/pair <code>" to your bot
   secret set <id>        store a secret; the value is read from stdin (hidden when typing)
   secret list            list stored secrets (never their values)
   secret rm <id>         delete a secret
@@ -36,7 +38,9 @@ function context(): ControlContext {
           home: paths.home,
           logFile: `${paths.logDir}/gateway.log`,
         })
-      : unsupportedService;
+      : process.platform === "linux"
+        ? systemdService({ nodePath: process.execPath, gatewayEntry, home: paths.home })
+        : unsupportedService;
   return { paths, service };
 }
 
@@ -44,12 +48,19 @@ async function run(command: string | undefined, args: string[]): Promise<number>
   const ctx = context();
   switch (command) {
     case "pair": {
-      if (args[0] !== "web") throw new Error("usage: achords pair web");
+      const purpose = args[0];
+      if (purpose !== "web" && purpose !== "telegram") {
+        throw new Error("usage: achords pair web|telegram");
+      }
       const db = openCoreDatabase(ctx.paths.db);
-      const code = createPairingCode(db, "web");
+      const code = createPairingCode(db, purpose);
       db.close();
       console.log(`Pairing code: ${code}  (single use, valid 10 minutes)`);
-      console.log("Enter it in the web UI on the device you want to pair.");
+      console.log(
+        purpose === "web"
+          ? "Enter it in the web UI on the device you want to pair."
+          : `Send this to your bot in a private chat:  /pair ${code}`,
+      );
       return 0;
     }
     case "secret": {
