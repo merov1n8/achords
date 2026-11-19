@@ -43,6 +43,43 @@ const TOOLS = [
     endpoint: "/api/agent/ask_owner",
     done: "Question sent to the owner. End your turn now; you will be resumed with the answer.",
   },
+  {
+    name: "spawn_worker",
+    description:
+      "Start a short-lived helper for a self-contained subtask, with a subset of YOUR OWN tools and write paths (anything beyond them is refused). Max 3 per task; helpers cannot delegate or spawn. You resume with its result.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instructions: { type: "string", description: "Complete instructions for the helper" },
+        tools: { type: "array", items: { type: "string" }, description: "Subset of your tools" },
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Absolute paths inside your own write paths (may be empty)",
+        },
+      },
+      required: ["instructions", "tools", "paths"],
+      additionalProperties: false,
+    },
+    endpoint: "/api/agent/spawn_worker",
+    done: "Worker started as task {taskId}. End your turn now; you will be resumed with its result.",
+  },
+  {
+    name: "propose_agent",
+    description:
+      "Propose a new persistent agent (full agent.yaml). Nothing is created until the owner approves it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        manifest_yaml: { type: "string", description: "Complete agent.yaml" },
+        reason: { type: "string", description: "Why this agent is needed" },
+      },
+      required: ["manifest_yaml", "reason"],
+      additionalProperties: false,
+    },
+    endpoint: "/api/agent/propose_agent",
+    done: "Proposal filed; the owner decides. Continue your task without the new agent.",
+  },
 ] as const;
 
 const granted = () => TOOLS.filter((t) => GRANTED.has(t.name));
@@ -58,8 +95,14 @@ const text = (t: string, isError = false) => ({
 async function callTool(name: string, args: Json): Promise<Json> {
   const tool = granted().find((t) => t.name === name);
   if (!tool) throw Object.assign(new Error(`unknown tool ${name}`), { code: -32602 });
+  const props = tool.inputSchema.properties as Record<string, { type: string }>;
   for (const key of tool.inputSchema.required) {
-    if (typeof args[key] !== "string" || !(args[key] as string).trim()) {
+    const v = args[key];
+    if (props[key]?.type === "array") {
+      if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) {
+        return text(`invalid arguments: ${key} must be a list of strings`, true);
+      }
+    } else if (typeof v !== "string" || !v.trim()) {
       return text(`invalid arguments: ${key} must be a non-empty string`, true);
     }
   }

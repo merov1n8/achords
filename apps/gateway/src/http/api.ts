@@ -25,7 +25,10 @@ const BODY_LIMIT = 64 * 1024;
 
 export interface ApiDeps {
   db: Db;
-  orchestrator: Pick<Orchestrator, "handleMessage" | "delegate" | "askOwner">;
+  orchestrator: Pick<
+    Orchestrator,
+    "handleMessage" | "delegate" | "askOwner" | "spawnWorker" | "proposeAgent" | "decideProposal"
+  >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
   /** Opened lazily: the master key is only fetched when the vault is actually used. */
@@ -116,6 +119,17 @@ const str = (v: unknown, field: string, max = 10_000): string => {
   return v;
 };
 
+const strList = (v: unknown, field: string): string[] => {
+  if (
+    !Array.isArray(v) ||
+    v.length > 50 ||
+    !v.every((x) => typeof x === "string" && x.length < 1000)
+  ) {
+    throw new HttpError(400, `${field} must be a list of strings`);
+  }
+  return v as string[];
+};
+
 export function createApiHandler(deps: ApiDeps) {
   const { db } = deps;
   const log = deps.log ?? (() => {});
@@ -196,6 +210,26 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Agent proposals: owner-only (session + CSRF); agents can only file them.
+    [
+      "GET",
+      /^\/api\/proposals$/,
+      () =>
+        db
+          .prepare(
+            "SELECT id, proposed_by, agent_id, yaml, reason, created_at FROM agent_proposals WHERE status = 'pending' ORDER BY created_at",
+          )
+          .all(),
+    ],
+    [
+      "POST",
+      /^\/api\/proposals\/([\w-]{1,32})\/(approve|reject)$/,
+      ({ params }) => {
+        const out = deps.orchestrator.decideProposal(params[0] as string, params[1] === "approve");
+        if (!out.ok) throw new HttpError(409, out.reason);
+        return out;
+      },
+    ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
     ["GET", /^\/api\/vault$/, () => vault().list()],
     [
@@ -257,23 +291,34 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
         const tool = path.slice("/api/agent/".length);
-        if (method !== "POST" || (tool !== "delegate" && tool !== "ask_owner")) {
-          throw new HttpError(404, "not found");
-        }
+        const AGENT_TOOLS = ["delegate", "ask_owner", "spawn_worker", "propose_agent"];
+        if (method !== "POST" || !AGENT_TOOLS.includes(tool)) throw new HttpError(404, "not found");
         if (!caller.tools.includes(tool)) {
           throw new HttpError(403, `tool ${tool} not granted to this run`);
         }
         const b = await readJson(req);
         // The calling task comes from the token, never from the body.
         const from = { from: "task" as const, taskId: caller.taskId };
+        const o = deps.orchestrator;
         const out =
           tool === "delegate"
-            ? deps.orchestrator.delegate(from, {
+            ? o.delegate(from, {
                 agent: str(b.agent, "agent", 64),
                 title: str(b.title, "title", 200),
                 instructions: str(b.instructions, "instructions", 20_000),
               })
-            : deps.orchestrator.askOwner(from, str(b.question, "question", 2000));
+            : tool === "spawn_worker"
+              ? o.spawnWorker(from, {
+                  instructions: str(b.instructions, "instructions", 20_000),
+                  tools: strList(b.tools, "tools"),
+                  paths: strList(b.paths, "paths"),
+                })
+              : tool === "propose_agent"
+                ? o.proposeAgent(from, {
+                    yaml: str(b.manifest_yaml, "manifest_yaml", 20_000),
+                    reason: str(b.reason, "reason", 2000),
+                  })
+                : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

@@ -74,6 +74,7 @@ describe("telegram channel", () => {
   let logs: string[];
   let handled: { threadId: string; text: string }[];
   let stopped: string[];
+  let decided: string[];
 
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), "achords-tg-"));
@@ -83,6 +84,7 @@ describe("telegram channel", () => {
     logs = [];
     handled = [];
     stopped = [];
+    decided = [];
     channel = createTelegramChannel({
       db,
       paths: homePaths(home),
@@ -90,6 +92,12 @@ describe("telegram channel", () => {
       apiBase: `http://127.0.0.1:${(tg.server.address() as AddressInfo).port}`,
       pollTimeoutS: 0,
       orchestrator: {
+        decideProposal: (id, approve) => {
+          decided.push(`${id}:${approve}`);
+          return id === "abc123"
+            ? { ok: true, agentId: "tester" }
+            : { ok: false, reason: "no pending proposal" };
+        },
         handleMessage: async (threadId, text) => {
           handled.push({ threadId, text });
           appendMessage(db, {
@@ -183,6 +191,20 @@ describe("telegram channel", () => {
     expect(tg.sent.at(-1)?.text).toMatch(/local-only/);
   });
 
+  it("/approve and /reject decide agent proposals, for the owner only", async () => {
+    await pairOwner();
+    tg.sent.length = 0;
+    tg.msg(2002, "/approve abc123");
+    tg.msg(OWNER, "/approve abc123");
+    tg.msg(OWNER, "/reject nope");
+    await channel.pollOnce();
+    expect(decided).toEqual(["abc123:true", "nope:false"]);
+    expect(tg.sent.map((s) => s.text)).toEqual([
+      expect.stringMatching(/approved.*tester/i),
+      expect.stringMatching(/no pending proposal/),
+    ]);
+  });
+
   it("/stop from the owner performs the emergency stop", async () => {
     await pairOwner();
     tg.sent.length = 0;
@@ -209,7 +231,10 @@ describe("telegram channel", () => {
       token: TOKEN,
       apiBase: "http://127.0.0.1:1",
       pollTimeoutS: 0,
-      orchestrator: { handleMessage: async () => "answer" },
+      orchestrator: {
+        handleMessage: async () => "answer",
+        decideProposal: () => ({ ok: false, reason: "x" }),
+      },
       onEmergencyStop: () => {},
       log: (m) => logs.push(m),
     });

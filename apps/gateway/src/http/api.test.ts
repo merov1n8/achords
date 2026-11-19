@@ -24,6 +24,8 @@ describe("HTTP API", () => {
   const handled: { threadId: string; text: string }[] = [];
   const delegations: { from: unknown; request: unknown }[] = [];
   const questions: { from: unknown; question: string }[] = [];
+  const workerCalls: { from: unknown; request: unknown }[] = [];
+  const decisions: { id: string; approve: boolean }[] = [];
   const tokens = createRunTokens();
 
   beforeEach(async () => {
@@ -45,6 +47,15 @@ describe("HTTP API", () => {
           handleMessage: async (threadId, text) => {
             handled.push({ threadId, text });
             return "answer";
+          },
+          spawnWorker: (from, request) => {
+            workerCalls.push({ from, request });
+            return { ok: true, taskId: "w-1" };
+          },
+          proposeAgent: () => ({ ok: true, proposalId: "p1" }),
+          decideProposal: (id, approve) => {
+            decisions.push({ id, approve });
+            return { ok: true, agentId: "tester" };
           },
           askOwner: (from, question) => {
             questions.push({ from, question });
@@ -326,6 +337,51 @@ describe("HTTP API", () => {
     expect(
       (await post("/api/agent/delegate", { agent: "a", title: "b", instructions: "c" })).status,
     ).toBe(403);
+  });
+
+  it("agent endpoint: spawn_worker passes only the declared fields", async () => {
+    const run = tokens.issue("task-5", "dev", ["spawn_worker", "propose_agent"]);
+    const res = await fetch(`${base}/api/agent/spawn_worker`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${run.token}` },
+      body: JSON.stringify({ instructions: "x", tools: ["Read"], paths: [], taskId: "other" }),
+    });
+    expect(await res.json()).toEqual({ ok: true, taskId: "w-1" });
+    expect(workerCalls.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-5" },
+      request: { instructions: "x", tools: ["Read"], paths: [] },
+    });
+  });
+
+  it("only the owner (paired session + CSRF) decides proposals; agents cannot", async () => {
+    const { call } = await pair();
+    db.prepare(
+      "INSERT INTO agent_proposals (id, proposed_by, agent_id, yaml, reason, created_at) VALUES ('p1', 'dev', 'tester', 'id: tester', 'qa', 1)",
+    ).run();
+    const list = (await (await call("/api/proposals")).json()) as { id: string }[];
+    expect(list.map((p) => p.id)).toEqual(["p1"]);
+    expect((await call("/api/proposals/p1/approve", { method: "POST", body: "{}" })).status).toBe(
+      200,
+    );
+    expect(decisions.at(-1)).toEqual({ id: "p1", approve: true });
+    // An agent's run token cannot reach owner endpoints.
+    const run = tokens.issue("task-5", "dev", ["propose_agent"]);
+    const viaToken = await fetch(`${base}/api/proposals/p1/approve`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${run.token}`,
+        origin: base,
+      },
+      body: "{}",
+    });
+    expect(viaToken.status).toBe(401);
+    const agentApprove = await fetch(`${base}/api/agent/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${run.token}` },
+      body: "{}",
+    });
+    expect(agentApprove.status).toBe(404);
   });
 
   it("unknown routes are 404", async () => {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +32,14 @@ import {
   waitForChildren,
 } from "@achords/core";
 import type { Embedder, Memory } from "@achords/memory";
-import { checkModel, isLocalModel, loadAgents, type Manifest } from "@achords/policy";
+import {
+  checkFs,
+  checkModel,
+  isLocalModel,
+  loadAgents,
+  type Manifest,
+  parseManifest,
+} from "@achords/policy";
 import type { ModelProvider, RunRequest } from "@achords/providers";
 import { z } from "zod";
 import type { RunTokens } from "../mcp/tokens.ts";
@@ -86,6 +93,24 @@ export interface Orchestrator {
     text: string,
     channel: Channel,
   ): Promise<"answer" | "ask" | "delegate" | "routed" | "error">;
+  /**
+   * Ephemeral worker (ADR-0029): runs the caller's agent with a subset of its permissions;
+   * requests beyond them are rejected, not trimmed. Max 3 per task; workers get no hub tools.
+   */
+  spawnWorker(
+    from: { from: "task"; taskId: string },
+    request: { instructions: string; tools: string[]; paths: string[] },
+  ): { ok: true; taskId: string } | { ok: false; reason: string };
+  /** Files a new-agent proposal; nothing is created until the owner approves it. */
+  proposeAgent(
+    from: { from: "task"; taskId: string },
+    request: { yaml: string; reason: string },
+  ): { ok: true; proposalId: string } | { ok: false; reason: string };
+  /** Owner decision on a proposal (Telegram /approve, web). */
+  decideProposal(
+    id: string,
+    approve: boolean,
+  ): { ok: true; agentId: string } | { ok: false; reason: string };
   /** An agent asks the owner (ADR-0029): posted to the task's thread; the task waits. */
   askOwner(
     from: { from: "task"; taskId: string },
@@ -108,6 +133,8 @@ export interface Orchestrator {
 
 export const MAX_DELEGATION_DEPTH = 3;
 export const MAX_CHILDREN_PER_TASK = 5;
+export const MAX_WORKERS_PER_TASK = 3;
+const WORKER_REFUSAL = "workers cannot spawn workers or delegate (depth 1)";
 
 const expandHome = (p: string) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
 
@@ -212,6 +239,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     parent: Task | undefined,
     targetId: string,
   ): string | undefined => {
+    if (parent?.workerSpec) return WORKER_REFUSAL;
     if (!target) return `no agent ${targetId}`;
     if (target.id === BOSS_ID) return "the boss cannot be delegated to";
     if (target.id === caller.id) return `cycle: ${caller.id} cannot delegate to itself`;
@@ -229,7 +257,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (depth > MAX_DELEGATION_DEPTH) {
       return `depth limit: ${depth} > ${MAX_DELEGATION_DEPTH} (${[...chain, target.id].join(" → ")})`;
     }
-    if (parent && listChildren(db, parent.id).length >= MAX_CHILDREN_PER_TASK) {
+    if (
+      parent &&
+      listChildren(db, parent.id).filter((c) => !c.workerSpec).length >= MAX_CHILDREN_PER_TASK
+    ) {
       return `fan-out limit: a task may delegate at most ${MAX_CHILDREN_PER_TASK} times`;
     }
     if (parent && remainingBudget(db, parent.rootId ?? parent.id) <= 0) {
@@ -240,6 +271,111 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   const orchestrator: Orchestrator = {
     syncAgents: () => [...agents().keys()],
+
+    spawnWorker(from, request) {
+      const parent = getTask(db, from.taskId);
+      const caller = parent?.assigneeAgentId ? agents().get(parent.assigneeAgentId) : undefined;
+      if (!parent || !caller) return { ok: false, reason: "unknown calling task" };
+      if (parent.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
+      const extraTool = request.tools.find((t) => !caller.tools.includes(t));
+      if (extraTool) {
+        return { ok: false, reason: `tool ${extraTool} is not among ${caller.id}'s own tools` };
+      }
+      const outside = request.paths.find((p) => !checkFs(caller, p, "write").allowed);
+      if (outside) {
+        return { ok: false, reason: `path ${outside} is outside ${caller.id}'s own write paths` };
+      }
+      const workers = listChildren(db, parent.id).filter((c) => c.workerSpec).length;
+      if (workers >= MAX_WORKERS_PER_TASK) {
+        return { ok: false, reason: `at most ${MAX_WORKERS_PER_TASK} workers per task` };
+      }
+      if (remainingBudget(db, parent.rootId ?? parent.id) <= 0) {
+        return { ok: false, reason: "the delegation chain has used up its budget" };
+      }
+      const child = enqueueChild(db, parent, {
+        title: `worker: ${request.instructions.slice(0, 60)}`,
+        description: request.instructions,
+        assigneeAgentId: caller.id,
+        caller: caller.id,
+        workerSpec: { tools: [...request.tools], paths: [...request.paths] },
+      });
+      return { ok: true, taskId: child.id };
+    },
+
+    proposeAgent(from, request) {
+      const task = getTask(db, from.taskId);
+      if (!task?.assigneeAgentId) return { ok: false, reason: "unknown calling task" };
+      if (task.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
+      let m: Manifest;
+      try {
+        m = parseManifest(request.yaml, "proposed agent.yaml");
+      } catch (err) {
+        return { ok: false, reason: (err as Error).message };
+      }
+      if (agents().has(m.id) || existsSync(join(agentsDir, m.id))) {
+        return { ok: false, reason: `agent ${m.id} already exists` };
+      }
+      const id = randomBytes(4).toString("hex");
+      db.prepare(
+        `INSERT INTO agent_proposals (id, proposed_by, task_id, thread_id, agent_id, yaml, reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        task.assigneeAgentId,
+        task.id,
+        task.threadId,
+        m.id,
+        request.yaml,
+        request.reason,
+        Date.now(),
+      );
+      if (task.threadId) {
+        // Everything the new agent would be allowed to do, so the owner decides on the facts.
+        const summary = [
+          `models: ${m.models.allowed.join(", ")}`,
+          `tools: ${m.tools.join(", ") || "none"}`,
+          `fs write: ${m.fs.write.join(", ") || "none"}; read: ${m.fs.read.join(", ") || "none"}`,
+          `shell: ${m.shell?.allow.join(", ") ?? "none"}`,
+          `network: ${m.network.allow.join(", ") || "none"}`,
+          `delegation: to ${m.delegation.can_delegate_to.join(", ") || "none"}, from ${m.delegation.accepts_from.join(", ") || "none"}`,
+          `budget: ${JSON.stringify(m.budget)}`,
+        ].join("\n");
+        appendMessage(db, {
+          threadId: task.threadId,
+          role: "agent",
+          author: task.assigneeAgentId,
+          channel: "system",
+          content: redact(
+            `${task.assigneeAgentId} proposes a new agent '${m.id}' (${m.role}): ${request.reason}\n${summary}\nApprove: /approve ${id} · Reject: /reject ${id}`,
+          ).slice(0, MAX_POST),
+        });
+      }
+      return { ok: true, proposalId: id };
+    },
+
+    decideProposal(id, approve) {
+      const row = db
+        .prepare("SELECT agent_id, yaml FROM agent_proposals WHERE id = ? AND status = 'pending'")
+        .get(id);
+      if (!row) return { ok: false, reason: `no pending proposal ${id}` };
+      const agentId = String(row.agent_id);
+      if (approve) {
+        try {
+          parseManifest(String(row.yaml), "proposed agent.yaml"); // still valid?
+          mkdirSync(join(agentsDir, agentId), { recursive: false, mode: 0o700 });
+          writeFileSync(join(agentsDir, agentId, "agent.yaml"), String(row.yaml), { flag: "wx" });
+        } catch (err) {
+          return { ok: false, reason: (err as Error).message };
+        }
+      }
+      db.prepare("UPDATE agent_proposals SET status = ?, decided_at = ? WHERE id = ?").run(
+        approve ? "approved" : "rejected",
+        Date.now(),
+        id,
+      );
+      if (approve) agents(); // mirror the new agent into the DB
+      return { ok: true, agentId };
+    },
 
     askOwner(from, question) {
       const task = getTask(db, from.taskId);
@@ -387,6 +523,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const all = agents();
       manifest = task.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
       if (!manifest) throw new Error(`no agent ${task.assigneeAgentId ?? "(unassigned)"}`);
+      if (task.workerSpec) {
+        // Ephemeral worker: the caller's agent, cut down to the granted subset; no delegation.
+        const { tools, paths } = task.workerSpec;
+        const { shell: _shell, ...rest } = manifest;
+        manifest = {
+          ...rest,
+          tools,
+          fs: { read: [], write: paths },
+          delegation: { can_delegate_to: [], accepts_from: [] },
+          ...(tools.includes("Bash") && manifest.shell ? { shell: manifest.shell } : {}),
+        };
+      }
       delegates = manifest.delegation.can_delegate_to
         .map((id) => all.get(id))
         .filter((m): m is Manifest => m !== undefined);
@@ -431,8 +579,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // Hub tools only for agents that may delegate: a private config file for this run only.
     let hubRun: { file: string; revoke: () => void } | undefined;
     // Every run may ask the owner; only agents allowed to delegate get `delegate` too.
-    if (deps.hub) {
-      const hubTools = ["ask_owner", ...(delegates.length ? ["delegate"] : [])];
+    // Workers (depth 1) get no hub tools at all.
+    if (deps.hub && !task.workerSpec) {
+      const hubTools = [
+        "ask_owner",
+        "propose_agent",
+        ...(delegates.length ? ["delegate"] : []),
+        ...(manifest.tools.length ? ["spawn_worker"] : []),
+      ];
       const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id, hubTools);
       const runDir = join(home, "run");
       mkdirSync(runDir, { recursive: true, mode: 0o700 });
