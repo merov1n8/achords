@@ -22,6 +22,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- New web design (approved samples): light pastel / dark anthracite themes following macOS day/night, violet or teal accent (Settings > Appearance), left sidebar tree with collapsible groups (drawer on phones), Inter + JetBrains Mono + Lucide icons bundled for offline use, all views restyled. All UI text comes from `locales/en.json` via `t()` (a test fails if a used key is missing).
+
 - Voice notes (ADR-0014): the owner's Telegram voice notes are downloaded (owner only, max 10 min), transcribed on the host with whisper.cpp (large-v3-turbo, language auto-detect) and handled like typed text; audio files are deleted afterwards. `achords doctor` checks Whisper and the model. Real Hungarian test: near-perfect transcript in ~6 s.
 
 - Approval buttons: messages can carry actions; Telegram shows them as inline buttons (✅ Approve / ❌ Reject for agent proposals), accepts presses only from the paired owner in a private chat, and removes the buttons after the decision. `/approve` / `/reject` remain as a fallback.

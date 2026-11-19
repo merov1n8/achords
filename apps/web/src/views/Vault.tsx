@@ -1,5 +1,7 @@
+import { Lock, Trash } from "lucide-preact";
 import { useState } from "preact/hooks";
 import { api } from "../api.ts";
+import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
 import type { SecretStatus } from "../types.ts";
@@ -24,7 +26,6 @@ export function Vault() {
       setError((err as Error).message);
     }
   };
-
   const remove = async (secretId: string) => {
     setConfirming(undefined);
     await api(`/api/vault/${encodeURIComponent(secretId)}`, { method: "DELETE" });
@@ -32,49 +33,67 @@ export function Vault() {
   };
 
   return (
-    <div class="vault">
-      <table>
-        <thead>
-          <tr>
-            <th>Secret</th>
-            <th>Value</th>
-            <th>Updated</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {secrets.data?.map((s) => (
-            <tr key={s.id}>
-              <td>
-                <code>{s.id}</code>
-              </td>
-              <td class="muted">{s.last4 ? `••••${s.last4}` : "••••"}</td>
-              <td class="muted">{s.updatedAt ? ago(s.updatedAt) : ""}</td>
-              <td>
-                {confirming === s.id ? (
-                  <>
-                    <button type="button" class="danger" onClick={() => remove(s.id)}>
-                      Delete
-                    </button>{" "}
-                    <button type="button" onClick={() => setConfirming(undefined)}>
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" onClick={() => setConfirming(s.id)}>
-                    Delete…
-                  </button>
-                )}
-              </td>
+    <>
+      <div class="page-head">
+        <h1>{t("nav.vault")}</h1>
+      </div>
+      <p class="muted">{t("vault.hint")}</p>
+      <div class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>{t("vault.secret")}</th>
+              <th>{t("vault.value")}</th>
+              <th>{t("vault.updated")}</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <form onSubmit={save} autocomplete="off">
-        <h2>Set or replace a secret</h2>
-        <label>
-          Id
+          </thead>
+          <tbody>
+            {secrets.data?.map((s) => (
+              <tr key={s.id}>
+                <td>
+                  <code>{s.id}</code>
+                </td>
+                <td class="muted">
+                  <Lock class="icon" /> {s.last4 ? `••••${s.last4}` : "••••"}
+                </td>
+                <td class="muted">{s.updatedAt ? ago(s.updatedAt) : ""}</td>
+                <td>
+                  {confirming === s.id ? (
+                    <>
+                      <button type="button" class="btn danger" onClick={() => remove(s.id)}>
+                        {t("vault.confirmDelete")}
+                      </button>{" "}
+                      <button
+                        type="button"
+                        class="btn ghost"
+                        onClick={() => setConfirming(undefined)}
+                      >
+                        {t("common.cancel")}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      class="btn ghost"
+                      onClick={() => setConfirming(s.id)}
+                      aria-label={t("vault.delete")}
+                    >
+                      <Trash class="icon" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <form class="panel gap-top narrow" onSubmit={save} autocomplete="off">
+        <h2>{t("vault.setTitle")}</h2>
+        <label class="field">
+          {t("vault.id")}
           <input
+            class="input"
             value={id}
             onInput={(e) => setId(e.currentTarget.value)}
             placeholder="telegram.bot-token"
@@ -82,9 +101,10 @@ export function Vault() {
             required
           />
         </label>
-        <label>
-          Value
+        <label class="field">
+          {t("vault.value")}
           <input
+            class="input"
             type="password"
             value={value}
             onInput={(e) => setValue(e.currentTarget.value)}
@@ -92,9 +112,11 @@ export function Vault() {
             required
           />
         </label>
-        <button type="submit">Save</button>
+        <button type="submit" class="btn primary">
+          {t("common.save")}
+        </button>
         {error && <p class="error">{error}</p>}
       </form>
-    </div>
+    </>
   );
 }
