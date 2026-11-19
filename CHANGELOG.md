@@ -19,6 +19,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Inter-agent delegation core (ADR-0029): linked parent/child tasks, `delegation.can_delegate_to` / `accepts_from` (deny by default, boss to all), max depth 3, cycle refusal, fan-out limit 5, one budget per chain, local-only propagation, results flow back to the delegating agent, only the root result reaches the owner. The boss's delegation now uses it.
+
 - Sensitivity routing (ADR-0007): local-only threads and tasks run only on local models, never fall back to a frontier model; a task whose local server is down waits and retries; local-only memories never reach a frontier prompt; Telegram `/local` and `POST /api/threads {sensitivity}`; the seeded boss allows `local/qwen3:8b`.
 
 - Long-term memory (`packages/memory`): FTS5 + sqlite-vec hybrid search (RRF) with local Ollama embeddings, keyword-only fallback and backfill; the boss and sub-agents get relevant memories, finished tasks are remembered (redacted). New dependency: `sqlite-vec` 0.1.9 (ADR-0008).

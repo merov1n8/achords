@@ -2,25 +2,31 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  addSpend,
   appendMessage,
   type Channel,
+  childFinished,
   claim,
   complete,
   type Db,
   defer,
-  enqueue,
+  enqueueChild,
+  enqueueRoot,
   extendLease,
   fail,
   finishRun,
   getTask,
   getThread,
   isPaused,
+  listChildren,
   listMessages,
+  remainingBudget,
   type Sensitivity,
   setRunPid,
   startRun,
   type Task,
   upsertAgent,
+  waitForChildren,
 } from "@achords/core";
 import type { Embedder, Memory } from "@achords/memory";
 import { checkModel, isLocalModel, loadAgents, type Manifest } from "@achords/policy";
@@ -78,7 +84,19 @@ export interface Orchestrator {
   syncAgents(): string[];
   /** Claims and runs one task. Returns false if there was nothing to do. */
   workOnce(signal?: AbortSignal): Promise<boolean>;
+  /**
+   * Delegates work (ADR-0029). The caller is the boss (for a thread) or the assignee of a task;
+   * it is derived from `from`, never taken from the request, and cannot pass permissions.
+   */
+  delegate(
+    from: { from: "boss"; threadId: string } | { from: "task"; taskId: string },
+    request: { agent: string; title: string; instructions: string },
+    opts?: { budgetUsd?: number },
+  ): { ok: true; taskId: string } | { ok: false; reason: string };
 }
+
+export const MAX_DELEGATION_DEPTH = 3;
+export const MAX_CHILDREN_PER_TASK = 5;
 
 const expandHome = (p: string) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
 
@@ -176,8 +194,77 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return { provider, req };
   };
 
-  return {
+  /** Pure policy check for one delegation step; returns the refusal reason, if any. */
+  const refuse = (
+    caller: Manifest,
+    target: Manifest | undefined,
+    parent: Task | undefined,
+    targetId: string,
+  ): string | undefined => {
+    if (!target) return `no agent ${targetId}`;
+    if (target.id === BOSS_ID) return "the boss cannot be delegated to";
+    if (target.id === caller.id) return `cycle: ${caller.id} cannot delegate to itself`;
+    const chain = [...(parent?.agentChain ?? []), caller.id];
+    if (chain.includes(target.id))
+      return `cycle: ${target.id} is already in the chain ${chain.join(" → ")}`;
+    const isBoss = caller.id === BOSS_ID;
+    if (!isBoss && !caller.delegation.can_delegate_to.includes(target.id)) {
+      return `${caller.id} may not delegate to ${target.id} (delegation.can_delegate_to)`;
+    }
+    if (!isBoss && !target.delegation.accepts_from.includes(caller.id)) {
+      return `${target.id} does not accept delegations from ${caller.id} (delegation.accepts_from)`;
+    }
+    const depth = (parent?.depth ?? 0) + 1;
+    if (depth > MAX_DELEGATION_DEPTH) {
+      return `depth limit: ${depth} > ${MAX_DELEGATION_DEPTH} (${[...chain, target.id].join(" → ")})`;
+    }
+    if (parent && listChildren(db, parent.id).length >= MAX_CHILDREN_PER_TASK) {
+      return `fan-out limit: a task may delegate at most ${MAX_CHILDREN_PER_TASK} times`;
+    }
+    if (parent && remainingBudget(db, parent.rootId ?? parent.id) <= 0) {
+      return "the delegation chain has used up its budget";
+    }
+    return undefined;
+  };
+
+  const orchestrator: Orchestrator = {
     syncAgents: () => [...agents().keys()],
+
+    delegate(from, request, opts = {}) {
+      const all = agents();
+      const target = all.get(request.agent);
+      if (from.from === "boss") {
+        const boss = all.get(BOSS_ID);
+        if (!boss) return { ok: false, reason: "boss agent is not configured" };
+        const reason = refuse(boss, target, undefined, request.agent);
+        if (reason || !target) return { ok: false, reason: reason ?? "no target" };
+        const budget = opts.budgetUsd ?? target.budget.per_run_usd;
+        const t = enqueueRoot(db, {
+          caller: BOSS_ID,
+          title: request.title,
+          description: request.instructions,
+          threadId: from.threadId,
+          assigneeAgentId: target.id,
+          // Children of local-only work stay local-only (ADR-0007).
+          sensitivity: getThread(db, from.threadId)?.sensitivity ?? "normal",
+          ...(budget !== undefined ? { budgetUsd: budget } : {}),
+        });
+        return { ok: true, taskId: t.id };
+      }
+      const parent = getTask(db, from.taskId);
+      const caller = parent?.assigneeAgentId ? all.get(parent.assigneeAgentId) : undefined;
+      if (!parent || !caller) return { ok: false, reason: "unknown calling task" };
+      const reason = refuse(caller, target, parent, request.agent);
+      if (reason || !target) return { ok: false, reason: reason ?? "no target" };
+      // Only these fields cross over: the target runs with its own manifest (no escalation).
+      const child = enqueueChild(db, parent, {
+        title: request.title,
+        description: request.instructions,
+        assigneeAgentId: target.id,
+        caller: caller.id,
+      });
+      return { ok: true, taskId: child.id };
+    },
 
     async handleMessage(threadId, text, channel) {
       appendMessage(db, { threadId, role: "user", channel, content: text });
@@ -214,15 +301,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           if (!task || task.assignee === BOSS_ID || !all.has(task.assignee)) {
             throw new Error(`unknown agent ${task?.assignee ?? "(none)"}`);
           }
-          enqueue(db, {
-            title: task.title,
-            // The sub-agent never sees the conversation, so the reply language travels with the task.
-            description: `${task.description}\n\nWrite your final report for the owner in ${task.language}.`,
-            threadId,
-            assigneeAgentId: task.assignee,
-            // Children of local-only work stay local-only (ADR-0007).
-            sensitivity,
-          });
+          const r = orchestrator.delegate(
+            { from: "boss", threadId },
+            {
+              agent: task.assignee,
+              title: task.title,
+              // The sub-agent never sees the conversation, so the reply language travels with it.
+              instructions: `${task.description}\n\nWrite your final report for the owner in ${task.language}.`,
+            },
+          );
+          if (!r.ok) throw new Error(r.reason);
         }
         post(threadId, decision.message);
         return decision.action;
@@ -240,11 +328,26 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return true;
     },
   };
+  return orchestrator;
 
   async function runTask(task: Task, signal?: AbortSignal) {
+    const rootId = task.rootId ?? task.id;
+    // Quiet output (ADR-0029): only root tasks talk to the owner; children report to their parent.
     const report = (finalFailure: boolean, text: string) => {
-      if (task.threadId && finalFailure) post(task.threadId, text);
+      if (!finalFailure) return;
+      if (task.parentId) childFinished(db, task.id);
+      else if (task.threadId) post(task.threadId, text);
     };
+    const failFinal = (msg: string) => {
+      db.prepare("UPDATE tasks SET max_attempts = attempts WHERE id = ?").run(task.id);
+      fail(db, task.id, WORKER_ID, msg);
+      report(true, `Failed: ${task.title}\n\n${msg}`);
+    };
+    const remaining = remainingBudget(db, rootId);
+    if (remaining <= 0) {
+      failFinal("the delegation chain has used up its budget");
+      return;
+    }
     let built: ReturnType<typeof toRequest>;
     let manifest: Manifest | undefined;
     try {
@@ -257,14 +360,26 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         [manifest.workspace, "shared"],
         local,
       );
-      const prompt = `${memories}# Task: ${task.title}\n\n${task.description ?? ""}`.trim();
+      // Continuation after delegating: the children's results are part of the prompt.
+      const children = listChildren(db, task.id);
+      const results = children.length
+        ? `\n\nResults from delegated tasks:\n${children
+            .map(
+              (c) =>
+                `- ${c.title} (${c.assigneeAgentId}, ${c.status}): ${c.result ?? c.error ?? ""}`,
+            )
+            .join("\n")}\nUse these results and finish the task.`
+        : "";
+      const prompt =
+        `${memories}# Task: ${task.title}\n\n${task.description ?? ""}${results}`.trim();
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
+      // One shared budget per chain: never more than what is left.
+      if (Number.isFinite(remaining)) {
+        built.req.maxBudgetUsd = Math.min(built.req.maxBudgetUsd ?? remaining, remaining);
+      }
     } catch (err) {
       // Policy or configuration problems will not fix themselves: fail without retrying.
-      const msg = (err as Error).message;
-      db.prepare("UPDATE tasks SET max_attempts = attempts WHERE id = ?").run(task.id);
-      fail(db, task.id, WORKER_ID, msg);
-      report(true, `Failed: ${task.title}\n\n${msg}`);
+      failFinal((err as Error).message);
       return;
     }
 
@@ -292,9 +407,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           ...(res.error ? { error: res.error } : {}),
         },
       );
+      addSpend(db, rootId, res.usage.costUsd ?? 0);
       if (res.stopReason === "unavailable") {
         // Fail-closed: wait for the backend (e.g. local model server), never fall back.
         defer(db, task.id, WORKER_ID, `waiting for the local model: ${res.error ?? ""}`, DEFER_MS);
+      } else if (res.ok && (getTask(db, task.id)?.waitingChildren ?? 0) > 0) {
+        // It delegated during this run: come back when the children are done.
+        waitForChildren(db, task.id, WORKER_ID);
       } else if (res.ok) {
         complete(db, task.id, WORKER_ID, res.text);
         await deps.memory
@@ -312,7 +431,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             deps.embedder,
           )
           .catch(() => {}); // memory is best effort; the task result is already safe
-        if (task.threadId) post(task.threadId, `Done: ${task.title}\n\n${res.text}`);
+        if (task.parentId) childFinished(db, task.id);
+        else if (task.threadId) post(task.threadId, `Done: ${task.title}\n\n${res.text}`);
       } else {
         fail(db, task.id, WORKER_ID, res.error ?? res.stopReason);
         report(

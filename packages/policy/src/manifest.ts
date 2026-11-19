@@ -66,6 +66,14 @@ export const manifestSchema = z
       .strict()
       .default({}),
     sensitivity: z.enum(["normal", "local-only"]).default("normal"),
+    // ADR-0029: both sides must allow a delegation; the boss is implicitly allowed everywhere.
+    delegation: z
+      .object({
+        can_delegate_to: z.array(z.string().regex(ID)).default([]),
+        accepts_from: z.array(z.string().regex(ID)).default([]),
+      })
+      .strict()
+      .default({ can_delegate_to: [], accepts_from: [] }),
   })
   .strict()
   .transform((m) => ({

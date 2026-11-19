@@ -8,6 +8,13 @@ export type TaskStatus = "queued" | "claimed" | "done" | "failed" | "cancelled";
 export interface Task {
   id: string;
   sensitivity: "normal" | "local-only";
+  rootId: string | null;
+  depth: number;
+  /** Agents that delegated down to this task, root first (ADR-0029). */
+  agentChain: string[];
+  budgetUsd: number | null;
+  spentUsd: number;
+  waitingChildren: number;
   threadId: string | null;
   parentId: string | null;
   title: string;
@@ -28,6 +35,12 @@ export interface Task {
 const toTask = (r: Record<string, unknown>): Task => ({
   id: r.id as string,
   sensitivity: r.sensitivity as Task["sensitivity"],
+  rootId: r.root_id as string | null,
+  depth: Number(r.depth),
+  agentChain: JSON.parse(String(r.agent_chain)) as string[],
+  budgetUsd: r.budget_usd === null ? null : Number(r.budget_usd),
+  spentUsd: Number(r.spent_usd),
+  waitingChildren: Number(r.waiting_children),
   threadId: r.thread_id as string | null,
   parentId: r.parent_id as string | null,
   title: r.title as string,
@@ -58,14 +71,16 @@ export function enqueue(
     priority?: number;
     maxAttempts?: number;
     sensitivity?: Task["sensitivity"];
+    /** Root tasks only: one budget for the whole delegation chain. */
+    budgetUsd?: number;
   },
   now = Date.now(),
 ): Task {
   const row = db
     .prepare(
       `INSERT INTO tasks (id, thread_id, parent_id, title, description, priority,
-         assignee_agent_id, max_attempts, sensitivity, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+         assignee_agent_id, max_attempts, sensitivity, budget_usd, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
@@ -77,6 +92,7 @@ export function enqueue(
       input.assigneeAgentId ?? null,
       input.maxAttempts ?? 3,
       input.sensitivity ?? "normal",
+      input.budgetUsd ?? null,
       now,
       now,
     );
@@ -120,7 +136,8 @@ export function claim(
         `UPDATE tasks SET status = 'claimed', claimed_by = ?, lease_until = ?,
            attempts = attempts + 1, updated_at = ?
          WHERE id = (
-           SELECT id FROM tasks WHERE status = 'queued' AND (not_before IS NULL OR not_before <= ?)
+           SELECT id FROM tasks WHERE status = 'queued' AND waiting_children = 0
+             AND (not_before IS NULL OR not_before <= ?)
            ORDER BY priority DESC, created_at, rowid LIMIT 1
          )
          RETURNING *`,
