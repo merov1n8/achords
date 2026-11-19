@@ -42,10 +42,20 @@ const CANDIDATES = 50;
 
 const vec = (v: number[]) => new Uint8Array(new Float32Array(v).buffer);
 
-/** Every word quoted and OR-ed: user text can never be parsed as FTS5 syntax. */
+const MAX_TRIGRAMS = 96;
+
+/**
+ * Query for the trigram index: every 3-letter piece of every word, quoted and OR-ed, so user text
+ * is never parsed as FTS5 syntax and suffixed word forms still match their stem.
+ */
 function ftsQuery(text: string): string | undefined {
-  const words = text.match(/[\p{L}\p{N}_]+/gu)?.slice(0, 32);
-  return words?.length ? words.map((w) => `"${w}"`).join(" OR ") : undefined;
+  const grams = new Set<string>();
+  for (const word of text.toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) ?? []) {
+    const chars = [...word];
+    for (let i = 0; i + 3 <= chars.length; i++) grams.add(chars.slice(i, i + 3).join(""));
+  }
+  const list = [...grams].slice(0, MAX_TRIGRAMS);
+  return list.length ? list.map((g) => `"${g}"`).join(" OR ") : undefined;
 }
 
 /**
