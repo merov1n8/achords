@@ -368,6 +368,25 @@ describe("HTTP API", () => {
     });
   });
 
+  it("message actions can be run from the web (owner session + CSRF)", async () => {
+    const { call } = await pair();
+    const ok = await call("/api/actions", {
+      method: "POST",
+      body: '{"data":"proposal:approve:p9"}',
+    });
+    expect(await ok.json()).toEqual({ ok: true, message: "Approved: agent tester." });
+    expect(decisions.at(-1)).toEqual({ id: "p9", approve: true });
+    expect(
+      (await call("/api/actions", { method: "POST", body: '{"data":"rm:-rf:/"}' })).status,
+    ).toBe(400);
+    const noCsrf = await fetch(`${base}/api/actions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: '{"data":"proposal:approve:p9"}',
+    });
+    expect(noCsrf.status).toBe(401);
+  });
+
   it("only the owner (paired session + CSRF) decides proposals; agents cannot", async () => {
     const { call } = await pair();
     db.prepare(

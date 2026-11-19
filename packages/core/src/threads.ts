@@ -163,3 +163,19 @@ export function listMessagesAfter(db: Db, threadId: string, seq: number): Messag
     .all(threadId, seq)
     .map(toMessage);
 }
+
+/**
+ * Removes the buttons of a decided action from every message that offered it (all verbs of
+ * `<kind>:<verb>:<id>`), so web and Telegram both stop offering it. Returns messages changed.
+ */
+export function clearActions(db: Db, kind: string, id: string): number {
+  const rows = db.prepare("SELECT rowid, actions FROM messages WHERE actions IS NOT NULL").all();
+  let changed = 0;
+  for (const r of rows) {
+    const actions = JSON.parse(String(r.actions)) as MessageAction[];
+    if (!actions.some((a) => a.data.startsWith(kind) && a.data.endsWith(`:${id}`))) continue;
+    db.prepare("UPDATE messages SET actions = NULL WHERE rowid = ?").run(Number(r.rowid));
+    changed++;
+  }
+  return changed;
+}

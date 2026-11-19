@@ -15,6 +15,7 @@ import {
   setSetting,
   writeStopMarker,
 } from "@achords/core";
+import { t } from "@achords/i18n";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { Transcriber } from "../voice/transcribe.ts";
 
@@ -102,10 +103,10 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
   /** Runs a button action; same effect as the matching text command. */
   const runAction = (data: string): string => {
     const m = /^proposal:(approve|reject):([\w-]{1,32})$/.exec(data);
-    if (!m) return "Unknown action.";
+    if (!m) return t("action.unknown");
     const out = deps.orchestrator.decideProposal(m[2] as string, m[1] === "approve");
     return out.ok
-      ? `${m[1] === "approve" ? "Approved" : "Rejected"}: agent ${out.agentId}.`
+      ? t(m[1] === "approve" ? "action.approved" : "action.rejected", { agent: out.agentId })
       : out.reason;
   };
 
@@ -144,13 +145,13 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     chatId: number,
     voice: NonNullable<NonNullable<Update["message"]>["voice"]>,
   ) {
-    const t = deps.transcriber;
-    if (!t?.available().ok) {
-      await send(chatId, "Voice notes need local Whisper on the host (run `achords doctor`).");
+    const stt = deps.transcriber;
+    if (!stt?.available().ok) {
+      await send(chatId, t("telegram.voiceNoWhisper"));
       return undefined;
     }
     if (voice.duration > MAX_VOICE_S) {
-      await send(chatId, `That voice note is too long (max ${MAX_VOICE_S / 60} min).`);
+      await send(chatId, t("telegram.voiceTooLong", { minutes: MAX_VOICE_S / 60 }));
       return undefined;
     }
     const file = await call<{ file_path: string }>("getFile", { file_id: voice.file_id });
@@ -167,9 +168,9 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     const path = join(deps.paths.runDir, `voice-${randomUUID()}.oga`);
     writeFileSync(path, bytes, { mode: 0o600 });
     try {
-      const out = await t.transcribe(path);
+      const out = await stt.transcribe(path);
       if (!out.ok) {
-        await send(chatId, `Could not transcribe the voice note: ${out.reason}`);
+        await send(chatId, t("telegram.voiceFailed", { reason: out.reason }));
         return undefined;
       }
       return out.text;
@@ -202,7 +203,7 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
 
       currentThread(true);
       deps.log(`telegram: paired owner user ${m.from.id}`);
-      await send(m.chat.id, "Paired. I only listen to you from now on.");
+      await send(m.chat.id, t("telegram.paired"));
       return;
     }
 
@@ -223,10 +224,7 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       writeStopMarker(deps.paths);
       const lines = killActiveRuns(db);
       deps.onEmergencyStop(lines);
-      await send(
-        m.chat.id,
-        `Emergency stop: ${lines.length - 1} run(s) killed, queue paused. The gateway is shutting down; run \`achords resume\` and \`achords start\` on the host to continue.`,
-      );
+      await send(m.chat.id, t("telegram.stopped", { runs: lines.length - 1 }));
       return;
     }
     const decision = /^\/(approve|reject)\s+([\w-]{1,32})$/.exec(text);
@@ -236,15 +234,12 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     }
     if (text === "/local") {
       makeThreadLocalOnly(db, currentThread());
-      await send(
-        m.chat.id,
-        "This thread is now local-only: it runs on local models only and never reaches a cloud model. This cannot be undone; use /new for normal work.",
-      );
+      await send(m.chat.id, t("telegram.localOnly"));
       return;
     }
     if (text === "/new") {
       currentThread(true);
-      await send(m.chat.id, "New thread started.");
+      await send(m.chat.id, t("telegram.newThread"));
       return;
     }
     await deps.orchestrator.handleMessage(currentThread(), text, "telegram");

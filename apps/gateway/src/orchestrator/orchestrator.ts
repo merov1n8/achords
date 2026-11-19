@@ -10,6 +10,7 @@ import {
   type Channel,
   childFinished,
   claim,
+  clearActions,
   complete,
   type Db,
   defer,
@@ -31,6 +32,7 @@ import {
   upsertAgent,
   waitForChildren,
 } from "@achords/core";
+import { t } from "@achords/i18n";
 import type { Embedder, Memory } from "@achords/memory";
 import {
   checkFs,
@@ -346,11 +348,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           author: task.assigneeAgentId,
           channel: "system",
           content: redact(
-            `${task.assigneeAgentId} proposes a new agent '${m.id}' (${m.role}): ${request.reason}\n${summary}\n(or reply /approve ${id} or /reject ${id})`,
+            t("thread.proposal", {
+              agent: task.assigneeAgentId,
+              id: m.id,
+              role: m.role,
+              reason: request.reason,
+              summary,
+              pid: id,
+            }),
           ).slice(0, MAX_POST),
           actions: [
-            { label: "✅ Approve", data: `proposal:approve:${id}` },
-            { label: "❌ Reject", data: `proposal:reject:${id}` },
+            { label: t("action.approve"), data: `proposal:approve:${id}` },
+            { label: t("action.reject"), data: `proposal:reject:${id}` },
           ],
         });
       }
@@ -377,6 +386,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         Date.now(),
         id,
       );
+      clearActions(db, "proposal:", id);
       if (approve) agents(); // mirror the new agent into the DB
       return { ok: true, agentId };
     },
@@ -392,10 +402,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         role: "agent",
         author: task.assigneeAgentId,
         channel: "system",
-        content: redact(`Question from ${task.assigneeAgentId} (${task.title}): ${question}`).slice(
-          0,
-          MAX_POST,
-        ),
+        content: redact(
+          t("thread.question", { agent: task.assigneeAgentId, title: task.title, question }),
+        ).slice(0, MAX_POST),
       });
       return { ok: true };
     },
@@ -487,7 +496,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         post(threadId, decision.message);
         return decision.action;
       } catch (err) {
-        post(threadId, `Sorry, I could not handle that (${(err as Error).message}).`);
+        post(threadId, t("thread.bossError", { reason: (err as Error).message }));
         return "error";
       }
     },
@@ -513,7 +522,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const failFinal = (msg: string) => {
       db.prepare("UPDATE tasks SET max_attempts = attempts WHERE id = ?").run(task.id);
       fail(db, task.id, WORKER_ID, msg);
-      report(true, `Failed: ${task.title}\n\n${msg}`);
+      report(true, t("thread.failed", { title: task.title, error: msg }));
     };
     const remaining = remainingBudget(db, rootId);
     if (remaining <= 0) {
@@ -669,12 +678,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           )
           .catch(() => {}); // memory is best effort; the task result is already safe
         if (task.parentId) childFinished(db, task.id);
-        else if (task.threadId) post(task.threadId, `Done: ${task.title}\n\n${res.text}`);
+        else if (task.threadId)
+          post(task.threadId, t("thread.done", { title: task.title, result: res.text }));
       } else {
         fail(db, task.id, WORKER_ID, res.error ?? res.stopReason);
         report(
           getTask(db, task.id)?.status === "failed",
-          `Failed: ${task.title}\n\n${res.error ?? res.stopReason}`,
+          t("thread.failed", { title: task.title, error: res.error ?? res.stopReason }),
         );
       }
     } finally {
