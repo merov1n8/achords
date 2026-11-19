@@ -30,5 +30,6 @@ const CHAT_BY_RAM: [minGb: number, model: string][] = [
 
 export function recommendModels(ramGb: number): { chat: string; embedding: string } {
   const chat = CHAT_BY_RAM.find(([min]) => ramGb >= min)?.[1] ?? "qwen3:1.7b";
-  return { chat, embedding: "nomic-embed-text" };
+  // Multilingual embeddings (Hungarian): bge-m3 6/6 vs nomic-embed-text 4/6 on a test set.
+  return { chat, embedding: "bge-m3" };
 }

@@ -19,6 +19,6 @@ describe("platform", () => {
     expect(recommendModels(24).chat).toBe("qwen3:8b");
     expect(recommendModels(32).chat).toBe("qwen3:14b");
     expect(recommendModels(64).chat).toBe("qwen3:32b");
-    expect(recommendModels(24).embedding).toBe("nomic-embed-text");
+    expect(recommendModels(24).embedding).toBe("bge-m3");
   });
 });

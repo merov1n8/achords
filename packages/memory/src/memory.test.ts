@@ -56,6 +56,28 @@ describe("memory", () => {
     expect(hits[0]?.score).toBeGreaterThan(0);
   });
 
+  it("weights semantic matches above noisy keyword matches", async () => {
+    // Embedder that knows "jelentés" ≈ "összefoglaló" (what a multilingual model does).
+    const semantic: Embedder = {
+      dims: 16,
+      async embed(texts) {
+        return texts.map((t) => {
+          const v = new Array(16).fill(0);
+          if (/jelentés|összefoglaló/.test(t)) v[0] = 1;
+          else v[1] = 1;
+          return v;
+        });
+      },
+    };
+    const m = openMemory(":memory:", { dims: 16 });
+    // Keyword noise: shares only the common word "kell" with the query.
+    await m.add({ workspace: "w", kind: "fact", content: "Ezt is el kell készíteni." }, semantic);
+    await m.add({ workspace: "w", kind: "fact", content: "heti összefoglaló péntek" }, semantic);
+    const hits = await m.search("mikor kell jelentést küldeni?", { workspaces: ["w"] }, semantic);
+    expect(hits[0]?.content).toContain("összefoglaló");
+    m.close();
+  });
+
   it("works without embeddings (Ollama down) and backfills vectors later", async () => {
     const m = openMemory(":memory:", { dims: 16 });
     const down = fakeEmbedder(false);
@@ -122,7 +144,9 @@ describe("ollamaEmbedder", () => {
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const e = ollamaEmbedder({ baseUrl: url, dims: 2 });
     expect(await e.embed(["hello"])).toEqual([[0.1, 0.2]]);
-    expect(seen).toMatchObject({ url: "/api/embed", model: "nomic-embed-text", input: ["hello"] });
+    // Multilingual default: nomic-embed-text did not help Hungarian at all (measured 2026-11-19).
+    expect(seen).toMatchObject({ url: "/api/embed", model: "bge-m3", input: ["hello"] });
+    expect(ollamaEmbedder().dims).toBe(1024);
     expect(
       await ollamaEmbedder({ baseUrl: "http://127.0.0.1:1", dims: 2 }).embed(["x"]),
     ).toBeUndefined();
