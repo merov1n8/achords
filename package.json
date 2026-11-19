@@ -12,7 +12,8 @@
     "format": "biome format --write .",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "achords": "node --disable-warning=ExperimentalWarning apps/cli/src/index.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2",
