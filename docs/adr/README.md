@@ -25,3 +25,4 @@
 - [ADR-0023: Manifest parsing with `yaml` and `zod`](0023-manifest-parsing-yaml-and-zod.md)
 - [ADR-0024: CLI agent runs are isolated from the user's Claude config](0024-cli-agent-runs-isolated-from-user-claude-config.md)
 - [ADR-0025: Orchestrator lives in the gateway; boss decides via structured output](0025-orchestrator-lives-in-the-gateway.md)
+- [ADR-0026: Web access via one-time pairing codes and session cookies](0026-web-access-via-pairing-codes-and-session-cookies.md)

@@ -1,0 +1,246 @@
+import { randomBytes } from "node:crypto";
+import { createServer, request, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import {
+  createPairingCode,
+  createThread,
+  type Db,
+  enqueue,
+  listMessages,
+  openCoreDatabase,
+  upsertAgent,
+} from "@achords/core";
+import { openVault, type Vault } from "@achords/secrets";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createApiHandler } from "./api.ts";
+
+describe("HTTP API", () => {
+  let db: Db;
+  let vault: Vault;
+  let server: Server;
+  let base: string;
+  let host: string;
+  const handled: { threadId: string; text: string }[] = [];
+
+  beforeEach(async () => {
+    db = openCoreDatabase(":memory:");
+    vault = openVault(":memory:", randomBytes(32));
+    handled.length = 0;
+    server = createServer();
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as AddressInfo).port;
+    host = `127.0.0.1:${port}`;
+    base = `http://${host}`;
+    server.on(
+      "request",
+      createApiHandler({
+        db,
+        vault: () => vault,
+        allowedHosts: [host, `localhost:${port}`],
+        orchestrator: {
+          handleMessage: async (threadId, text) => {
+            handled.push({ threadId, text });
+            return "answer";
+          },
+        },
+      }),
+    );
+  });
+  afterEach(async () => {
+    await new Promise((r) => server.close(r));
+    vault.close();
+    db.close();
+  });
+
+  /** Pairs a device and returns a fetch wrapper that sends its cookie and CSRF token. */
+  async function pair(deviceName = "MacBook") {
+    const code = createPairingCode(db, "web");
+    const res = await fetch(`${base}/api/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ code, deviceName }),
+    });
+    expect(res.status).toBe(200);
+    const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0] as string;
+    const { csrf, device } = (await res.json()) as { csrf: string; device: { id: string } };
+    const call = (path: string, init: RequestInit = {}) =>
+      fetch(`${base}${path}`, {
+        ...init,
+        headers: {
+          cookie,
+          origin: base,
+          "content-type": "application/json",
+          "x-achords-csrf": csrf,
+          ...(init.headers as Record<string, string>),
+        },
+      });
+    return { call, cookie, csrf, device, setCookie: res.headers.get("set-cookie") ?? "" };
+  }
+
+  it("pairing sets an HttpOnly, Secure, SameSite=Strict session cookie; the token is not in the body", async () => {
+    const code = createPairingCode(db, "web");
+    const res = await fetch(`${base}/api/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ code, deviceName: "MacBook" }),
+    });
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/^achords_session=[A-Za-z0-9_-]{43};/);
+    expect(setCookie).toMatch(/HttpOnly/);
+    expect(setCookie).toMatch(/Secure/);
+    expect(setCookie).toMatch(/SameSite=Strict/);
+    const body = await res.text();
+    expect(body).not.toContain(setCookie.split(";")[0]?.split("=")[1]);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects wrong codes and locks out after 5 attempts", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const res = await fetch(`${base}/api/pair`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: base },
+        body: JSON.stringify({ code: "AAAA-AAAA", deviceName: "x" }),
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses).toEqual([401, 401, 401, 401, 401, 429]);
+  });
+
+  it("requires a session for everything except pairing", async () => {
+    for (const path of [
+      "/api/session",
+      "/api/threads",
+      "/api/tasks",
+      "/api/vault",
+      "/api/devices",
+    ]) {
+      expect((await fetch(`${base}${path}`)).status).toBe(401);
+    }
+  });
+
+  it("blocks foreign Host headers (DNS rebinding)", async () => {
+    const { cookie } = await pair();
+    // fetch() ignores a custom Host header, so use http.request to really send one.
+    const status = await new Promise<number>((resolve, reject) => {
+      const r = request(
+        `${base}/api/session`,
+        { headers: { cookie, host: "evil.example" } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      r.on("error", reject);
+      r.end();
+    });
+    expect(status).toBe(421);
+  });
+
+  it("requires the CSRF header and a same-origin Origin on state-changing requests", async () => {
+    const { call, cookie } = await pair();
+    const noCsrf = await fetch(`${base}/api/threads`, {
+      method: "POST",
+      headers: { cookie, origin: base, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(noCsrf.status).toBe(403);
+    const crossOrigin = await call("/api/threads", {
+      method: "POST",
+      body: "{}",
+      headers: { origin: "https://evil.example" },
+    });
+    expect(crossOrigin.status).toBe(403);
+    expect((await call("/api/threads", { method: "POST", body: "{}" })).status).toBe(201);
+  });
+
+  it("threads: create, post a message (handled async by the boss), list messages", async () => {
+    const { call } = await pair();
+    const t = (await (
+      await call("/api/threads", { method: "POST", body: '{"title":"T"}' })
+    ).json()) as {
+      id: string;
+    };
+    const post = await call(`/api/threads/${t.id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ text: "szia" }),
+    });
+    expect(post.status).toBe(202);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(handled).toEqual([{ threadId: t.id, text: "szia" }]);
+
+    expect(
+      (await call("/api/threads/nope/messages", { method: "POST", body: '{"text":"x"}' })).status,
+    ).toBe(404);
+    expect((await call("/api/threads")).status).toBe(200);
+    const list = (await (await call(`/api/threads/${t.id}/messages`)).json()) as unknown[];
+    expect(Array.isArray(list)).toBe(true);
+  });
+
+  it("serves tasks and agents for the kanban", async () => {
+    const { call } = await pair();
+    upsertAgent(db, { id: "web-dev", name: "Web dev", role: "web-dev", workspace: "w" });
+    enqueue(db, { title: "card", assigneeAgentId: "web-dev" });
+    const tasks = (await (await call("/api/tasks")).json()) as { title: string }[];
+    expect(tasks.map((t) => t.title)).toEqual(["card"]);
+    const agents = (await (await call("/api/agents")).json()) as { id: string }[];
+    expect(agents.map((a) => a.id)).toEqual(["web-dev"]);
+  });
+
+  it("vault is write-only over HTTP", async () => {
+    const { call } = await pair();
+    const value = "sk-test-value-0123456789-abcd";
+    const put = await call("/api/vault/telegram.bot-token", {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+    expect(put.status).toBe(200);
+    const list = await (await call("/api/vault")).text();
+    expect(list).toContain('"last4":"abcd"');
+    expect(list).not.toContain(value.slice(0, 12));
+    expect(vault.audit("telegram.bot-token")[0]).toMatchObject({
+      action: "set",
+      actor: "web:MacBook",
+    });
+    expect((await call("/api/vault/telegram.bot-token", { method: "DELETE" })).status).toBe(200);
+    expect((await call("/api/vault/BAD ID", { method: "PUT", body: '{"value":"x"}' })).status).toBe(
+      400,
+    );
+  });
+
+  it("lists devices and revokes them; a revoked session stops working", async () => {
+    const mac = await pair("MacBook");
+    const phone = await pair("iPhone");
+    const devices = (await (await mac.call("/api/devices")).json()) as {
+      id: string;
+      current: boolean;
+    }[];
+    expect(devices.map((d) => d.current)).toEqual([true, false]);
+    expect((await mac.call(`/api/devices/${phone.device.id}`, { method: "DELETE" })).status).toBe(
+      200,
+    );
+    expect((await phone.call("/api/session")).status).toBe(401);
+    expect((await mac.call("/api/session")).status).toBe(200);
+  });
+
+  it("logout revokes the current session and clears the cookie", async () => {
+    const { call } = await pair();
+    const res = await call("/api/logout", { method: "POST", body: "{}" });
+    expect(res.headers.get("set-cookie")).toMatch(/Max-Age=0/);
+    expect((await call("/api/session")).status).toBe(401);
+  });
+
+  it("rejects oversized and malformed bodies", async () => {
+    const { call } = await pair();
+    expect((await call("/api/threads", { method: "POST", body: "{nope" })).status).toBe(400);
+    const big = JSON.stringify({ title: "x".repeat(70_000) });
+    expect((await call("/api/threads", { method: "POST", body: big })).status).toBe(413);
+  });
+
+  it("unknown routes are 404", async () => {
+    const { call } = await pair();
+    expect((await call("/api/nope")).status).toBe(404);
+    const t = createThread(db, {});
+    expect(listMessages(db, t.id)).toEqual([]);
+  });
+});
