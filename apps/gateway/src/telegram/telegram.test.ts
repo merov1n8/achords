@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,6 +15,7 @@ import {
   openCoreDatabase,
 } from "@achords/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Transcriber } from "../voice/transcribe.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram.ts";
 
 const TOKEN = "123456789:AAH-TestTokenTestTokenTestToken0123";
@@ -37,6 +38,16 @@ function fakeTelegram() {
     for await (const c of req) chunks.push(c as Buffer);
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
     const method = req.url?.split("/").pop();
+    if (req.url === `/file/bot${TOKEN}/voice/file_1.oga`) {
+      calls.push({ method: "download", body: {} });
+      res.end("OGG-BYTES");
+      return;
+    }
+    if (method === "getFile") {
+      calls.push({ method, body });
+      res.end(JSON.stringify({ ok: true, result: { file_path: "voice/file_1.oga" } }));
+      return;
+    }
     if (!req.url?.startsWith(`/bot${TOKEN}/`)) {
       res.writeHead(401).end(JSON.stringify({ ok: false }));
       return;
@@ -74,6 +85,17 @@ function fakeTelegram() {
       },
     });
   };
+  const voice = (from: number, duration = 5) => {
+    queue.push({
+      update_id: nextId++,
+      message: {
+        message_id: nextId,
+        from: { id: from },
+        chat: { id: from, type: "private" },
+        voice: { file_id: "f1", duration, file_size: 9 },
+      },
+    });
+  };
   const press = (from: number, data: string, chatType = "private") => {
     queue.push({
       update_id: nextId++,
@@ -85,7 +107,7 @@ function fakeTelegram() {
       },
     });
   };
-  return { server, sent, msg, press, queue, calls };
+  return { server, sent, msg, press, voice, queue, calls };
 }
 
 describe("telegram channel", () => {
@@ -266,6 +288,86 @@ describe("telegram channel", () => {
       reply_markup: { inline_keyboard: [] },
     });
     expect(tg.sent.at(-1)?.text).toMatch(/Approved: agent tester/);
+  });
+
+  describe("voice notes", () => {
+    const withTranscriber = (t: Transcriber | undefined) =>
+      createTelegramChannel({
+        db,
+        paths: homePaths(home),
+        token: TOKEN,
+        apiBase: `http://127.0.0.1:${(tg.server.address() as AddressInfo).port}`,
+        pollTimeoutS: 0,
+        orchestrator: {
+          decideProposal: () => ({ ok: false, reason: "x" }),
+          handleMessage: async (threadId, text) => {
+            handled.push({ threadId, text });
+            return "answer";
+          },
+        },
+        onEmergencyStop: () => {},
+        log: (m) => logs.push(m),
+        ...(t ? { transcriber: t } : {}),
+      });
+
+    it("transcribes the owner's voice note locally and handles it like text", async () => {
+      await pairOwner();
+      const seenFiles: string[] = [];
+      const ch = withTranscriber({
+        available: () => ({ ok: true }),
+        transcribe: async (path) => {
+          seenFiles.push(readFileSync(path, "utf8"));
+          return { ok: true, text: "csinálj egy listát" };
+        },
+      });
+      tg.voice(OWNER);
+      await ch.pollOnce().catch((e) => logs.push(`ERR ${e.message}`));
+      console.log(
+        "DEBUG",
+        logs,
+        tg.calls.map((c) => c.method),
+      );
+      expect(seenFiles).toEqual(["OGG-BYTES"]);
+      expect(handled.map((h) => h.text)).toEqual(["csinálj egy listát"]);
+      // The downloaded audio does not stay on disk.
+      expect(readdirSync(homePaths(home).runDir).filter((f) => f.startsWith("voice-"))).toEqual([]);
+    });
+
+    it("never downloads voice notes from anyone else", async () => {
+      await pairOwner();
+      tg.calls.length = 0;
+      const ch = withTranscriber({
+        available: () => ({ ok: true }),
+        transcribe: async () => ({ ok: true, text: "x" }),
+      });
+      tg.voice(2002);
+      await ch.pollOnce();
+      expect(tg.calls.filter((c) => c.method === "getFile" || c.method === "download")).toEqual([]);
+      expect(handled).toEqual([]);
+    });
+
+    it("explains when Whisper is missing, the note is too long, or nothing was recognised", async () => {
+      await pairOwner();
+      tg.sent.length = 0;
+      tg.voice(OWNER);
+      await withTranscriber(undefined).pollOnce();
+      tg.voice(OWNER, 700);
+      await withTranscriber({
+        available: () => ({ ok: true }),
+        transcribe: async () => ({ ok: true, text: "x" }),
+      }).pollOnce();
+      tg.voice(OWNER);
+      await withTranscriber({
+        available: () => ({ ok: true }),
+        transcribe: async () => ({ ok: false, reason: "no speech recognised" }),
+      }).pollOnce();
+      expect(tg.sent.map((s) => s.text)).toEqual([
+        expect.stringMatching(/local Whisper.*achords doctor/),
+        expect.stringMatching(/too long.*10 min/),
+        expect.stringMatching(/no speech recognised/),
+      ]);
+      expect(handled).toEqual([]);
+    });
   });
 
   it("/stop from the owner performs the emergency stop", async () => {

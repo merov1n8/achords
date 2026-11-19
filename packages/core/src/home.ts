@@ -14,6 +14,8 @@ export function homePaths(home: string) {
     db: join(home, "core.db"),
     vaultDb: join(home, "vault.db"),
     memoryDb: join(home, "memory.db"),
+    // Local speech-to-text model (ADR-0014); multilingual, good Hungarian, ~574 MB.
+    whisperModel: join(home, "models", "ggml-large-v3-turbo-q5_0.bin"),
     // Linux fallback only; on macOS the master key lives in the Keychain.
     masterKeyFile: join(home, "master.key"),
     runDir,

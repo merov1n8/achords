@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   AuthError,
   createThread,
@@ -13,6 +16,7 @@ import {
   writeStopMarker,
 } from "@achords/core";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
+import type { Transcriber } from "../voice/transcribe.ts";
 
 const OWNER_USER = "telegram.owner_user_id";
 const OWNER_CHAT = "telegram.owner_chat_id";
@@ -20,6 +24,7 @@ const OFFSET = "telegram.offset";
 const THREAD = "telegram.thread_id";
 const CURSOR = "telegram.delivered_seq";
 const MAX_TEXT = 4000; // Bot API limit is 4096
+const MAX_VOICE_S = 600;
 
 export interface TelegramDeps {
   db: Db;
@@ -29,6 +34,8 @@ export interface TelegramDeps {
   /** Long-poll timeout in seconds (0 in tests). */
   pollTimeoutS?: number;
   orchestrator: Pick<Orchestrator, "handleMessage" | "decideProposal">;
+  /** Local speech-to-text for voice notes (ADR-0014); without it voice notes get a hint. */
+  transcriber?: Transcriber;
   /** Called after an owner-issued /stop has paused the queue and killed runs. */
   onEmergencyStop: (lines: string[]) => void;
   log: (msg: string) => void;
@@ -53,6 +60,7 @@ interface Update {
     from?: { id: number };
     chat: { id: number; type: string };
     text?: string;
+    voice?: { file_id: string; duration: number; file_size?: number };
   };
 }
 
@@ -131,14 +139,53 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     return thread.id;
   };
 
+  /** Downloads the owner's voice note and transcribes it locally; undefined if it failed. */
+  async function voiceToText(
+    chatId: number,
+    voice: NonNullable<NonNullable<Update["message"]>["voice"]>,
+  ) {
+    const t = deps.transcriber;
+    if (!t?.available().ok) {
+      await send(chatId, "Voice notes need local Whisper on the host (run `achords doctor`).");
+      return undefined;
+    }
+    if (voice.duration > MAX_VOICE_S) {
+      await send(chatId, `That voice note is too long (max ${MAX_VOICE_S / 60} min).`);
+      return undefined;
+    }
+    const file = await call<{ file_path: string }>("getFile", { file_id: voice.file_id });
+    let bytes: Buffer;
+    try {
+      const res = await fetch(`${base}/file/bot${deps.token}/${file.file_path}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      bytes = Buffer.from(await res.arrayBuffer());
+    } catch (err) {
+      // Never log the URL: it contains the bot token.
+      throw new Error(`telegram voice download failed (${(err as Error).name})`);
+    }
+    mkdirSync(deps.paths.runDir, { recursive: true, mode: 0o700 });
+    const path = join(deps.paths.runDir, `voice-${randomUUID()}.oga`);
+    writeFileSync(path, bytes, { mode: 0o600 });
+    try {
+      const out = await t.transcribe(path);
+      if (!out.ok) {
+        await send(chatId, `Could not transcribe the voice note: ${out.reason}`);
+        return undefined;
+      }
+      return out.text;
+    } finally {
+      rmSync(path, { force: true });
+    }
+  }
+
   async function handle(update: Update) {
     const m = update.message;
-    if (!m?.text || !m.from) return;
+    if (!m?.from || (!m.text && !m.voice)) return;
     if (m.chat.type !== "private") {
       deps.log(`telegram: ignored message from a ${m.chat.type} chat`);
       return;
     }
-    const text = m.text.trim();
+    const text = (m.text ?? "").trim();
     const owner = ownerUser();
 
     if (text.startsWith("/pair ")) {
@@ -152,6 +199,7 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       }
       setSetting(db, OWNER_USER, String(m.from.id));
       setSetting(db, OWNER_CHAT, String(m.chat.id));
+
       currentThread(true);
       deps.log(`telegram: paired owner user ${m.from.id}`);
       await send(m.chat.id, "Paired. I only listen to you from now on.");
@@ -163,6 +211,13 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       return;
     }
     setSetting(db, OWNER_CHAT, String(m.chat.id));
+
+    if (m.voice) {
+      // Only now, after the owner check: nobody else can make the host download anything.
+      const spoken = await voiceToText(m.chat.id, m.voice);
+      if (spoken) await deps.orchestrator.handleMessage(currentThread(), spoken, "telegram");
+      return;
+    }
 
     if (text === "/stop") {
       writeStopMarker(deps.paths);
