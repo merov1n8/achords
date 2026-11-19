@@ -41,7 +41,13 @@ export function buildArgs(req: RunRequest): string[] {
   if (req.allowedTools.length) args.push("--allowedTools", req.allowedTools.join(","));
   // Deny by default: no MCP servers (this also hides the user's claude.ai connectors) and no
   // user/project settings, so personal hooks and permissions do not leak into agent runs.
-  args.push("--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "");
+  args.push(
+    "--strict-mcp-config",
+    "--mcp-config",
+    req.mcpConfigPath ?? '{"mcpServers":{}}',
+    "--setting-sources",
+    "",
+  );
   if (req.addDirs?.length) args.push("--add-dir", ...req.addDirs);
   if (req.jsonSchema) args.push("--json-schema", JSON.stringify(req.jsonSchema));
   if (req.appendSystemPrompt) args.push("--append-system-prompt", req.appendSystemPrompt);

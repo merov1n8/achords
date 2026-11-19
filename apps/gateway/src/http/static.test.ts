@@ -43,7 +43,10 @@ describe("static web UI", () => {
       "request",
       createApiHandler({
         db: openCoreDatabase(":memory:"),
-        orchestrator: { handleMessage: async () => "answer" },
+        orchestrator: {
+          handleMessage: async () => "answer",
+          delegate: () => ({ ok: false, reason: "n/a" }),
+        },
         allowedHosts: [`127.0.0.1:${port}`],
         staticDir,
       }),

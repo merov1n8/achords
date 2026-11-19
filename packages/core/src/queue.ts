@@ -121,6 +121,18 @@ export function claim(
   now = Date.now(),
 ): Task | undefined {
   return transaction(db, () => {
+    // Children that die with their worker on the last attempt must still wake their parent.
+    const dead = db
+      .prepare(
+        `SELECT parent_id FROM tasks WHERE status = 'claimed' AND lease_until < ?
+           AND attempts >= max_attempts AND parent_id IS NOT NULL`,
+      )
+      .all(now);
+    for (const r of dead) {
+      db.prepare(
+        "UPDATE tasks SET waiting_children = MAX(waiting_children - 1, 0) WHERE id = ?",
+      ).run(String(r.parent_id));
+    }
     db.prepare(
       `UPDATE tasks SET
          status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,

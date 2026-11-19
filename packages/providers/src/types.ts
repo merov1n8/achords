@@ -10,6 +10,11 @@ export interface RunRequest {
   allowedTools: string[];
   /** Directories beyond cwd the tools may access (from the manifest's fs roots). */
   addDirs?: string[];
+  /**
+   * MCP config file for this run (the hub's own server only, ADR-0029). A file, not inline JSON:
+   * it carries the run token, and argv is visible to every local user.
+   */
+  mcpConfigPath?: string;
   /** JSON Schema the final answer must match; the parsed value is returned as `structured`. */
   jsonSchema?: object;
   appendSystemPrompt?: string;
