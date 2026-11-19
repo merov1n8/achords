@@ -1,16 +1,21 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 // achords CLI. Control commands work without a running gateway.
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createPairingCode, homePaths, openCoreDatabase, resolveHome } from "@achords/core";
 import { openHomeVault } from "@achords/secrets";
 import { type ControlContext, kill, resume, start, status, stop } from "./control.ts";
+import { runDoctor, systemDoctorEnv } from "./doctor.ts";
+import { runInit } from "./init.ts";
 import { launchdService, protectedFolderOf, unsupportedService } from "./launchd.ts";
-import { readSecret } from "./secret-input.ts";
+import { createPrompter, readSecret } from "./secret-input.ts";
 import { systemdService } from "./systemd.ts";
 
 const USAGE = `usage: achords <command>
 
+  init     first-time setup (checks, Telegram token, service, pairing codes); re-runnable
+  doctor   check prerequisites and the running system
   start    start the gateway as a background service
   stop     graceful stop (queue state is kept)
   kill     EMERGENCY STOP: unload service, kill gateway and all agent runs, pause queue
@@ -44,9 +49,45 @@ function context(): ControlContext {
   return { paths, service };
 }
 
+// Opening the vault needs the master key; doctor only does that once secrets exist.
+function vaultStatus(paths: ControlContext["paths"]) {
+  return () => {
+    if (!existsSync(paths.vaultDb)) return { ok: true as const, telegram: false };
+    try {
+      const v = openHomeVault(paths.home);
+      const telegram = v.status("telegram.bot-token").set;
+      v.close();
+      return { ok: true as const, telegram };
+    } catch (err) {
+      return { ok: false as const, error: (err as Error).message };
+    }
+  };
+}
+
 async function run(command: string | undefined, args: string[]): Promise<number> {
   const ctx = context();
+  const doctorEnv = () =>
+    systemDoctorEnv(ctx.paths, gatewayEntry, () => ctx.service.isLoaded(), vaultStatus(ctx.paths));
   switch (command) {
+    case "doctor": {
+      const icon = { ok: "✓", info: "·", warn: "!", fail: "✗" } as const;
+      const checks = await runDoctor(doctorEnv());
+      for (const c of checks) {
+        console.log(`${icon[c.level]} ${c.name.padEnd(20)} ${c.detail}`);
+        if (c.fix && c.level !== "ok") console.log(`  ${"".padEnd(20)} → ${c.fix}`);
+      }
+      return checks.some((c) => c.level === "fail") ? 1 : 0;
+    }
+    case "init": {
+      const ask = createPrompter();
+      return runInit({
+        paths: ctx.paths,
+        io: { ask, print: (line) => console.log(line) },
+        doctor: () => runDoctor(doctorEnv()),
+        openVault: () => openHomeVault(ctx.paths.home),
+        start: () => start(ctx),
+      });
+    }
     case "pair": {
       const purpose = args[0];
       if (purpose !== "web" && purpose !== "telegram") {

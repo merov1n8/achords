@@ -1,5 +1,15 @@
 # Operations
 
+## First-time setup
+
+```sh
+pnpm install && pnpm build
+pnpm achords init      # checks, optional Telegram token, starts the service, prints pairing codes
+pnpm achords doctor    # re-check anytime; every problem comes with a fix
+```
+
+`init` changes nothing if a prerequisite fails, and is safe to re-run (existing secrets are kept unless you choose to replace them).
+
 ## Control commands
 
 Run from the repo root during development (`pnpm achords <command>`), or as `achords <command>` once installed.
