@@ -78,6 +78,23 @@ describe("memory", () => {
     m.close();
   });
 
+  it("never returns local-only memories unless explicitly asked (fail-safe default)", async () => {
+    const m = openMemory(":memory:", { dims: 16 });
+    await m.add({ workspace: "w", kind: "fact", content: "public Acme note" });
+    await m.add({
+      workspace: "w",
+      kind: "fact",
+      content: "secret Acme salary note",
+      localOnly: true,
+    });
+    const normal = await m.search("Acme note", { workspaces: ["w"] });
+    expect(normal.map((h) => h.content)).toEqual(["public Acme note"]);
+    const local = await m.search("Acme note", { workspaces: ["w"], includeLocalOnly: true });
+    expect(local).toHaveLength(2);
+    expect(local.find((h) => h.content.includes("salary"))?.localOnly).toBe(true);
+    m.close();
+  });
+
   it("works without embeddings (Ollama down) and backfills vectors later", async () => {
     const m = openMemory(":memory:", { dims: 16 });
     const down = fakeEmbedder(false);

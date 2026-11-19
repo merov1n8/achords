@@ -177,6 +177,21 @@ describe("HTTP API", () => {
     expect(Array.isArray(list)).toBe(true);
   });
 
+  it("creates local-only threads; there is no way to downgrade them", async () => {
+    const { call } = await pair();
+    const t = (await (
+      await call("/api/threads", { method: "POST", body: '{"sensitivity":"local-only"}' })
+    ).json()) as { id: string; sensitivity: string };
+    expect(t.sensitivity).toBe("local-only");
+    expect(
+      (await call("/api/threads", { method: "POST", body: '{"sensitivity":"public"}' })).status,
+    ).toBe(400);
+    expect(
+      (await call(`/api/threads/${t.id}`, { method: "PATCH", body: '{"sensitivity":"normal"}' }))
+        .status,
+    ).toBe(404);
+  });
+
   it("serves tasks and agents for the kanban", async () => {
     const { call } = await pair();
     upsertAgent(db, { id: "web-dev", name: "Web dev", role: "web-dev", workspace: "w" });

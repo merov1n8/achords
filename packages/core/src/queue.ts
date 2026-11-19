@@ -7,6 +7,7 @@ export type TaskStatus = "queued" | "claimed" | "done" | "failed" | "cancelled";
 
 export interface Task {
   id: string;
+  sensitivity: "normal" | "local-only";
   threadId: string | null;
   parentId: string | null;
   title: string;
@@ -26,6 +27,7 @@ export interface Task {
 
 const toTask = (r: Record<string, unknown>): Task => ({
   id: r.id as string,
+  sensitivity: r.sensitivity as Task["sensitivity"],
   threadId: r.thread_id as string | null,
   parentId: r.parent_id as string | null,
   title: r.title as string,
@@ -55,14 +57,15 @@ export function enqueue(
     assigneeAgentId?: string;
     priority?: number;
     maxAttempts?: number;
+    sensitivity?: Task["sensitivity"];
   },
   now = Date.now(),
 ): Task {
   const row = db
     .prepare(
       `INSERT INTO tasks (id, thread_id, parent_id, title, description, priority,
-         assignee_agent_id, max_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+         assignee_agent_id, max_attempts, sensitivity, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
@@ -73,6 +76,7 @@ export function enqueue(
       input.priority ?? 0,
       input.assigneeAgentId ?? null,
       input.maxAttempts ?? 3,
+      input.sensitivity ?? "normal",
       now,
       now,
     );
@@ -116,12 +120,12 @@ export function claim(
         `UPDATE tasks SET status = 'claimed', claimed_by = ?, lease_until = ?,
            attempts = attempts + 1, updated_at = ?
          WHERE id = (
-           SELECT id FROM tasks WHERE status = 'queued'
+           SELECT id FROM tasks WHERE status = 'queued' AND (not_before IS NULL OR not_before <= ?)
            ORDER BY priority DESC, created_at, rowid LIMIT 1
          )
          RETURNING *`,
       )
-      .get(opts.workerId, now + opts.leaseMs, now);
+      .get(opts.workerId, now + opts.leaseMs, now, now);
     return row ? toTask(row) : undefined;
   });
 }
@@ -177,6 +181,28 @@ export function fail(
        WHERE id = ? AND status = 'claimed' AND claimed_by = ?`,
     )
     .run(error, now, id, workerId);
+  return r.changes === 1;
+}
+
+/**
+ * Puts a claimed task back to wait for a resource (e.g. the local model server) without using
+ * up an attempt; it is not claimed again before `delayMs` has passed.
+ */
+export function defer(
+  db: Db,
+  id: string,
+  workerId: string,
+  reason: string,
+  delayMs: number,
+  now = Date.now(),
+): boolean {
+  const r = db
+    .prepare(
+      `UPDATE tasks SET status = 'queued', attempts = MAX(attempts - 1, 0), error = ?,
+         not_before = ?, claimed_by = NULL, lease_until = NULL, updated_at = ?
+       WHERE id = ? AND status = 'claimed' AND claimed_by = ?`,
+    )
+    .run(reason, now + delayMs, now, id, workerId);
   return r.changes === 1;
 }
 

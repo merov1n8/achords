@@ -7,6 +7,7 @@ import {
   type HomePaths,
   killActiveRuns,
   listMessagesAfter,
+  makeThreadLocalOnly,
   redeemPairingCode,
   setSetting,
   writeStopMarker,
@@ -126,6 +127,14 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       await send(
         m.chat.id,
         `Emergency stop: ${lines.length - 1} run(s) killed, queue paused. The gateway is shutting down; run \`achords resume\` and \`achords start\` on the host to continue.`,
+      );
+      return;
+    }
+    if (text === "/local") {
+      makeThreadLocalOnly(db, currentThread());
+      await send(
+        m.chat.id,
+        "This thread is now local-only: it runs on local models only and never reaches a cloud model. This cannot be undone; use /new for normal work.",
       );
       return;
     }

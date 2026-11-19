@@ -6,6 +6,8 @@ role: orchestrator
 workspace: shared
 models:
   default: cli-claude/sonnet
+  # local-only threads use the local model; it must be pulled (`ollama pull qwen3:8b`)
+  allowed: [cli-claude/sonnet, local/qwen3:8b]
 tools: []
 fs:
   write: ["{{ACHORDS_HOME}}/agents/boss/work"]

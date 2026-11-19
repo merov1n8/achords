@@ -7,20 +7,23 @@ import {
   claim,
   complete,
   type Db,
+  defer,
   enqueue,
   extendLease,
   fail,
   finishRun,
   getTask,
+  getThread,
   isPaused,
   listMessages,
+  type Sensitivity,
   setRunPid,
   startRun,
   type Task,
   upsertAgent,
 } from "@achords/core";
 import type { Embedder, Memory } from "@achords/memory";
-import { checkModel, loadAgents, type Manifest } from "@achords/policy";
+import { checkModel, isLocalModel, loadAgents, type Manifest } from "@achords/policy";
 import type { ModelProvider, RunRequest } from "@achords/providers";
 import { z } from "zod";
 
@@ -32,6 +35,7 @@ const RUN_TIMEOUT_MS = 30 * 60_000;
 const HISTORY = 20;
 const MAX_POST = 4000;
 const MEMORY_HITS = 5;
+const DEFER_MS = 60_000;
 const SUMMARY_CHARS = 1500;
 
 const decisionSchema = z.object({
@@ -101,9 +105,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     });
 
   // Relevant memories as a prompt section; empty when there is no memory or nothing matches.
-  const recall = async (query: string, workspaces: string[]) => {
+  // `local`: the prompt goes to a local model, so local-only memories may be included.
+  const recall = async (query: string, workspaces: string[], local: boolean) => {
     if (!deps.memory) return "";
-    const hits = await deps.memory.search(query, { workspaces, limit: MEMORY_HITS }, deps.embedder);
+    const hits = await deps.memory.search(
+      query,
+      { workspaces, limit: MEMORY_HITS, includeLocalOnly: local },
+      deps.embedder,
+    );
     if (hits.length === 0) return "";
     return `Relevant memory (may be outdated):\n${hits.map((h) => `- [${h.workspace}/${h.kind}] ${h.content}`).join("\n")}\n\n`;
   };
@@ -113,10 +122,31 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return existsSync(path) ? readFileSync(path, "utf8") : undefined;
   };
 
+  /**
+   * The model a run uses. Local-only work takes the default if it is local, otherwise the first
+   * local model the manifest allows; with none, the run is refused (ADR-0007, no fallback).
+   */
+  const pickModel = (m: Manifest, sensitivity: Sensitivity): string => {
+    if (sensitivity === "normal") return m.models.default;
+    const local = [m.models.default, ...m.models.allowed].find(isLocalModel);
+    if (!local) {
+      throw new Error(
+        `this work is local-only, but ${m.id} has no local model allowed (add e.g. local/qwen3:8b to models.allowed in agents/${m.id}/agent.yaml)`,
+      );
+    }
+    return local;
+  };
+
   /** Policy → run request. Throws with a reason if the manifest does not allow the run. */
-  const toRequest = (m: Manifest, prompt: string, timeoutMs: number) => {
-    const model = m.models.default;
-    const decision = checkModel(m, model);
+  const toRequest = (
+    m: Manifest,
+    prompt: string,
+    timeoutMs: number,
+    sensitivity: Sensitivity = "normal",
+  ) => {
+    const model = pickModel(m, sensitivity);
+    // Second, independent guard: the policy engine checks the same sensitivity.
+    const decision = checkModel(m, model, { dataSensitivity: sensitivity });
     if (!decision.allowed) throw new Error(decision.reason);
     const slash = model.indexOf("/");
     const provider = deps.providers[model.slice(0, slash)];
@@ -155,6 +185,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const all = agents();
         const boss = all.get(BOSS_ID);
         if (!boss) throw new Error("boss agent is not configured");
+        const sensitivity = getThread(db, threadId)?.sensitivity ?? "normal";
+        const bossModel = pickModel(boss, sensitivity);
         const team = [...all.values()]
           .filter((m) => m.id !== BOSS_ID)
           .map((m) => `- ${m.id}: ${m.name} (${m.role}, workspace ${m.workspace})`)
@@ -165,12 +197,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           .join("\n");
         // The boss works for the owner across all business branches.
         const workspaces = [...new Set([...all.values()].map((m) => m.workspace))];
-        const memories = await recall(text, workspaces);
+        const memories = await recall(text, workspaces, isLocalModel(bossModel));
         const prompt = `${memories}Agents you can delegate to:\n${team || "(none)"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
 
-        const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS);
+        const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
         // Structured output is an internal tool call, so allow a few turns.
         const res = await provider.run({ ...req, jsonSchema: DECISION_JSON_SCHEMA, maxTurns: 4 });
+        if (res.stopReason === "unavailable") {
+          throw new Error("the local model is not available right now (is Ollama running?)");
+        }
         if (!res.ok) throw new Error(res.error ?? "boss run failed");
         const decision = decisionSchema.parse(res.structured);
 
@@ -185,6 +220,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             description: `${task.description}\n\nWrite your final report for the owner in ${task.language}.`,
             threadId,
             assigneeAgentId: task.assignee,
+            // Children of local-only work stay local-only (ADR-0007).
+            sensitivity,
           });
         }
         post(threadId, decision.message);
@@ -214,12 +251,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       manifest = task.assigneeAgentId ? agents().get(task.assigneeAgentId) : undefined;
       if (!manifest) throw new Error(`no agent ${task.assigneeAgentId ?? "(unassigned)"}`);
       // Sub-agents only see their own workspace plus shared knowledge (ADR-0009).
-      const memories = await recall(`${task.title} ${task.description ?? ""}`, [
-        manifest.workspace,
-        "shared",
-      ]);
+      const local = isLocalModel(pickModel(manifest, task.sensitivity));
+      const memories = await recall(
+        `${task.title} ${task.description ?? ""}`,
+        [manifest.workspace, "shared"],
+        local,
+      );
       const prompt = `${memories}# Task: ${task.title}\n\n${task.description ?? ""}`.trim();
-      built = toRequest(manifest, prompt, RUN_TIMEOUT_MS);
+      built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
     } catch (err) {
       // Policy or configuration problems will not fix themselves: fail without retrying.
       const msg = (err as Error).message;
@@ -253,7 +292,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           ...(res.error ? { error: res.error } : {}),
         },
       );
-      if (res.ok) {
+      if (res.stopReason === "unavailable") {
+        // Fail-closed: wait for the backend (e.g. local model server), never fall back.
+        defer(db, task.id, WORKER_ID, `waiting for the local model: ${res.error ?? ""}`, DEFER_MS);
+      } else if (res.ok) {
         complete(db, task.id, WORKER_ID, res.text);
         await deps.memory
           ?.add(
@@ -265,6 +307,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                 SUMMARY_CHARS,
               ),
               source: task.id,
+              localOnly: task.sensitivity === "local-only",
             },
             deps.embedder,
           )
