@@ -12,6 +12,9 @@ export function homePaths(home: string) {
   return {
     home,
     db: join(home, "core.db"),
+    vaultDb: join(home, "vault.db"),
+    // Linux fallback only; on macOS the master key lives in the Keychain.
+    masterKeyFile: join(home, "master.key"),
     runDir,
     pidFile: join(runDir, "gateway.pid"),
     // Emergency stop marker: while it exists the gateway refuses to start (`achords resume` clears).
