@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Manifests reject claude CLI model names that are neither an alias (opus, sonnet, haiku, fable) nor a full name (`cli-claude/claude-opus` used to pass and would only fail at the first model call).
+- Seeded boss manifest comment no longer shows the substituted data path.
+
 - Memory ranking for Hungarian: multilingual `bge-m3` is the default embedding model (`nomic-embed-text` scored like no embeddings at all), weighted fusion, and dissimilar vector hits no longer earn rank points.
 
 - Memory keyword search matches Hungarian suffixed word forms (trigram index): "WordPresst" finds "WordPress", "Kovácséknak" finds "Kovács".

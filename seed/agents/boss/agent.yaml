@@ -1,5 +1,5 @@
 # Orchestrator. Decides: answer, ask a clarifying question, or delegate to a sub-agent.
-# {{ACHORDS_HOME}} is replaced when the agent is seeded into $ACHORDS_HOME/agents.
+# Paths below are filled in with your data folder when the agent is seeded.
 id: boss
 name: Boss
 role: orchestrator

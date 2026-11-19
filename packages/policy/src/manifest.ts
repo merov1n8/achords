@@ -6,6 +6,21 @@ import { z } from "zod";
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 // "provider/model", e.g. cli-claude/sonnet, local/qwen3
 const MODEL = /^[a-z0-9-]+\/[A-Za-z0-9._:-]+$/;
+// The claude CLI accepts an alias (newest model of a family) or a full versioned name. Anything
+// else is only rejected at the first model call, so catch it when the manifest is loaded.
+const CLAUDE_MODEL = /^(opus|sonnet|haiku|fable|claude-[a-z]+-\d+(-\d+)*)$/;
+
+const modelId = z
+  .string()
+  .regex(MODEL, "expected provider/model")
+  .superRefine((m, ctx) => {
+    if (m.startsWith("cli-claude/") && !CLAUDE_MODEL.test(m.slice("cli-claude/".length))) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${m}: use an alias (opus, sonnet, haiku, fable: always the newest) or a full name like claude-opus-5-5`,
+      });
+    }
+  });
 
 const absolutePath = z
   .string()
@@ -26,8 +41,8 @@ export const manifestSchema = z
     workspace: z.string().min(1),
     models: z
       .object({
-        default: z.string().regex(MODEL, "expected provider/model"),
-        allowed: z.array(z.string().regex(MODEL, "expected provider/model")).optional(),
+        default: modelId,
+        allowed: z.array(modelId).optional(),
       })
       .strict(),
     tools: z.array(z.string().min(1)).default([]),
