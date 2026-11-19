@@ -79,6 +79,13 @@ export function enqueue(
   return toTask(row as Record<string, unknown>);
 }
 
+export function listTasks(db: Db, limit = 200): Task[] {
+  return db
+    .prepare("SELECT * FROM tasks ORDER BY updated_at DESC, rowid DESC LIMIT ?")
+    .all(limit)
+    .map(toTask);
+}
+
 export function getTask(db: Db, id: string): Task | undefined {
   const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
   return row ? toTask(row) : undefined;

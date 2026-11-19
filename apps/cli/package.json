@@ -12,6 +12,7 @@
     "achords": "./src/index.ts"
   },
   "dependencies": {
-    "@achords/core": "workspace:*"
+    "@achords/core": "workspace:*",
+    "@achords/secrets": "workspace:*"
   }
 }

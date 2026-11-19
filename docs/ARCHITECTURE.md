@@ -45,7 +45,8 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 ### 4.1 Gateway (always-on daemon)
 
 - Small Node process supervised by launchd (macOS) / systemd (Linux).
-- Listens on: web UI/API (bound to localhost; remote access via Tailscale), Telegram long-poll, scheduler ticks.
+- Listens on: web UI/API (bound to 127.0.0.1:7420; remote access via Tailscale), Telegram long-poll, scheduler ticks.
+- Web/API access: one-time pairing code (`achords pair web`) exchanged for an HttpOnly/Secure/SameSite=Strict session cookie; CSRF header + Origin check on writes; exact Host allow-list; per-device revoke (ADR-0026).
 - Owns no model. Spawns agent runs, collects results, routes them back to the right thread/channel.
 
 ### 4.2 Threads and channels

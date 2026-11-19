@@ -14,6 +14,19 @@ Run from the repo root during development (`pnpm achords <command>`), or as `ach
 
 All state lives under `$ACHORDS_HOME` (default `~/.achords`): `core.db`, `run/gateway.pid`, `run/STOP`, `logs/gateway.log`.
 
+## Pairing a browser and storing secrets
+
+```sh
+pnpm achords pair web                       # prints a one-time code (10 min); enter it in the web UI
+pnpm achords secret set telegram.bot-token  # value is typed hidden (or piped), never an argument
+pnpm achords secret list                    # ids, last 4 chars (12+ char values only), dates
+pnpm achords secret rm telegram.bot-token
+```
+
+The API listens on `http://127.0.0.1:7420` (`ACHORDS_PORT` to change). Five wrong pairing codes within 15 minutes lock pairing and invalidate all open codes; create a new one afterwards. Safari may refuse the `Secure` session cookie on plain `http://localhost`; use Chrome/Firefox locally or the Tailscale HTTPS URL. Paired devices can be listed and revoked (`GET/DELETE /api/devices`, web UI in step 7).
+
+On macOS the vault's master key is in the login Keychain (item `achords` / `master-key`). `ACHORDS_KEYSTORE=file` uses `$ACHORDS_HOME/master.key` (0600) instead, e.g. on headless hosts.
+
 ## How the emergency stop holds
 
 - The launchd job respawns the gateway only after a crash (`KeepAlive.SuccessfulExit = false`). The gateway exits 0 when stopped on purpose, and exits 0 at once while `run/STOP` exists, so neither launchd nor a reboot brings it back.

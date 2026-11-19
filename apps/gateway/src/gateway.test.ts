@@ -10,7 +10,8 @@ const MAIN = new URL("./main.ts", import.meta.url).pathname;
 
 function startGateway(home: string): ChildProcess {
   return spawn(process.execPath, ["--disable-warning=ExperimentalWarning", MAIN], {
-    env: { ...process.env, ACHORDS_HOME: home },
+    // Port 0: no clash with a real gateway; file key store: never touch the Keychain in tests.
+    env: { ...process.env, ACHORDS_HOME: home, ACHORDS_PORT: "0", ACHORDS_KEYSTORE: "file" },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }

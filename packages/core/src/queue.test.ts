@@ -13,6 +13,7 @@ import {
   fail,
   getTask,
   isPaused,
+  listTasks,
   setPaused,
 } from "./queue.ts";
 
@@ -79,6 +80,17 @@ describe("task queue", () => {
     expect(claim(db, { workerId: "w", leaseMs: LEASE })).toBeUndefined();
     setPaused(db, false);
     expect(claim(db, { workerId: "w", leaseMs: LEASE })).toBeDefined();
+  });
+
+  it("lists tasks for the kanban, most recently updated first", () => {
+    const db = openCoreDatabase(":memory:");
+    const a = enqueue(db, { title: "a" }, 1);
+    const b = enqueue(db, { title: "b" }, 2);
+    cancel(db, a.id, 3);
+    expect(listTasks(db).map((t) => [t.id, t.status])).toEqual([
+      [a.id, "cancelled"],
+      [b.id, "queued"],
+    ]);
   });
 
   it("cancels queued and claimed tasks but not finished ones", () => {

@@ -12,6 +12,7 @@
     "isolatedModules": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "erasableSyntaxOnly": true
   }
 }
