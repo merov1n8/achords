@@ -10,6 +10,7 @@ import {
   openCoreDatabase,
   setPaused,
 } from "@achords/core";
+import { openMemory } from "@achords/memory";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createOrchestrator, type Orchestrator } from "./orchestrator.ts";
@@ -268,6 +269,58 @@ describe("orchestrator", () => {
     setPaused(db, true);
     expect(await orch.workOnce()).toBe(false);
     expect(calls).toEqual([]);
+  });
+
+  it("gives the boss and sub-agents relevant memories and remembers finished tasks (redacted)", async () => {
+    const memory = openMemory(":memory:", { dims: 16 });
+    await memory.add({
+      workspace: "web-clients",
+      kind: "decision",
+      content: "Acme wants plain HTML, no frameworks",
+    });
+    await memory.add({
+      workspace: "studio",
+      kind: "fact",
+      content: "Acme is also a Unity asset name",
+    });
+    const fake = fakeProvider((req) =>
+      req.jsonSchema
+        ? result({
+            structured: {
+              action: "delegate",
+              message: "ok",
+              task: {
+                title: "Acme TODO",
+                description: "Build the Acme TODO",
+                assignee: "web-dev",
+                language: "English",
+              },
+            },
+          })
+        : result({ text: "Built it. token=supersecretvalue123" }),
+    );
+    const orch = createOrchestrator({
+      db,
+      home,
+      providers: { "cli-claude": fake.provider },
+      memory,
+      redact: (s) => s.replaceAll("supersecretvalue123", "[REDACTED]"),
+    });
+    orch.syncAgents();
+    const t = createThread(db, {});
+    await orch.handleMessage(t.id, "Acme TODO please", "web");
+    // The boss sees memories from every workspace.
+    expect(fake.calls[0]?.prompt).toContain("Acme wants plain HTML");
+    await orch.workOnce();
+    // The sub-agent only sees its own workspace (+ shared).
+    expect(fake.calls[1]?.prompt).toContain("Acme wants plain HTML");
+    expect(fake.calls[1]?.prompt).not.toContain("Unity asset");
+
+    const saved = await memory.search("Acme TODO built", { workspaces: ["web-clients"] });
+    const summary = saved.find((h) => h.kind === "summary");
+    expect(summary?.content).toContain("Built it");
+    expect(summary?.content).not.toContain("supersecretvalue123");
+    memory.close();
   });
 
   it("redacts secrets from everything posted to the thread", async () => {

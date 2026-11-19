@@ -13,6 +13,7 @@ export function homePaths(home: string) {
     home,
     db: join(home, "core.db"),
     vaultDb: join(home, "vault.db"),
+    memoryDb: join(home, "memory.db"),
     // Linux fallback only; on macOS the master key lives in the Keychain.
     masterKeyFile: join(home, "master.key"),
     runDir,

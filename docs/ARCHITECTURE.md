@@ -105,7 +105,7 @@ Default layout, configurable:
 
 ### 4.8 Memory
 
-- **Fast memory**: SQLite (`node:sqlite`, ADR-0022) with FTS5 + `sqlite-vec`. Hybrid retrieval fused with Reciprocal Rank Fusion.
+- **Fast memory**: SQLite (`node:sqlite`, ADR-0022) with FTS5 + `sqlite-vec`. Hybrid retrieval fused with Reciprocal Rank Fusion. Separate `memory.db`; without the local embedding model memory falls back to keyword search and vectors are backfilled later. The boss recalls across all workspaces, sub-agents only their own plus `shared`; finished tasks are stored as redacted summaries. (Implemented: Phase 2 step 2; tiers, salience decay and the MD vault come later.)
 - Tiers: hot / warm / cold / shared. Salience decay (never auto-delete).
 - Embeddings computed locally (Ollama embedding model), never sent to frontier providers.
 - **MD vault**: per workspace, Obsidian-compatible (frontmatter, `[[links]]`). Holds decisions, daily journals, project notes, skills.
