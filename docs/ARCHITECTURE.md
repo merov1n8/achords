@@ -62,6 +62,15 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - Decomposes tasks, assigns to sub-agents, tracks them on the kanban, asks the user only when blocked or when approval is required.
 - Sub-agents get a default model per role; orchestrator may choose within an allowed set (autonomy setting).
 
+### 4.3.1 Inter-agent delegation (ADR-0029)
+
+- Any agent can delegate, not only the boss: a `delegate` tool on the hub's own MCP server creates a linked child task (parent/child on the kanban). The boss→sub-agent flow is the same mechanism.
+- The target runs with its own manifest, never the caller's; callers cannot pass tools, paths, models or secrets. Sensitivity only tightens (`local-only` propagates to every descendant), budget only shrinks.
+- Policy: `delegation.can_delegate_to` (caller) and `delegation.accepts_from` (target), both deny by default; the boss may delegate to all.
+- Guards: max depth 3, no cycles (A→B→A), fan-out limit, one budget per root task shared across the chain.
+- Async: the parent waits; when children finish it is re-queued with their results. The owner sees only the final result or a question; `ask_owner` from any depth goes to the original thread and the reply is routed back to the asking task.
+- Ephemeral workers: `spawn_worker` with a subset of the caller's permissions (max 3 per task, depth 1, shared budget); a new persistent agent needs owner approval (`propose_agent`).
+
 ### 4.4 Agent runner
 
 - Each run is a short-lived process: frontier CLI subprocess (`claude -p`, `codex exec`), API call loop, or local model loop.
@@ -92,6 +101,7 @@ Per agent (declared in `agents/<id>/agent.yaml`):
 - `network`: allowed domains (enforced for containerized agents).
 - `publish_mode`: `review | auto`, per channel (marketing).
 - `budget`: token / cost caps per run and per day.
+- `delegation`: `can_delegate_to` / `accepts_from` agent ids, deny by default (ADR-0029).
 - `sensitivity`: data tagged `local-only` is always routed to local models; if none is available the task waits (fail-closed).
 
 Manifests are validated strictly (`yaml` + `zod`, ADR-0023): unknown keys are errors and every omitted section means "nothing allowed". Filesystem checks resolve symlinks so a link inside an allowed root cannot escape it; shell commands with metacharacters (chaining, substitution, redirects) always need approval.
@@ -141,6 +151,7 @@ Default layout, configurable:
 - MCP client for all integrations, configured from a catalog; credentials resolved from the vault.
 - Default catalog: Google Ads, Analytics, Search Console, AdMob, Google Cloud / Firebase, Meta (Facebook, Instagram), TikTok, Reddit, App Store Connect, Google Play Console, WordPress, ElevenLabs, fal.ai, Meshy, Gmail/Calendar/Drive, Unity MCP.
 - The hub also exposes its own MCP server (tasks, threads, memory search) so external clients can drive it, subject to the policy engine.
+- Agent runs get the hub's MCP server (and only that, plus catalog servers their manifest allows) with a per-run capability token: `delegate`, `ask_owner`, `spawn_worker`, `propose_agent`, later `report_progress` (ADR-0029). The caller's identity comes from the token, never from tool arguments.
 
 ### 4.15 Secrets vault
 

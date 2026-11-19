@@ -28,3 +28,4 @@
 - [ADR-0026: Web access via one-time pairing codes and session cookies](0026-web-access-via-pairing-codes-and-session-cookies.md)
 - [ADR-0027: Telegram is bound to one owner user id; everyone else is ignored](0027-telegram-owner-binding.md)
 - [ADR-0028: Web UI with Vite + Preact + TypeScript](0028-web-ui-vite-preact-typescript.md)
+- [ADR-0029: Inter-agent delegation and ephemeral workers](0029-inter-agent-delegation-and-ephemeral-workers.md)

@@ -1,0 +1,17 @@
+# ADR-0029: Inter-agent delegation and ephemeral workers
+
+Status: Accepted (2026-11-19)
+
+- Context: Phase 1 hard-codes one flow: the boss decides and enqueues a task for a sub-agent. Real work needs any agent to hand part of its task to another (web-dev → marketing for copy, studio → web-dev for a landing page), plus short-lived helpers, without weakening the deny-by-default model (ADR-0010) or the local-only guarantee (ADR-0007).
+
+- Decision:
+  - **Mechanism.** The hub runs its own MCP server (ADR-0019, §4.14) and attaches it to every agent run with a per-run capability token. Tools: `delegate(agent, title, instructions)`, `ask_owner(question)`, `spawn_worker(instructions, tools, paths)`, `propose_agent(manifest)`. The gateway derives the caller (agent, task, chain) from the token, never from tool arguments. The boss's decide-and-enqueue flow becomes the same `delegate` path.
+  - **Linked tasks.** A delegation creates a child task (`parent_id`, `root_id`, `depth`, agent chain) shown on the kanban under its parent. It runs asynchronously: the parent run ends in `waiting`; when its children finish, the parent is re-queued with their results appended to its prompt. Results flow back automatically.
+  - **No privilege escalation.** The target always runs with its own manifest. A caller cannot pass tools, paths, models or secrets; sensitivity can only tighten, budget can only shrink.
+  - **Policy (deny by default).** `agent.yaml`: `delegation.can_delegate_to: [ids]` on the caller and `delegation.accepts_from: [ids]` on the target; both must allow. The boss may delegate to every agent (implicit on both sides).
+  - **Sensitivity.** A `local-only` task makes every descendant `local-only`; a child cannot be less sensitive than its parent.
+  - **Guards.** Max depth 3 (configurable lower, never higher), no cycles (the target must not already be in the chain, A→B→A is refused), fan-out limit per task (default 5), and one budget per root task shared by the whole chain: each run gets the remaining amount as its cap, spent cost is booked against the root; exhausted → the remaining work fails with a report to the owner.
+  - **Quiet by default.** Only the root task's final result, or a question, reaches the owner. `ask_owner` from any depth posts the question into the original thread (attributed to the asking agent); the owner's reply in that thread is routed back to the waiting task, not to the boss.
+  - **Ephemeral workers.** `spawn_worker` runs a helper with a subset of the caller's own permissions (requests outside them are rejected, not trimmed), at most 3 per task, depth 1 (workers get no delegation or spawn tools), budget taken from the shared chain budget, gone when the task ends. Creating a persistent agent (`propose_agent`) only files a proposal; nothing exists until the owner approves it on Telegram or the web.
+
+- Consequences: CLI runs get one MCP server again (only the hub's, still never the user's connectors; ADR-0024 stays true). Local models need a tool loop before they can delegate. Schema change on tasks (root, depth, chain, sensitivity, budget, waiting states). The same tool channel can later carry `report_progress` for live progress (Phase 2, step 5b). Tests must cover depth limit, cycle detection, permission non-escalation, sensitivity propagation, shared budget, `accepts_from` deny-by-default, worker permission subset and owner-question routing.
