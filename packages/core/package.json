@@ -1,0 +1,11 @@
+{
+  "name": "@achords/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Orchestrator, task queue, threads",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

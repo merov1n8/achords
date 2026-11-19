@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Secrets and runtime state: never commit
+.env
+.env.*
+!.env.example
+store/
+vault/
+*.vault.db
+agents/*/runtime/
+*.sqlite
+*.sqlite-*
+*.db

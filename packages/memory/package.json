@@ -1,0 +1,11 @@
+{
+  "name": "@achords/memory",
+  "version": "0.0.0",
+  "private": true,
+  "description": "SQLite fast memory and MD vault sync",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

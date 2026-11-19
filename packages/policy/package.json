@@ -1,0 +1,11 @@
+{
+  "name": "@achords/policy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Policy engine",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
