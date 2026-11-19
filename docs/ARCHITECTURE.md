@@ -70,6 +70,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - Guards: max depth 3, no cycles (A→B→A), fan-out limit, one budget per root task shared across the chain.
 - Async: the parent waits; when children finish it is re-queued with their results. The owner sees only the final result or a question; `ask_owner` from any depth goes to the original thread and the reply is routed back to the asking task.
 - Ephemeral workers: `spawn_worker` with a subset of the caller's permissions (max 3 per task, depth 1, shared budget); a new persistent agent needs owner approval (`propose_agent`).
+- Status: the delegation core (linked tasks, policy, guards, shared budget, results back to the caller, quiet output) is implemented and the boss uses it; the MCP tools that let agents call it, `ask_owner`, workers and agent proposals follow. The chain budget is the root agent's `budget.per_run_usd`.
 
 ### 4.4 Agent runner
 
