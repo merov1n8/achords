@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- `AGENT.md` per agent (replaces `prompt.md`, which still works on older installs): scope, what the agent does not do, hand-offs and way of working. The boss and delegating agents see each agent's one-paragraph scope when choosing who gets the work. New seeds for boss and web-dev.
+
 - Web kanban on the workflow (ADR-0030): workflow columns per workspace in one scrolling row, drag & drop with Pointer Events (mouse, pen; touch from the grip so the page still scrolls), keyboard moves (Space, ←/→, Enter, Esc), drop targets show whether a move follows the rules or is a logged override, subtask counts on cards, and a read-only rules table.
 
 - Workflow in the gateway (ADR-0030): each workspace gets `workflows/<workspace>.yaml` (default seeded once); tasks given to agents appear as cards, finished work moves to review automatically; a QA agent (role `qa`) gets review work and can move it to done, the developer cannot; agents move cards with the new `move_task` hub tool; owner moves via `POST /api/tasks/:id/move` (overrides logged); `approve: owner` columns ask with Approve/Reject buttons on Telegram and web.

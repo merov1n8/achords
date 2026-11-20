@@ -57,9 +57,9 @@ describe("seedAgents", () => {
     expect(yaml).toContain(`${home}/workspaces/web-clients`);
     expect(yaml).not.toContain("{{ACHORDS_HOME}}");
 
-    writeFileSync(join(agents, "web-dev", "prompt.md"), "local edit");
+    writeFileSync(join(agents, "web-dev", "AGENT.md"), "local edit");
     expect(seedAgents(SEED_DIR, agents, home)).toEqual([]);
-    expect(readFileSync(join(agents, "web-dev", "prompt.md"), "utf8")).toBe("local edit");
+    expect(readFileSync(join(agents, "web-dev", "AGENT.md"), "utf8")).toBe("local edit");
   });
 });
 
@@ -111,6 +111,24 @@ describe("orchestrator", () => {
     expect(calls[0]?.prompt).toContain("web-dev");
     expect(calls[0]?.prompt).toContain("hello");
     expect(calls[0]?.appendSystemPrompt).toContain("ask");
+  });
+
+  it("AGENT.md: the agent's own runs get it, the boss sees each agent's summary", async () => {
+    const { orch, calls } = make(boss({ action: "answer", message: "ok" }));
+    await orch.handleMessage(createThread(db, {}).id, "hello", "web");
+    // Boss: its own AGENT.md as system prompt, the team with one-line scopes.
+    expect(calls[0]?.appendSystemPrompt).toMatch(/# Boss/);
+    expect(calls[0]?.prompt).toMatch(
+      /- web-dev: Web developer \(web-dev, workspace web-clients\): Builds and maintains client websites/,
+    );
+  });
+
+  it("an older install's prompt.md still works when there is no AGENT.md", async () => {
+    rmSync(join(home, "agents", "boss", "AGENT.md"));
+    writeFileSync(join(home, "agents", "boss", "prompt.md"), "legacy boss prompt");
+    const { orch, calls } = make(boss({ action: "answer", message: "ok" }));
+    await orch.handleMessage(createThread(db, {}).id, "hello", "web");
+    expect(calls[0]?.appendSystemPrompt).toBe("legacy boss prompt");
   });
 
   it("boss asks a clarifying question: no task yet", async () => {
@@ -218,7 +236,7 @@ describe("orchestrator", () => {
     expect(req.allowedTools).toContain("Bash(git status:*)");
     expect(req.allowedTools).not.toContain("Bash");
     expect(req.prompt).toContain("Build it");
-    expect(req.appendSystemPrompt).toContain("web developer agent");
+    expect(req.appendSystemPrompt).toContain("# Web developer");
 
     expect(getTask(db, task.id)).toMatchObject({ status: "done" });
     expect(listMessages(db, t.id).at(-1)?.content).toBe(
