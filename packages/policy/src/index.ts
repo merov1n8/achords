@@ -16,7 +16,7 @@ export {
   manifestSchema,
   parseManifest,
 } from "./manifest.ts";
-export { createProject, loadProjects, type Project } from "./projects.ts";
+export { createProject, loadProjects, type Project, updateProject } from "./projects.ts";
 export {
   checkMove,
   DEFAULT_WORKFLOW_YAML,

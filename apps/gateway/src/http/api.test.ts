@@ -707,6 +707,22 @@ describe("HTTP API", () => {
       ).status,
     ).toBe(409);
 
+    const one = (await (await call("/api/projects/acme")).json()) as { doc: string };
+    expect(one.doc).toContain("# Acme shop");
+    const upd = await call("/api/projects/acme", {
+      method: "PUT",
+      body: JSON.stringify({ name: "Acme webshop", doc: "# Acme webshop\n\nWooCommerce." }),
+    });
+    expect(upd.status).toBe(200);
+    expect(await (await call("/api/projects/acme")).json()).toMatchObject({
+      name: "Acme webshop",
+      doc: "# Acme webshop\n\nWooCommerce.",
+    });
+    expect(
+      (await call("/api/projects/acme", { method: "PUT", body: '{"workspace":"../x"}' })).status,
+    ).toBe(400);
+    expect((await call("/api/projects/nope")).status).toBe(404);
+
     const thread = createThread(db, {});
     const set = await call(`/api/threads/${thread.id}/project`, {
       method: "PUT",

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createProject, loadProjects } from "./projects.ts";
+import { createProject, loadProjects, updateProject } from "./projects.ts";
 
 describe("projects", () => {
   let dir: string;
@@ -39,6 +39,24 @@ describe("projects", () => {
       "name: Manual\nworkspace: studio\nextra: 1\n",
     );
     expect(() => loadProjects(dir)).toThrow(/extra/);
+  });
+
+  it("updates name, workspace and PROJECT.md; the slug (folder) stays", () => {
+    createProject(dir, { slug: "acme", name: "Acme", workspace: "web-clients" });
+    writeFileSync(join(dir, "acme", "files", "index.php"), "<?php");
+    updateProject(dir, "acme", {
+      name: "Acme shop",
+      workspace: "studio",
+      doc: "# Acme shop\n\nWooCommerce.\n",
+    });
+    expect(loadProjects(dir).get("acme")).toMatchObject({
+      name: "Acme shop",
+      workspace: "studio",
+      doc: "# Acme shop\n\nWooCommerce.\n",
+    });
+    expect(existsSync(join(dir, "acme", "files", "index.php"))).toBe(true);
+    expect(() => updateProject(dir, "acme", { workspace: "../x" })).toThrow(/workspace/);
+    expect(() => updateProject(dir, "nope", { name: "x" })).toThrow(/no project/);
   });
 
   it("an empty or missing projects folder is fine", () => {
