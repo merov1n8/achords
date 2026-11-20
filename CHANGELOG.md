@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- **Security:** agent file and fetch permissions are now enforced by the CLI. A manifest granting `Read`/`Edit`/`Write`/`WebFetch` used to allow them everywhere (any file of the user, any web host), because a bare tool name in `--allowedTools` is unscoped. Rules are now scoped to the agent's `fs.read`/`fs.write` folders (its working folder when none) and its `network.allow` hosts; the rest is refused. Verified against the real CLI.
+
 - The web session cookie is named per gateway port (`achords_session_<port>`). Browsers share cookies across ports of one host, so pairing a second gateway on 127.0.0.1 (a test instance) silently replaced the owner's session and brought back the pairing screen. Existing browsers need to pair once more after this update.
 
 - Saving model settings keeps the `allowed` list in the style written in `agent.yaml` (one `- model` per line stays that way) instead of turning it into `[a, b]`.
