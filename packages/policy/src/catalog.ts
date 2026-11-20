@@ -106,6 +106,11 @@ export function grantedIntegrations(
   return { ok: true, entries };
 }
 
-/** CLI tool names an agent may call on an entry; write tools wait for publishing review. */
-export const allowedIntegrationTools = (entry: CatalogEntry): string[] =>
-  entry.tools.read.map((t) => `mcp__${entry.id}__${t}`);
+/**
+ * CLI tool names an agent may call on an entry. Write tools wait for publishing review, except
+ * on a local integration (no credentials) while the owner granted full access (ADR-0035).
+ */
+export const allowedIntegrationTools = (entry: CatalogEntry, elevated = false): string[] =>
+  [...entry.tools.read, ...(elevated && !secretRefs(entry).length ? entry.tools.write : [])].map(
+    (t) => `mcp__${entry.id}__${t}`,
+  );

@@ -27,8 +27,14 @@ export function allowRules(input: {
   }
   for (const tool of tools) {
     if (READ_TOOLS.has(tool) || WRITE_TOOLS.has(tool)) continue;
-    if (tool === "WebFetch") rules.push(...input.network.map((h) => `WebFetch(domain:${h})`));
-    else if (tool === "Bash") rules.push(...input.shell.map((c) => `Bash(${c}:*)`));
+    // "*" is the open web (owner-granted full access, ADR-0035): the bare tool name.
+    if (tool === "WebFetch") {
+      rules.push(
+        ...(input.network.includes("*")
+          ? ["WebFetch"]
+          : input.network.map((h) => `WebFetch(domain:${h})`)),
+      );
+    } else if (tool === "Bash") rules.push(...input.shell.map((c) => `Bash(${c}:*)`));
     else rules.push(tool);
   }
   return rules;

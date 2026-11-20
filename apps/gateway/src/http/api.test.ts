@@ -108,6 +108,10 @@ describe("HTTP API", () => {
             questions.push({ from, question });
             return { ok: true };
           },
+          requestAccess: (from, reason) => {
+            questions.push({ from, question: `access: ${reason}` });
+            return { ok: true };
+          },
           delegate: (from, request) => {
             delegations.push({ from, request });
             return request.agent === "nope"
@@ -467,6 +471,22 @@ describe("HTTP API", () => {
     expect(
       (await post("/api/agent/delegate", { agent: "a", title: "b", instructions: "c" })).status,
     ).toBe(403);
+  });
+
+  it("agent endpoint: request_access reaches the orchestrator only when granted", async () => {
+    const post = (token: string) =>
+      fetch(`${base}/api/agent/request_access`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reason: "Blender effect from a video" }),
+      });
+    const granted = tokens.issue("task-4", "artist", ["request_access"]).token;
+    expect(await (await post(granted)).json()).toEqual({ ok: true });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-4" },
+      question: "access: Blender effect from a video",
+    });
+    expect((await post(tokens.issue("task-4", "artist", ["ask_owner"]).token)).status).toBe(403);
   });
 
   it("agent endpoint: spawn_worker passes only the declared fields", async () => {

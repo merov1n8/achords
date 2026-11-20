@@ -78,6 +78,7 @@ export interface ApiDeps {
     | "workflow"
     | "syncAgents"
     | "openRoom"
+    | "requestAccess"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -497,7 +498,7 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/actions$/,
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
-        if (!/^(proposal|move):(approve|reject):[\w-]{1,36}$/.test(data)) {
+        if (!/^(proposal|move|access):(approve|reject):[\w-]{1,36}$/.test(data)) {
           throw new HttpError(400, "unknown action");
         }
         const out = deps.orchestrator.runAction(data);
@@ -756,6 +757,7 @@ export function createApiHandler(deps: ApiDeps) {
           "propose_agent",
           "move_task",
           "open_room",
+          "request_access",
         ];
         if (method !== "POST" || !AGENT_TOOLS.includes(tool)) throw new HttpError(404, "not found");
         if (!caller.tools.includes(tool)) {
@@ -795,7 +797,9 @@ export function createApiHandler(deps: ApiDeps) {
                         yaml: str(b.manifest_yaml, "manifest_yaml", 20_000),
                         reason: str(b.reason, "reason", 2000),
                       })
-                    : o.askOwner(from, str(b.question, "question", 2000));
+                    : tool === "request_access"
+                      ? o.requestAccess(from, str(b.reason, "reason", 2000))
+                      : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }
