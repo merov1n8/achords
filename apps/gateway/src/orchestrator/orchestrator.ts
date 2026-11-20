@@ -11,7 +11,9 @@ import {
   childFinished,
   claim,
   clearActions,
+  closeRoom,
   complete,
+  openRoom as createRoom,
   type Db,
   defer,
   enqueueChild,
@@ -19,6 +21,7 @@ import {
   extendLease,
   fail,
   finishRun,
+  getRoom,
   getSetting,
   getTask,
   getThread,
@@ -26,8 +29,13 @@ import {
   listChildren,
   listMessages,
   moveCard,
+  nextTurn,
+  openRoomsOf,
   placeCard,
+  type Room,
+  recordTurn,
   remainingBudget,
+  roomsOf,
   type Sensitivity,
   setRunPid,
   setSetting,
@@ -115,6 +123,14 @@ export interface Orchestrator {
     from: { from: "task"; taskId: string },
     request: { instructions: string; tools: string[]; paths: string[] },
   ): { ok: true; taskId: string } | { ok: false; reason: string };
+  /**
+   * Opens a bounded discussion (ADR-0032) with agents the caller may delegate to; the caller
+   * resumes with the transcript once every participant has spoken in every round.
+   */
+  openRoom(
+    from: { from: "task"; taskId: string },
+    request: { topic: string; question: string; participants: string[]; rounds: number },
+  ): { ok: true; roomId: string } | { ok: false; reason: string };
   /** Files a new-agent proposal; nothing is created until the owner approves it. */
   proposeAgent(
     from: { from: "task"; taskId: string },
@@ -163,6 +179,10 @@ export interface Orchestrator {
 export const MAX_DELEGATION_DEPTH = 3;
 export const MAX_CHILDREN_PER_TASK = 5;
 export const MAX_WORKERS_PER_TASK = 3;
+export const MAX_ROOM_PARTICIPANTS = 3;
+export const MAX_ROOM_ROUNDS = 3;
+// Discussion turns only read: never write, run commands or use hub tools (ADR-0032).
+const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
 const WORKER_REFUSAL = "workers cannot spawn workers or delegate (depth 1)";
 
 const expandHome = (p: string) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
@@ -297,7 +317,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
     if (
       parent &&
-      listChildren(db, parent.id).filter((c) => !c.workerSpec).length >= MAX_CHILDREN_PER_TASK
+      // Workers and discussion turns have their own limits.
+      listChildren(db, parent.id).filter((c) => !c.workerSpec && !c.roomId).length >=
+        MAX_CHILDREN_PER_TASK
     ) {
       return `fan-out limit: a task may delegate at most ${MAX_CHILDREN_PER_TASK} times`;
     }
@@ -414,7 +436,52 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (check.ok) requestMove(cur, cur.column, wf.finish, "system", wf);
   };
 
+  /** One discussion turn as a child of the opener's task (the opener waits for it). */
+  const enqueueTurn = (opener: Task, room: Room, turn: { agentId: string; round: number }) =>
+    enqueueChild(db, opener, {
+      title: `Discussion: ${room.topic} (round ${turn.round})`,
+      assigneeAgentId: turn.agentId,
+      caller: room.openerAgentId,
+      roomId: room.id,
+    });
+
   const orchestrator: Orchestrator = {
+    openRoom(from, request) {
+      const all = agents();
+      const parent = getTask(db, from.taskId);
+      const caller = parent?.assigneeAgentId ? all.get(parent.assigneeAgentId) : undefined;
+      if (!parent || !caller) return { ok: false, reason: "unknown calling task" };
+      if (parent.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
+      if (parent.roomId)
+        return { ok: false, reason: "a discussion turn cannot open another discussion" };
+      const ps = request.participants;
+      if (ps.length < 1 || ps.length > MAX_ROOM_PARTICIPANTS || new Set(ps).size !== ps.length) {
+        return { ok: false, reason: `1 to ${MAX_ROOM_PARTICIPANTS} different participants` };
+      }
+      if (
+        !Number.isInteger(request.rounds) ||
+        request.rounds < 1 ||
+        request.rounds > MAX_ROOM_ROUNDS
+      ) {
+        return { ok: false, reason: `rounds must be 1 to ${MAX_ROOM_ROUNDS}` };
+      }
+      // Same rules as delegating to each participant (both sides must allow it).
+      for (const id of ps) {
+        const reason = refuse(caller, all.get(id), parent, id);
+        if (reason) return { ok: false, reason };
+      }
+      const room = createRoom(db, {
+        openerTaskId: parent.id,
+        openerAgentId: caller.id,
+        topic: request.topic,
+        question: request.question,
+        participants: ps,
+        rounds: request.rounds,
+      });
+      enqueueTurn(parent, room, nextTurn(room) as { agentId: string; round: number });
+      return { ok: true, roomId: room.id };
+    },
+
     syncAgents: () => {
       const all = agents();
       const dir = join(home, "workflows");
@@ -763,6 +830,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // Quiet output (ADR-0029): only root tasks talk to the owner; children report to their parent.
     const report = (finalFailure: boolean, text: string) => {
       if (!finalFailure) return;
+      // A failed turn ends the discussion; the opener resumes with what was said.
+      if (task.roomId) closeRoom(db, task.roomId);
       if (task.parentId) childFinished(db, task.id);
       else if (task.threadId) post(task.threadId, text);
     };
@@ -787,6 +856,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       project = task.project ? projects().get(task.project) : undefined;
       if (task.project && !project) throw new Error(`unknown project ${task.project}`);
       manifest = withProject(manifest, project);
+      if (task.roomId) {
+        const { shell: _shell, ...rest } = manifest;
+        manifest = {
+          ...rest,
+          tools: manifest.tools.filter((tool) => READ_ONLY_TOOLS.includes(tool)),
+          fs: { read: [...manifest.fs.read, ...manifest.fs.write], write: [] },
+          delegation: { can_delegate_to: [], accepts_from: [] },
+        };
+      }
       if (task.workerSpec) {
         // Ephemeral worker: the caller's agent, cut down to the granted subset; no delegation.
         const { tools, paths } = task.workerSpec;
@@ -810,7 +888,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         local,
       );
       // Continuation after delegating: the children's results are part of the prompt.
-      const children = listChildren(db, task.id);
+      const children = listChildren(db, task.id).filter((c) => !c.roomId);
+      const transcript = (roomId: string) =>
+        listMessages(db, roomId)
+          .map((msg) => `${msg.author ?? "?"}: ${msg.content}`)
+          .join("\n");
+      const discussions = roomsOf(db, task.id)
+        .map(
+          (r) =>
+            `\n\nDiscussion "${r.topic}" with ${r.participants.join(", ")}:\n${transcript(r.id)}\nWrite the decision and finish the task.`,
+        )
+        .join("");
       const results = children.length
         ? `\n\nResults from delegated tasks:\n${children
             .map(
@@ -827,8 +915,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         delegates.length && deps.hub
           ? `\n\nYou can delegate to:\n${delegates.map(teamLine).join("\n")}\nUse the delegate tool only for work outside your own role.`
           : "";
+      const room = task.roomId ? getRoom(db, task.roomId) : undefined;
+      const turn = nextTurn(room);
       const prompt =
-        `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${answer}`.trim();
+        room && turn
+          ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
+          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${discussions}${answer}`.trim();
+      if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.
       if (Number.isFinite(remaining)) {
@@ -844,12 +937,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let hubRun: { file: string; revoke: () => void } | undefined;
     // Every run may ask the owner; only agents allowed to delegate get `delegate` too.
     // Workers (depth 1) get no hub tools at all.
-    if (deps.hub && !task.workerSpec) {
+    if (deps.hub && !task.workerSpec && !task.roomId) {
       const hubTools = [
         "ask_owner",
         "propose_agent",
         "move_task",
-        ...(delegates.length ? ["delegate"] : []),
+        ...(delegates.length ? ["delegate", "open_room"] : []),
         ...(manifest.tools.length ? ["spawn_worker"] : []),
       ];
       const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id, hubTools);
@@ -912,8 +1005,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ) {
         // It delegated or asked the owner during this run: resume when that is answered.
         waitForChildren(db, task.id, WORKER_ID);
+      } else if (res.ok && task.roomId) {
+        // A discussion turn: record it, hand the word to the next speaker, else back to the opener.
+        complete(db, task.id, WORKER_ID, res.text);
+        recordTurn(db, task.roomId, manifest.id, redact(res.text).slice(0, MAX_POST));
+        const room = getRoom(db, task.roomId);
+        const next = nextTurn(room);
+        const opener = task.parentId ? getTask(db, task.parentId) : undefined;
+        if (room && next && opener) enqueueTurn(opener, room, next);
+        childFinished(db, task.id);
       } else if (res.ok) {
         complete(db, task.id, WORKER_ID, res.text);
+        // The opener's result is the decision of the discussions it opened.
+        for (const r of openRoomsOf(db, task.id))
+          closeRoom(db, r.id, redact(res.text).slice(0, MAX_POST));
         await deps.memory
           ?.add(
             {

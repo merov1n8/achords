@@ -7,9 +7,11 @@ import {
   createSession,
   createThread,
   type Db,
+  getRoom,
   getThread,
   listAgents,
   listMessages,
+  listRooms,
   listSessions,
   listTasks,
   listThreads,
@@ -64,6 +66,7 @@ export interface ApiDeps {
     | "runAction"
     | "workflow"
     | "syncAgents"
+    | "openRoom"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -262,6 +265,17 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Agent rooms (ADR-0032): hidden from chats; the owner can read them here.
+    ["GET", /^\/api\/rooms$/, () => listRooms(db)],
+    [
+      "GET",
+      /^\/api\/rooms\/([\w-]+)\/messages$/,
+      ({ params }) => {
+        const id = params[0] as string;
+        if (!getRoom(db, id)) throw new HttpError(404, "no such room");
+        return listMessages(db, id);
+      },
+    ],
     // Projects (ADR-0031): files are managed in Finder; the API lists, creates and assigns.
     [
       "GET",
@@ -574,7 +588,14 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
         const tool = path.slice("/api/agent/".length);
-        const AGENT_TOOLS = ["delegate", "ask_owner", "spawn_worker", "propose_agent", "move_task"];
+        const AGENT_TOOLS = [
+          "delegate",
+          "ask_owner",
+          "spawn_worker",
+          "propose_agent",
+          "move_task",
+          "open_room",
+        ];
         if (method !== "POST" || !AGENT_TOOLS.includes(tool)) throw new HttpError(404, "not found");
         if (!caller.tools.includes(tool)) {
           throw new HttpError(403, `tool ${tool} not granted to this run`);
@@ -596,17 +617,24 @@ export function createApiHandler(deps: ApiDeps) {
                   tools: strList(b.tools, "tools"),
                   paths: strList(b.paths, "paths"),
                 })
-              : tool === "move_task"
-                ? o.moveTask(from, {
-                    taskId: str(b.task_id, "task_id", 64),
-                    to: str(b.to, "to", 32),
+              : tool === "open_room"
+                ? o.openRoom(from, {
+                    topic: str(b.topic, "topic", 200),
+                    question: str(b.question, "question", 5000),
+                    participants: strList(b.participants, "participants"),
+                    rounds: Number(b.rounds),
                   })
-                : tool === "propose_agent"
-                  ? o.proposeAgent(from, {
-                      yaml: str(b.manifest_yaml, "manifest_yaml", 20_000),
-                      reason: str(b.reason, "reason", 2000),
+                : tool === "move_task"
+                  ? o.moveTask(from, {
+                      taskId: str(b.task_id, "task_id", 64),
+                      to: str(b.to, "to", 32),
                     })
-                  : o.askOwner(from, str(b.question, "question", 2000));
+                  : tool === "propose_agent"
+                    ? o.proposeAgent(from, {
+                        yaml: str(b.manifest_yaml, "manifest_yaml", 20_000),
+                        reason: str(b.reason, "reason", 2000),
+                      })
+                    : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }
