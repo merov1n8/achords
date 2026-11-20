@@ -120,6 +120,51 @@ describe("orchestrator", () => {
     expect(calls[0]?.appendSystemPrompt).toContain("ask");
   });
 
+  it("boss proposes an agent change; only the approved diff is written, once (ADR-0041)", async () => {
+    const change = {
+      agent: "web-dev",
+      add: { network: ["developer.wordpress.org"], tools: ["WebFetch"] },
+      remove: { shell: ["npm test"] },
+      reason: "the owner wants web-dev to read WordPress docs",
+    };
+    const { orch, calls } = make(boss({ action: "change_agent", message: "Javasoltam.", change }));
+    const t = createThread(db, {});
+    expect(await orch.handleMessage(t.id, "web-dev olvashassa a WP doksit", "web")).toBe(
+      "change_agent",
+    );
+    // The boss sees what each agent has now.
+    expect(calls[0]?.prompt).toMatch(
+      /- web-dev: mcp \[\]; tools \[Read, Edit, Write, Glob, Grep, Bash\]/,
+    );
+    const path = join(home, "agents", "web-dev", "agent.yaml");
+    const before = readFileSync(path, "utf8");
+    const msg = listMessages(db, t.id).find((m) => m.actions?.length);
+    expect(msg?.content).toMatch(
+      /Proposed change to web-dev[\s\S]*- tools: \+ WebFetch\n- websites: \+ developer.wordpress.org\n- shell commands: − npm test/,
+    );
+    expect(readFileSync(path, "utf8")).toBe(before); // nothing yet
+    const approve = msg?.actions?.[0]?.data ?? "";
+    expect(orch.runAction(approve).ok).toBe(true);
+    const after = readFileSync(path, "utf8");
+    expect(after).toContain("# Web developer for client work."); // comments kept
+    expect(after).toMatch(/tools: \[Read, Edit, Write, Glob, Grep, Bash, WebFetch\]/);
+    expect(after).toMatch(/allow: \[[^\]]*pnpm test[^\]]*\]/);
+    expect(after).not.toMatch(/[[,] ?"?npm test/);
+    expect(orch.runAction(approve).ok).toBe(false);
+  });
+
+  it("an agent change made against an older file is refused at approval", async () => {
+    const change = { agent: "web-dev", add: { tools: ["WebFetch"] }, reason: "docs" };
+    const { orch } = make(boss({ action: "change_agent", message: "ok", change }));
+    const t = createThread(db, {});
+    await orch.handleMessage(t.id, "x", "web");
+    const path = join(home, "agents", "web-dev", "agent.yaml");
+    writeFileSync(path, readFileSync(path, "utf8").replace("per_run_usd: 2", "per_run_usd: 3"));
+    const approve = listMessages(db, t.id).find((m) => m.actions?.length)?.actions?.[0]?.data ?? "";
+    expect(orch.runAction(approve)).toMatchObject({ ok: false, message: /edited since/ });
+    expect(readFileSync(path, "utf8")).not.toContain("WebFetch");
+  });
+
   it("AGENT.md: the agent's own runs get it, the boss sees each agent's summary", async () => {
     const { orch, calls } = make(boss({ action: "answer", message: "ok" }));
     await orch.handleMessage(createThread(db, {}).id, "hello", "web");

@@ -22,8 +22,13 @@ export {
 } from "./catalog.ts";
 export * from "./check.ts";
 export {
+  AGENT_LIST_FIELDS,
+  type AgentListField,
+  type AgentPatch,
   createAgentFiles,
+  manifestChanges,
   type NewAgent,
+  patchManifestText,
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";

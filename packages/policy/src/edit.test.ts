@@ -2,7 +2,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createAgentFiles, updateManifestModels, updateManifestName } from "./edit.ts";
+import {
+  createAgentFiles,
+  manifestChanges,
+  patchManifestText,
+  updateManifestModels,
+  updateManifestName,
+} from "./edit.ts";
 import { loadManifest } from "./manifest.ts";
 
 const YAML = `# Boss agent — my notes stay here
@@ -115,4 +121,46 @@ const base = () => ({
   workspace: "w",
   models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
   description: "d",
+});
+
+describe("agent change proposals (ADR-0041)", () => {
+  const BASE = `# Social agent
+id: social
+name: Social
+role: social
+workspace: marketing
+models:
+  default: cli-claude/sonnet
+  allowed: [cli-claude/sonnet]
+tools: [Read, WebFetch]
+mcp: [wordpress] # client sites
+network:
+  allow: [example.com]
+`;
+
+  it("adds and removes list entries, keeps comments, and describes the change", () => {
+    const next = patchManifestText(BASE, {
+      add: { mcp: ["meta"], models: ["cli-claude/opus"], network: ["facebook.com"] },
+      remove: { network: ["example.com"], tools: ["WebFetch"] },
+      defaultModel: "cli-claude/opus",
+    });
+    expect(next).toContain("# Social agent");
+    expect(next).toContain("mcp: [wordpress, meta] # client sites");
+    expect(manifestChanges(BASE, next)).toEqual([
+      "integrations: + meta",
+      "tools: − WebFetch",
+      "websites: + facebook.com, − example.com",
+      "models: + cli-claude/opus",
+      "default model: cli-claude/sonnet → cli-claude/opus",
+    ]);
+  });
+
+  it("creates missing lists, drops an emptied shell, and refuses invalid results", () => {
+    const withShell = patchManifestText(BASE, { add: { shell: ["ls"], tools: ["Bash"] } });
+    expect(withShell).toMatch(/shell:\n {2}allow: \[ls\]/);
+    expect(patchManifestText(withShell, { remove: { shell: ["ls"] } })).not.toContain("shell");
+    expect(() => patchManifestText(BASE, { defaultModel: "cli-claude/haiku" })).toThrow(
+      /must be one of models.allowed/,
+    );
+  });
 });

@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Change agents by asking: tell the boss "give social access to Meta" or "let web-dev read the WordPress docs"; it posts the exact change in plain words (+ meta, − npm test) with Approve / Reject, and only an approved change is written to agent.yaml, keeping your comments. A proposal made before you edited the file by hand is refused.
 - Test connection on Settings → Integrations: one read call through the same path agents use (for client integrations with a chosen project, e.g. its GA4 property or Facebook page) shows whether the credentials and accounts work.
 - All chats: a checkbox in the table header selects every chat shown.
 - Integration monitors: watch a read call of an integration (e.g. new comments on a Facebook page, Search Console queries) every N minutes; when the result changes, the local model decides whether it is news by your own question ("a new review under 4 stars") and tells you in one or two sentences. Unchanged results cost nothing and use no quota.

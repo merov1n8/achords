@@ -40,3 +40,4 @@
 - [ADR-0038: Prompt-injection guard without containers (isolation C)](0038-prompt-injection-guard.md)
 - [ADR-0039: Heartbeat monitors](0039-heartbeat-monitors.md)
 - [ADR-0040: OpenAI models through the codex CLI](0040-openai-models-through-codex-cli.md)
+- [ADR-0041: Owner-approved changes to existing agents](0041-owner-approved-agent-changes.md)
