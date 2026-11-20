@@ -19,14 +19,18 @@ import {
   extendLease,
   fail,
   finishRun,
+  getSetting,
   getTask,
   getThread,
   isPaused,
   listChildren,
   listMessages,
+  moveCard,
+  placeCard,
   remainingBudget,
   type Sensitivity,
   setRunPid,
+  setSetting,
   startRun,
   type Task,
   upsertAgent,
@@ -37,10 +41,15 @@ import type { Embedder, Memory } from "@achords/memory";
 import {
   checkFs,
   checkModel,
+  checkMove,
+  DEFAULT_WORKFLOW_YAML,
   isLocalModel,
   loadAgents,
+  loadWorkflow,
   type Manifest,
   parseManifest,
+  permissionMatrix,
+  type Workflow,
 } from "@achords/policy";
 import type { ModelProvider, RunRequest } from "@achords/providers";
 import { z } from "zod";
@@ -118,8 +127,23 @@ export interface Orchestrator {
     from: { from: "task"; taskId: string },
     question: string,
   ): { ok: true } | { ok: false; reason: string };
-  /** Loads manifests and mirrors them into the DB. Returns the agent ids. */
+  /** Loads manifests and mirrors them into the DB; seeds missing workflows. Returns agent ids. */
   syncAgents(): string[];
+  /** An agent moves a kanban card (hub tool move_task), checked against the workflow. */
+  moveTask(
+    from: { from: "task"; taskId: string },
+    request: { taskId: string; to: string },
+  ): { ok: true; pending?: true } | { ok: false; reason: string };
+  /** The owner moves a card (web drag & drop); `from` is the column the owner saw. */
+  ownerMove(
+    taskId: string,
+    from: string,
+    to: string,
+  ): { ok: true; override: boolean } | { ok: false; reason: string };
+  /** A message button (Telegram or web): proposal:<verb>:<id> or move:<verb>:<taskId>. */
+  runAction(data: string): { ok: boolean; message: string };
+  /** A workspace's workflow and its permission matrix (read-only web view). */
+  workflow(workspace: string): { workflow: Workflow; matrix: ReturnType<typeof permissionMatrix> };
   /** Claims and runs one task. Returns false if there was nothing to do. */
   workOnce(signal?: AbortSignal): Promise<boolean>;
   /**
@@ -271,8 +295,181 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return undefined;
   };
 
+  // Kanban workflow (ADR-0030): one workflow.yaml per workspace, seeded once, never overwritten.
+  const SAFE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+  const workflowFor = (workspace: string): Workflow =>
+    loadWorkflow(SAFE_NAME.test(workspace) ? join(home, "workflows", `${workspace}.yaml`) : "");
+  const workspaceOf = (task: Task) =>
+    (task.assigneeAgentId ? agents().get(task.assigneeAgentId)?.workspace : undefined) ?? "shared";
+  const pendingKey = (taskId: string) => `pending_move:${taskId}`;
+
+  /** on_enter automation; `byOwner` skips nothing here (approval is checked before moving). */
+  const enterColumn = (task: Task, column: string, wf: Workflow) => {
+    const assign = wf.on_enter[column]?.assign;
+    if (!assign?.startsWith("role:")) return;
+    const role = assign.slice(5);
+    const workspace = workspaceOf(task);
+    const reviewer = [...agents().values()]
+      .filter(
+        (m) => m.workspace === workspace && m.roles.includes(role) && m.id !== task.assigneeAgentId,
+      )
+      .sort((a, b) => a.id.localeCompare(b.id))[0];
+    // Nobody with that role: the card waits for the owner.
+    if (!reviewer) return;
+    const targets = wf.transitions
+      .filter((tr) => tr.from === column && tr.by === assign)
+      .map((tr) => tr.to);
+    const root = getTask(db, task.id) as Task;
+    enqueueChild(db, root, {
+      title: `${column}: ${task.title}`,
+      description: [
+        `Card ${task.id} ("${task.title}", by ${task.assigneeAgentId ?? "?"}) is in "${column}" and assigned to you as ${role}.`,
+        `Original instructions:\n${task.description ?? ""}`,
+        `Result of the work:\n${root.result ?? "(none yet)"}`,
+        `When you have decided, move the card with move_task (task_id "${task.id}") to one of: ${targets.join(", ") || "(no column allowed for your role)"}, and say why.`,
+      ].join("\n\n"),
+      assigneeAgentId: reviewer.id,
+      caller: "workflow",
+    });
+  };
+
+  /** Applies a checked agent/system move, or parks it for owner approval (on_enter approve). */
+  const requestMove = (
+    task: Task,
+    from: string,
+    to: string,
+    actor: string,
+    wf: Workflow,
+  ): { ok: true; pending?: true } | { ok: false; reason: string } => {
+    if (wf.on_enter[to]?.approve === "owner") {
+      setSetting(db, pendingKey(task.id), JSON.stringify({ from, to, actor }));
+      if (task.threadId) {
+        appendMessage(db, {
+          threadId: task.threadId,
+          role: "agent",
+          author: BOSS_ID,
+          channel: "system",
+          content: t("thread.moveRequest", { actor, title: task.title, from, to }),
+          actions: [
+            { label: t("action.approve"), data: `move:approve:${task.id}` },
+            { label: t("action.reject"), data: `move:reject:${task.id}` },
+          ],
+        });
+      }
+      return { ok: true, pending: true };
+    }
+    if (!moveCard(db, { taskId: task.id, from, to, actor })) {
+      return { ok: false, reason: "the card was moved meanwhile" };
+    }
+    enterColumn(task, to, wf);
+    return { ok: true };
+  };
+
+  /** A successful run lands in `finish` unless the agent already moved the card. */
+  const finishCard = (task: Task) => {
+    const cur = getTask(db, task.id);
+    if (!cur?.column || !cur.assigneeAgentId) return;
+    const wf = workflowFor(workspaceOf(cur));
+    if (cur.column !== wf.start) return;
+    const roles = agents().get(cur.assigneeAgentId)?.roles ?? [];
+    const check = checkMove(wf, { assignee: cur.assigneeAgentId, column: cur.column }, wf.finish, {
+      kind: "agent",
+      id: cur.assigneeAgentId,
+      roles,
+    });
+    if (check.ok) requestMove(cur, cur.column, wf.finish, "system", wf);
+  };
+
   const orchestrator: Orchestrator = {
-    syncAgents: () => [...agents().keys()],
+    syncAgents: () => {
+      const all = agents();
+      const dir = join(home, "workflows");
+      mkdirSync(dir, { recursive: true });
+      for (const ws of new Set([...all.values()].map((m) => m.workspace))) {
+        const path = join(dir, `${ws}.yaml`);
+        if (SAFE_NAME.test(ws) && !existsSync(path)) writeFileSync(path, DEFAULT_WORKFLOW_YAML);
+      }
+      return [...all.keys()];
+    },
+
+    workflow(workspace) {
+      const workflow = workflowFor(workspace);
+      return { workflow, matrix: permissionMatrix(workflow) };
+    },
+
+    moveTask(from, request) {
+      const caller = getTask(db, from.taskId);
+      const manifest = caller?.assigneeAgentId ? agents().get(caller.assigneeAgentId) : undefined;
+      if (!caller || !manifest || caller.workerSpec)
+        return { ok: false, reason: "unknown calling task" };
+      const target = getTask(db, request.taskId);
+      if (!target?.column) return { ok: false, reason: "no such card" };
+      const workspace = workspaceOf(target);
+      if (workspace !== manifest.workspace)
+        return { ok: false, reason: "card is in another workspace" };
+      const wf = workflowFor(workspace);
+      const check = checkMove(
+        wf,
+        { assignee: target.assigneeAgentId, column: target.column },
+        request.to,
+        {
+          kind: "agent",
+          id: manifest.id,
+          roles: manifest.roles,
+        },
+      );
+      if (!check.ok) return check;
+      return requestMove(target, target.column, request.to, `agent:${manifest.id}`, wf);
+    },
+
+    ownerMove(taskId, from, to) {
+      const target = getTask(db, taskId);
+      if (!target?.column) return { ok: false, reason: "no such card" };
+      if (target.column !== from) return { ok: false, reason: "the card was moved meanwhile" };
+      const wf = workflowFor(workspaceOf(target));
+      const check = checkMove(wf, { assignee: target.assigneeAgentId, column: from }, to, {
+        kind: "owner",
+      });
+      if (!check.ok) return check;
+      if (!moveCard(db, { taskId, from, to, actor: "owner", override: check.override })) {
+        return { ok: false, reason: "the card was moved meanwhile" };
+      }
+      // The owner decided; a parked agent move for this card is obsolete.
+      setSetting(db, pendingKey(taskId), "");
+      clearActions(db, "move:", taskId);
+      enterColumn(target, to, wf);
+      return { ok: true, override: check.override };
+    },
+
+    runAction(data) {
+      const proposal = /^proposal:(approve|reject):([\w-]{1,36})$/.exec(data);
+      if (proposal) {
+        const approve = proposal[1] === "approve";
+        const out = orchestrator.decideProposal(proposal[2] as string, approve);
+        return out.ok
+          ? {
+              ok: true,
+              message: t(approve ? "action.approved" : "action.rejected", { agent: out.agentId }),
+            }
+          : { ok: false, message: out.reason };
+      }
+      const move = /^move:(approve|reject):([\w-]{1,36})$/.exec(data);
+      if (!move) return { ok: false, message: t("action.unknown") };
+      const taskId = move[2] as string;
+      const raw = getSetting(db, pendingKey(taskId));
+      const task = getTask(db, taskId);
+      if (!raw || !task) return { ok: false, message: t("action.noPendingMove") };
+      const p = JSON.parse(raw) as { from: string; to: string; actor: string };
+      setSetting(db, pendingKey(taskId), "");
+      clearActions(db, "move:", taskId);
+      const vars = { title: task.title, from: p.from, to: p.to };
+      if (move[1] === "reject") return { ok: true, message: t("action.moveRejected", vars) };
+      if (!moveCard(db, { taskId, from: p.from, to: p.to, actor: p.actor })) {
+        return { ok: false, message: "the card was moved meanwhile" };
+      }
+      enterColumn(task, p.to, workflowFor(workspaceOf(task)));
+      return { ok: true, message: t("action.moveApproved", vars) };
+    },
 
     spawnWorker(from, request) {
       const parent = getTask(db, from.taskId);
@@ -428,6 +625,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           sensitivity: getThread(db, from.threadId)?.sensitivity ?? "normal",
           ...(budget !== undefined ? { budgetUsd: budget } : {}),
         });
+        placeCard(db, t.id, workflowFor(target.workspace).start, "system");
         return { ok: true, taskId: t.id };
       }
       const parent = getTask(db, from.taskId);
@@ -597,6 +795,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const hubTools = [
         "ask_owner",
         "propose_agent",
+        "move_task",
         ...(delegates.length ? ["delegate"] : []),
         ...(manifest.tools.length ? ["spawn_worker"] : []),
       ];
@@ -678,8 +877,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           )
           .catch(() => {}); // memory is best effort; the task result is already safe
         if (task.parentId) childFinished(db, task.id);
-        else if (task.threadId)
-          post(task.threadId, t("thread.done", { title: task.title, result: res.text }));
+        else {
+          finishCard(task);
+          if (task.threadId)
+            post(task.threadId, t("thread.done", { title: task.title, result: res.text }));
+        }
       } else {
         fail(db, task.id, WORKER_ID, res.error ?? res.stopReason);
         report(

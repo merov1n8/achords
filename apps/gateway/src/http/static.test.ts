@@ -50,6 +50,12 @@ describe("static web UI", () => {
           spawnWorker: () => ({ ok: false, reason: "n/a" }),
           proposeAgent: () => ({ ok: false, reason: "n/a" }),
           decideProposal: () => ({ ok: false, reason: "n/a" }),
+          moveTask: () => ({ ok: false, reason: "n/a" }),
+          ownerMove: () => ({ ok: false, reason: "n/a" }),
+          runAction: () => ({ ok: false, message: "n/a" }),
+          workflow: () => {
+            throw new Error("n/a");
+          },
         },
         allowedHosts: [`127.0.0.1:${port}`],
         staticDir,
