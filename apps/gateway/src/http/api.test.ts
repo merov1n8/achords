@@ -334,6 +334,44 @@ describe("HTTP API", () => {
     expect(integrations.map((i) => i.id)).toEqual(["ga4"]);
   });
 
+  it("monitors: create, list, edit, quiet hours, delete (ADR-0039)", async () => {
+    const { call } = await pair();
+    const created = await call("/api/monitors", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Shop",
+        kind: "site",
+        config: { url: "https://shop.example" },
+        every_minutes: 10,
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const bad = await call("/api/monitors", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "x",
+        kind: "site",
+        config: { url: "file:///etc" },
+        every_minutes: 10,
+      }),
+    });
+    expect(bad.status).toBe(400);
+    expect(
+      (await call(`/api/monitors/${id}`, { method: "PUT", body: '{"enabled":false}' })).status,
+    ).toBe(200);
+    const list = (await (await call("/api/monitors")).json()) as { enabled: boolean }[];
+    expect(list.map((m) => m.enabled)).toEqual([false]);
+    expect(
+      (await call("/api/monitors/quiet", { method: "PUT", body: '{"hours":"22-7"}' })).status,
+    ).toBe(200);
+    expect(await (await call("/api/monitors/quiet")).json()).toEqual({ hours: "22-7" });
+    expect(
+      (await call("/api/monitors/quiet", { method: "PUT", body: '{"hours":"late"}' })).status,
+    ).toBe(400);
+    expect((await call(`/api/monitors/${id}`, { method: "DELETE" })).status).toBe(200);
+  });
+
   it("vault is write-only over HTTP", async () => {
     const { call } = await pair();
     const value = "sk-test-value-0123456789-abcd";

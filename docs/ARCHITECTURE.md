@@ -141,6 +141,8 @@ Default layout, configurable:
 
 ### 4.10 Scheduler and heartbeat
 
+- Implemented (ADR-0039): `site` and `stuck` monitors in the gateway tick, notify on change only, quiet hours; integration checks with local triage are next.
+
 - Cron-style schedules stored in SQLite, editable in the UI (list, daily timeline, weekly view). Every run reports a result. Implemented (ADR-0033): own 5-field cron parser in local time; the gateway tick delegates due schedules to their agent like the boss would; results go to the schedule's own thread; missed runs are caught up once, a still-running previous task skips the occurrence; seeds are inserted once, switched off.
 - Heartbeat monitors: cheap periodic checks (calendar, mail, kanban, ads metrics) that notify only when something matters. Prefer local models for heartbeat triage.
 
