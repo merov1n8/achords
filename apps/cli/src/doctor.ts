@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HomePaths } from "@achords/core";
+import { t } from "@achords/i18n";
 import { detectPlatform, recommendModels } from "@achords/platform";
 import { installedLaunchdPath, protectedFolderOf } from "./launchd.ts";
 
@@ -48,12 +49,12 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
 
   add(
     atLeast(env.nodeVersion, MIN_NODE)
-      ? { name: "node", level: "ok", detail: `v${env.nodeVersion}` }
+      ? { name: t("cli.doctor.node"), level: "ok", detail: `v${env.nodeVersion}` }
       : {
-          name: "node",
+          name: t("cli.doctor.node"),
           level: "fail",
           detail: `v${env.nodeVersion}`,
-          fix: `install Node ${MIN_NODE.join(".")} or newer (22 LTS)`,
+          fix: t("cli.doctor.nodeFix", { version: MIN_NODE.join(".") }),
         },
   );
 
@@ -64,52 +65,66 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
   add(
     claude && !serviceSeesClaude
       ? {
-          name: "claude CLI",
+          name: t("cli.doctor.claudeCli"),
           level: "fail",
-          detail: `found at ${claude}, but the service's PATH does not include ${claudeDir}`,
-          fix: "run `achords stop && achords start` from your normal shell (it records your PATH)",
+          detail: t("cli.doctor.claudePath", { claude, dir: claudeDir ?? "" }),
+          fix: t("cli.doctor.claudePathFix"),
         }
       : claude
-        ? { name: "claude CLI", level: "ok", detail: env.version("claude") ?? claude }
+        ? { name: t("cli.doctor.claudeCli"), level: "ok", detail: env.version("claude") ?? claude }
         : {
-            name: "claude CLI",
+            name: t("cli.doctor.claudeCli"),
             level: "fail",
-            detail: "not found on PATH",
-            fix: "install Claude Code (https://claude.com/claude-code) and log in with `claude`",
+            detail: t("cli.doctor.notOnPath"),
+            fix: t("cli.doctor.claudeFix"),
           },
   );
 
   add(
     env.which("git")
-      ? { name: "git", level: "ok", detail: env.version("git") ?? "found" }
-      : { name: "git", level: "warn", detail: "not found", fix: "install git (dev agents use it)" },
+      ? {
+          name: t("cli.doctor.git"),
+          level: "ok",
+          detail: env.version("git") ?? t("cli.doctor.found"),
+        }
+      : {
+          name: t("cli.doctor.git"),
+          level: "warn",
+          detail: t("cli.doctor.notFound"),
+          fix: t("cli.doctor.gitFix"),
+        },
   );
 
   if (!existsSync(env.paths.home)) {
     add({
-      name: "data folder",
+      name: t("cli.doctor.dataFolder"),
       level: "info",
-      detail: `${env.paths.home} does not exist yet`,
-      fix: "run `achords init`",
+      detail: t("cli.doctor.homeMissing", { home: env.paths.home }),
+      fix: t("cli.doctor.runInit"),
     });
   } else {
     const mode = statSync(env.paths.home).mode & 0o777;
     add(
       mode & 0o077
         ? {
-            name: "data folder",
+            name: t("cli.doctor.dataFolder"),
             level: "warn",
-            detail: `${env.paths.home} is readable by others (${mode.toString(8)})`,
+            detail: t("cli.doctor.homeOpen", { home: env.paths.home, mode: mode.toString(8) }),
             fix: `chmod 700 ${env.paths.home}`,
           }
-        : { name: "data folder", level: "ok", detail: env.paths.home },
+        : { name: t("cli.doctor.dataFolder"), level: "ok", detail: env.paths.home },
     );
   }
 
   add(
     existsSync(join(env.webDist, "index.html"))
-      ? { name: "web UI", level: "ok", detail: "built" }
-      : { name: "web UI", level: "warn", detail: "not built", fix: "run `pnpm build`" },
+      ? { name: t("cli.doctor.webUi"), level: "ok", detail: t("cli.doctor.built") }
+      : {
+          name: t("cli.doctor.webUi"),
+          level: "warn",
+          detail: t("cli.doctor.notBuilt"),
+          fix: t("cli.doctor.buildFix"),
+        },
   );
 
   if (env.platform === "darwin") {
@@ -117,44 +132,54 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
     add(
       folder
         ? {
-            name: "macOS folder access",
+            name: t("cli.doctor.macFolderName"),
             level: "warn",
-            detail: `the code is in ~/${folder}; the service needs node to have access to it`,
-            fix: "move the checkout (e.g. ~/Code/achords) or grant node access in System Settings > Privacy & Security > Files and Folders",
+            detail: t("cli.doctor.macFolder", { folder }),
+            fix: t("cli.doctor.macFolderFix"),
           }
-        : { name: "macOS folder access", level: "ok", detail: "code is outside protected folders" },
+        : { name: t("cli.doctor.macFolderName"), level: "ok", detail: t("cli.doctor.macFolderOk") },
     );
   }
 
   add(
     env.serviceLoaded()
-      ? { name: "service", level: "ok", detail: "loaded" }
-      : { name: "service", level: "warn", detail: "not loaded", fix: "run `achords start`" },
+      ? { name: t("cli.doctor.service"), level: "ok", detail: t("cli.status.loaded") }
+      : {
+          name: t("cli.doctor.service"),
+          level: "warn",
+          detail: t("cli.status.notLoaded"),
+          fix: t("cli.doctor.runStart"),
+        },
   );
   add(
     (await env.gatewayResponds())
-      ? { name: "gateway", level: "ok", detail: "responding on 127.0.0.1" }
-      : { name: "gateway", level: "warn", detail: "not responding", fix: "run `achords start`" },
+      ? { name: t("cli.doctor.gateway"), level: "ok", detail: t("cli.doctor.responding") }
+      : {
+          name: t("cli.doctor.gateway"),
+          level: "warn",
+          detail: t("cli.doctor.notResponding"),
+          fix: t("cli.doctor.runStart"),
+        },
   );
 
   const vault = env.vaultStatus();
   if (!vault.ok) {
     add({
-      name: "vault",
+      name: t("cli.doctor.vault"),
       level: "fail",
-      detail: `cannot open: ${vault.error}`,
-      fix: "allow Keychain access for node, or set ACHORDS_KEYSTORE=file on headless hosts",
+      detail: t("cli.doctor.vaultError", { error: vault.error }),
+      fix: t("cli.doctor.vaultFix"),
     });
   } else {
-    add({ name: "vault", level: "ok", detail: "master key available" });
+    add({ name: t("cli.doctor.vault"), level: "ok", detail: t("cli.doctor.vaultOk") });
     add(
       vault.telegram
-        ? { name: "telegram", level: "ok", detail: "bot token set" }
+        ? { name: t("cli.doctor.telegram"), level: "ok", detail: t("cli.doctor.telegramOk") }
         : {
-            name: "telegram",
+            name: t("cli.doctor.telegram"),
             level: "info",
-            detail: "no bot token",
-            fix: "optional: `achords secret set telegram.bot-token`",
+            detail: t("cli.doctor.telegramMissing"),
+            fix: t("cli.doctor.telegramFix"),
           },
     );
   }
@@ -164,36 +189,42 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
   const has = (m: string) => pulled?.some((p) => p === m || p === `${m}:latest`) ?? false;
   if (pulled === undefined) {
     add({
-      name: "local models",
+      name: t("cli.doctor.localModels"),
       level: "info",
-      detail: "Ollama not running",
-      fix: `optional, for local-only work: install Ollama (https://ollama.com), then \`ollama pull ${chat}\` and \`ollama pull ${embedding}\``,
+      detail: t("cli.doctor.ollamaDown"),
+      fix: t("cli.doctor.ollamaFix", { chat, embedding }),
     });
   } else {
     const missing = [chat, embedding].filter((m) => !has(m));
     add(
       missing.length
         ? {
-            name: "local models",
+            name: t("cli.doctor.localModels"),
             level: "info",
-            detail: `Ollama running; recommended for ${env.ramGb} GB RAM: ${chat}`,
+            detail: t("cli.doctor.ollamaRecommend", { ram: env.ramGb, chat }),
             fix: missing.map((m) => `ollama pull ${m}`).join(" && "),
           }
-        : { name: "local models", level: "ok", detail: `Ollama: ${chat}, ${embedding}` },
+        : {
+            name: t("cli.doctor.localModels"),
+            level: "ok",
+            detail: t("cli.doctor.ollamaOk", { chat, embedding }),
+          },
     );
   }
   // Optional (ADR-0014): only voice notes need it.
   const whisper = env.which("whisper-cli");
   add(
     whisper && env.hasWhisperModel
-      ? { name: "speech", level: "ok", detail: "local Whisper ready" }
+      ? { name: t("cli.doctor.speech"), level: "ok", detail: t("cli.doctor.whisperOk") }
       : {
-          name: "speech",
+          name: t("cli.doctor.speech"),
           level: "info",
-          detail: whisper ? "Whisper model missing" : "whisper-cli not found",
+          detail: whisper ? t("cli.doctor.whisperModel") : t("cli.doctor.whisperCli"),
           fix: whisper
-            ? `optional, for voice notes: download ggml-large-v3-turbo-q5_0.bin into ${env.paths.whisperModel.replace(/\/[^/]+$/, "")}`
-            : "optional, for voice notes: brew install whisper-cpp",
+            ? t("cli.doctor.whisperModelFix", {
+                dir: env.paths.whisperModel.replace(/\/[^/]+$/, ""),
+              })
+            : t("cli.doctor.whisperCliFix"),
         },
   );
   return checks;

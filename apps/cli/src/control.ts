@@ -11,6 +11,7 @@ import {
   setPaused,
   writeStopMarker,
 } from "@achords/core";
+import { t } from "@achords/i18n";
 import type { ServiceManager } from "./launchd.ts";
 
 // Duplicated from @achords/gateway to keep the CLI free of a gateway dependency.
@@ -33,7 +34,7 @@ function withDb<T>(paths: HomePaths, fn: (db: ReturnType<typeof openCoreDatabase
 
 export function start({ paths, service }: ControlContext, waitMs = 5000): string {
   if (stopMarkerExists(paths)) {
-    throw new Error("emergency stop is active; run `achords resume` first");
+    throw new Error(t("cli.start.emergency"));
   }
   mkdirSync(paths.logDir, { recursive: true, mode: 0o700 });
   service.start();
@@ -49,7 +50,7 @@ export function start({ paths, service }: ControlContext, waitMs = 5000): string
     }
     Atomics.wait(pause, 0, 0, 100);
   }
-  return `gateway started (${service.kind})`;
+  return t("cli.start.done", { kind: service.kind });
 }
 
 /** Graceful: unloads the service (SIGTERM to the gateway). The queue keeps its state. */
@@ -58,7 +59,7 @@ export function stop({ paths, service }: ControlContext): string {
   // Foreground (dev) gateway without a service: same graceful signal.
   const pid = readLivePid(paths.pidFile);
   if (pid !== undefined) process.kill(pid, "SIGTERM");
-  return unloaded || pid !== undefined ? "gateway stopped" : "gateway was not running";
+  return unloaded || pid !== undefined ? t("cli.stop.done") : t("cli.stop.notRunning");
 }
 
 export interface KillReport {
@@ -83,14 +84,16 @@ export function kill({ paths, service }: ControlContext): KillReport {
 
   step("stop marker", () => {
     writeStopMarker(paths);
-    return "STOP marker written";
+    return t("cli.kill.marker");
   });
-  step("service", () => (service.stop() ? "service unloaded" : "service was not loaded"));
+  step("service", () =>
+    service.stop() ? t("cli.kill.serviceUnloaded") : t("cli.kill.serviceNotLoaded"),
+  );
   step("gateway", () => {
     const pid = readLivePid(paths.pidFile);
-    if (pid === undefined) return "no live gateway process";
+    if (pid === undefined) return t("cli.kill.noGateway");
     process.kill(pid, "SIGKILL");
-    return `gateway killed (pid ${pid})`;
+    return t("cli.kill.gatewayKilled", { pid });
   });
   step("runs", () =>
     withDb(paths, (db) => {
@@ -104,7 +107,7 @@ export function kill({ paths, service }: ControlContext): KillReport {
 export function resume({ paths }: ControlContext): string {
   rmSync(paths.stopFile, { force: true });
   withDb(paths, (db) => setPaused(db, false));
-  return "emergency stop cleared, queue resumed; run `achords start` to start the gateway";
+  return t("cli.resume.done");
 }
 
 export interface Status {
