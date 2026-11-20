@@ -167,5 +167,14 @@
   "progress.minutesLeft": "~{n} min",
   "progress.left": "{time} left",
   "progress.running": "Running now",
-  "progress.steps": "{done}/{total}"
+  "progress.steps": "{done}/{total}",
+  "usage.warn": "Heads-up: {provider} {window} is at {percent}% ({resets}). Agents stop when it is used up.",
+  "usage.window.five_hour": "5-hour window",
+  "usage.window.seven_day": "7-day window",
+  "usage.resetsIn": "resets in {h}h {m}m",
+  "nav.usage": "Usage",
+  "usage.help": "Subscription windows as the Claude CLI reports them after every run. You get a note in your thread at 80% and 95%.",
+  "usage.empty": "No run has reported its quota yet.",
+  "usage.updated": "updated {ago}",
+  "usage.spentToday": "API-equivalent cost of today's runs: ${usd} (on a subscription this is not billed; it shows how much work was done)."
 }

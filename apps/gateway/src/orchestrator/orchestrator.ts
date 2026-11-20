@@ -34,6 +34,7 @@ import {
   placeCard,
   type Room,
   recordTurn,
+  recordUsageWindows,
   remainingBudget,
   roomsOf,
   type Sensitivity,
@@ -106,6 +107,8 @@ export interface OrchestratorDeps {
   /** Long-term memory (ADR-0008); optional so the hub works without it. */
   memory?: Memory;
   embedder?: Embedder;
+  /** Tells the owner something outside a task (e.g. a quota warning): Telegram + web thread. */
+  notify?: (text: string) => void;
   /** The hub's own MCP server for agent runs (ADR-0029); `url` is set once the API listens. */
   hub?: { url: string; tokens: RunTokens; serverEntry: string };
 }
@@ -181,6 +184,8 @@ export const MAX_DELEGATION_DEPTH = 3;
 export const MAX_CHILDREN_PER_TASK = 5;
 export const MAX_WORKERS_PER_TASK = 3;
 export const MAX_ROOM_PARTICIPANTS = 3;
+// Quota warnings to the owner, once per window and level (step 6).
+const USAGE_WARN_LEVELS = [0.8, 0.95];
 // The owner's live bar shows % done from this checklist (Claude Code's TodoWrite tool).
 const PROGRESS_HINT =
   "For work with more than one step, keep a short checklist with the TodoWrite tool and update it as you go; the owner sees your progress from it.";
@@ -448,6 +453,36 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       caller: room.openerAgentId,
       roomId: room.id,
     });
+
+  /**
+   * Stores the quota windows a run reported and warns the owner once per window and level
+   * (80%, 95%); a new window (later reset time) can warn again.
+   */
+  const recordUsage = (
+    provider: string,
+    windows: { kind: string; utilization: number; resetsAt: number; status: string }[],
+  ) => {
+    recordUsageWindows(db, provider, windows);
+    for (const w of windows) {
+      const level = [...USAGE_WARN_LEVELS].reverse().find((l) => w.utilization >= l);
+      if (!level) continue;
+      const key = `usage_warned:${provider}:${w.kind}:${w.resetsAt}`;
+      if (Number(getSetting(db, key) ?? 0) >= level) continue;
+      setSetting(db, key, String(level));
+      const minutes = Math.max(0, Math.round((w.resetsAt - Date.now()) / 60_000));
+      deps.notify?.(
+        t("usage.warn", {
+          provider,
+          window:
+            t(`usage.window.${w.kind}`) === `usage.window.${w.kind}`
+              ? w.kind
+              : t(`usage.window.${w.kind}`),
+          percent: Math.round(w.utilization * 100),
+          resets: t("usage.resetsIn", { h: Math.floor(minutes / 60), m: minutes % 60 }),
+        }),
+      );
+    }
+  };
 
   const orchestrator: Orchestrator = {
     openRoom(from, request) {
@@ -788,7 +823,25 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
         const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
         // Structured output is an internal tool call, so allow a few turns.
-        const res = await provider.run({ ...req, jsonSchema: DECISION_JSON_SCHEMA, maxTurns: 4 });
+        // Recorded like any run: cost, quota windows, `achords kill`, the live bar.
+        const bossRun = startRun(db, { provider: provider.id, model: req.model, agentId: boss.id });
+        const res = await provider
+          .run({
+            ...req,
+            jsonSchema: DECISION_JSON_SCHEMA,
+            maxTurns: 4,
+            onSpawn: (pid) => setRunPid(db, bossRun.id, pid),
+          })
+          .catch((err: Error) => {
+            // Never leave a run "running" (live bar, `achords kill`).
+            finishRun(db, bossRun.id, "failed", { error: err.message });
+            throw err;
+          });
+        finishRun(db, bossRun.id, res.ok ? "succeeded" : "failed", {
+          ...(res.error ? { error: res.error } : {}),
+          ...(res.usage.costUsd !== null ? { costUsd: res.usage.costUsd } : {}),
+        });
+        recordUsage(provider.id, res.windows);
         if (res.stopReason === "unavailable") {
           throw new Error("the local model is not available right now (is Ollama running?)");
         }
@@ -1005,8 +1058,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         res.ok ? "succeeded" : res.stopReason === "cancelled" ? "cancelled" : "failed",
         {
           ...(res.error ? { error: res.error } : {}),
+          ...(res.usage.costUsd !== null ? { costUsd: res.usage.costUsd } : {}),
         },
       );
+      recordUsage(built.provider.id, res.windows);
       addSpend(db, rootId, res.usage.costUsd ?? 0);
       if (res.stopReason === "unavailable") {
         // Fail-closed: wait for the backend (e.g. local model server), never fall back.

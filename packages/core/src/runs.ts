@@ -74,15 +74,15 @@ export function finishRun(
   db: Db,
   id: string,
   status: Exclude<RunStatus, "running">,
-  info: { exitCode?: number; error?: string },
+  info: { exitCode?: number; error?: string; costUsd?: number },
   now = Date.now(),
 ): boolean {
   const r = db
     .prepare(
-      `UPDATE runs SET status = ?, exit_code = ?, error = ?, ended_at = ?
+      `UPDATE runs SET status = ?, exit_code = ?, error = ?, cost_usd = ?, ended_at = ?
        WHERE id = ? AND status = 'running'`,
     )
-    .run(status, info.exitCode ?? null, info.error ?? null, now, id);
+    .run(status, info.exitCode ?? null, info.error ?? null, info.costUsd ?? null, now, id);
   return r.changes === 1;
 }
 

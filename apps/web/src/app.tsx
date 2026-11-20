@@ -4,6 +4,7 @@ import {
   CircleCheck,
   Columns3,
   FolderKanban,
+  Gauge,
   Menu,
   MessageSquare,
   Plus,
@@ -24,6 +25,7 @@ import { LiveBar } from "./views/LiveBar.tsx";
 import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
 import { Rooms } from "./views/Rooms.tsx";
+import { Usage } from "./views/Usage.tsx";
 import { Vault } from "./views/Vault.tsx";
 
 /** Hash routes: #/chat/<threadId>, #/kanban, #/projects, #/agents, #/settings/<section>. */
@@ -95,6 +97,7 @@ export function App() {
         {section === "kanban" && <Kanban />}
         {section === "agents" && <Agents />}
         {section === "projects" && <Projects />}
+        {section === "usage" && <Usage />}
         {section === "settings" && sub === "vault" && <Vault />}
         {section === "settings" && sub === "rooms" && <Rooms />}
         {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
@@ -174,6 +177,10 @@ function Sidebar(props: {
       <a class={`nav ${section === "agents" ? "active" : ""}`} href="#/agents">
         <Bot class="icon" />
         {t("nav.agents")}
+      </a>
+      <a class={`nav ${section === "usage" ? "active" : ""}`} href="#/usage">
+        <Gauge class="icon" />
+        {t("nav.usage")}
       </a>
       <Group
         icon={<SettingsIcon class="icon" />}

@@ -15,3 +15,4 @@ export * from "./rooms.ts";
 export * from "./runs.ts";
 export * from "./settings.ts";
 export * from "./threads.ts";
+export * from "./usage.ts";
