@@ -9,6 +9,7 @@ import {
   loadCatalog,
   publishMode,
   scopeRefusal,
+  scopeTargets,
   secretRefs,
 } from "./catalog.ts";
 import { parseManifest } from "./manifest.ts";
@@ -222,5 +223,24 @@ describe("publish mode (ADR-0037)", () => {
     expect(publishMode(agent, "wordpress", { publish: "review" })).toBe("review");
     expect(publishMode(agent, "wordpress", { publish: "off" })).toBe("off");
     expect(publishMode(agent, "meta", {})).toBe("review");
+  });
+});
+
+describe("scope targets from account channels", () => {
+  it("reads the entry's own channel by default, or the listed channels", () => {
+    const { seed, owner } = dirs();
+    writeFileSync(
+      join(owner, "m.yaml"),
+      "id: meta\nname: M\ncommand: npx\nscope:\n  args: [page_id]\n  channels: [facebook, instagram]\n",
+    );
+    writeFileSync(
+      join(owner, "g.yaml"),
+      "id: ga4\nname: G\ncommand: uvx\nscope:\n  args: [property_id]\n",
+    );
+    const c = loadCatalog(seed, owner);
+    const accounts = { facebook: ["1"], instagram: ["2", "@handle"], ga4: ["9"] };
+    expect(scopeTargets(c.get("meta") as never, accounts)).toEqual(["1", "2", "@handle"]);
+    expect(scopeTargets(c.get("ga4") as never, accounts)).toEqual(["9"]);
+    expect(scopeTargets(c.get("ga4") as never, undefined)).toEqual([]);
   });
 });

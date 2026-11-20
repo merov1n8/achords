@@ -15,6 +15,7 @@ export {
   type PublishMode,
   publishMode,
   scopeRefusal,
+  scopeTargets,
   secretRefs,
 } from "./catalog.ts";
 export * from "./check.ts";

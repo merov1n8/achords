@@ -3,7 +3,8 @@ import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
-import type { Agent, Project } from "../types.ts";
+import type { Agent, Project, SecretStatus } from "../types.ts";
+import { SecretInput } from "./SecretInput.tsx";
 
 export function Projects() {
   const projects = usePoll(() => api<Project[]>("/api/projects"), 15000);
@@ -147,8 +148,8 @@ const CHANNELS = [
   { id: "search-console", label: t("projects.channel.searchConsole") },
   { id: "google-ads", label: t("projects.channel.googleAds") },
   { id: "meta-ads", label: t("projects.channel.metaAds") },
-  { id: "facebook", label: "Facebook" },
-  { id: "instagram", label: "Instagram" },
+  { id: "facebook", label: t("projects.channel.facebook") },
+  { id: "instagram", label: t("projects.channel.instagram") },
   { id: "tiktok", label: "TikTok" },
   { id: "youtube", label: "YouTube" },
   { id: "linkedin", label: "LinkedIn" },
@@ -220,6 +221,38 @@ function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }) {
         </button>
       </div>
       <span class="muted small">{t("projects.accountsHelp")}</span>
+    </div>
+  );
+}
+
+/** Per-project WordPress credentials (ADR-0034): written to the vault, never read back. */
+function WordPressConnection(props: { slug: string }) {
+  const secrets = usePoll(() => api<SecretStatus[]>("/api/vault"), 30000);
+  const isSet = (id: string) => secrets.data?.some((s) => s.id === id && s.set) ?? false;
+  const field = (
+    part: "url" | "user" | "password",
+    label: string,
+    type: "url" | "text" | "password",
+  ) => {
+    const id = `wordpress-${part}-${props.slug}`;
+    return (
+      <SecretInput
+        key={id}
+        id={id}
+        label={label}
+        type={type}
+        set={isSet(id)}
+        onSaved={secrets.refresh}
+      />
+    );
+  };
+  return (
+    <div class="field">
+      {t("projects.wordpress")}
+      <span class="muted small">{t("projects.wordpressHelp")}</span>
+      {field("url", t("projects.wordpressUrl"), "url")}
+      {field("user", t("projects.wordpressUser"), "text")}
+      {field("password", t("projects.wordpressPassword"), "password")}
     </div>
   );
 }
@@ -299,6 +332,7 @@ function EditProject(props: {
         </datalist>
       </label>
       <Accounts rows={f.rows} onChange={(rows) => setF({ ...f, rows })} />
+      <WordPressConnection slug={props.slug} />
       <label class="field">
         PROJECT.md
         <textarea
