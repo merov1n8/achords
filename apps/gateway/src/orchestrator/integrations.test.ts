@@ -109,7 +109,7 @@ describe("integrations in runs (ADR-0034)", () => {
     orch = createOrchestrator({
       db,
       home,
-      providers: { "cli-claude": p },
+      providers: { "cli-claude": p, "cli-codex": { ...p, id: "cli-codex" } },
       hub: { url: "http://127.0.0.1:7420", tokens: runTokens, serverEntry: "/x/server.ts" },
       integrations: {
         catalog: () => loadCatalog(join(home, "no-seed"), catalogDir),
@@ -459,5 +459,22 @@ describe("integrations in runs (ADR-0034)", () => {
       await give("autopub", "acme");
       expect(launches[1]?.publish?.mode).toBe("auto");
     });
+  });
+
+  it("an OpenAI (codex) run gets no MCP tools yet and is told so (ADR-0040)", async () => {
+    mkdirSync(join(home, "agents", "oai"), { recursive: true });
+    writeFileSync(
+      join(home, "agents", "oai", "agent.yaml"),
+      "id: oai\nname: oai\nrole: oai\nworkspace: web-clients\nmodels:\n  default: cli-codex/gpt-6-astra\n  allowed: [cli-codex/gpt-6-astra, cli-claude/sonnet]\ntools: [Read]\nmcp: [wp]\n",
+    );
+    orch.syncAgents();
+    const task = await give("oai", "acme");
+    expect(task.status).toBe("done");
+    expect(seen[0]?.req.model).toBe("gpt-6-astra");
+    expect(seen[0]?.req.mcpConfigPath).toBeUndefined();
+    expect(seen[0]?.req.prompt).toMatch(
+      /OpenAI model without achords tools[\s\S]*\(wp are left out\)/,
+    );
+    expect(resolved).toEqual([]); // no credentials were even resolved
   });
 });
