@@ -69,3 +69,23 @@ export function createProject(
   );
   return loadProjects(projectsDir).get(p.slug) as Project;
 }
+
+/** Changes a project's name, workspace or PROJECT.md; the slug (its folder) and files/ stay. */
+export function updateProject(
+  projectsDir: string,
+  slug: string,
+  patch: { name?: string; workspace?: string; doc?: string },
+): Project {
+  const cur = loadProjects(projectsDir).get(slug);
+  if (!cur) throw new Error(`no project ${slug}`);
+  const data = projectSchema.parse({
+    name: (patch.name ?? cur.name).trim(),
+    workspace: (patch.workspace ?? cur.workspace).trim(),
+  });
+  writeFileSync(
+    join(cur.dir, "project.yaml"),
+    `name: ${JSON.stringify(data.name)}\nworkspace: ${data.workspace}\n`,
+  );
+  if (patch.doc !== undefined) writeFileSync(join(cur.dir, "PROJECT.md"), patch.doc);
+  return loadProjects(projectsDir).get(slug) as Project;
+}

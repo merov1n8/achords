@@ -38,6 +38,7 @@ import {
   loadProjects,
   updateManifestModels,
   updateManifestName,
+  updateProject,
 } from "@achords/policy";
 import type { Vault } from "@achords/secrets";
 import type { RunTokens } from "../mcp/tokens.ts";
@@ -389,6 +390,42 @@ export function createApiHandler(deps: ApiDeps) {
           const msg = (err as Error).message;
           throw new HttpError(/already exists/.test(msg) ? 409 : 400, msg);
         }
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})$/,
+      ({ params }) => {
+        const p = loadProjects(projectsDirOrThrow()).get(params[0] as string);
+        if (!p) throw new HttpError(404, "no such project");
+        return {
+          slug: p.slug,
+          name: p.name,
+          workspace: p.workspace,
+          dir: p.dir,
+          filesDir: p.filesDir,
+          doc: p.doc,
+        };
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})$/,
+      async ({ params, body }) => {
+        const slug = params[0] as string;
+        if (!loadProjects(projectsDirOrThrow()).has(slug))
+          throw new HttpError(404, "no such project");
+        const b = await body();
+        const p = attempt(() =>
+          updateProject(projectsDirOrThrow(), slug, {
+            ...(b.name !== undefined ? { name: str(b.name, "name", 100) } : {}),
+            ...(b.workspace !== undefined ? { workspace: str(b.workspace, "workspace", 64) } : {}),
+            ...(b.doc !== undefined
+              ? { doc: typeof b.doc === "string" ? b.doc.slice(0, 50_000) : "" }
+              : {}),
+          }),
+        );
+        return { slug: p.slug, name: p.name, workspace: p.workspace };
       },
     ],
     [
