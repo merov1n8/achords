@@ -207,8 +207,9 @@ describe("inter-agent delegation (ADR-0029)", () => {
     root("a");
     await drain();
     const b = calls.find((c) => c.agent === "b")?.req;
-    expect(b?.tools).toEqual([]);
-    expect(b?.allowedTools).toEqual([]);
+    // Only the progress checklist (no access to files, shell or network); nothing from the caller.
+    expect(b?.tools).toEqual(["TodoWrite"]);
+    expect(b?.allowedTools).toEqual(["TodoWrite"]);
     expect(b?.model).toBe("sonnet");
   });
 

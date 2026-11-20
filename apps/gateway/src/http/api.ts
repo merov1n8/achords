@@ -15,6 +15,7 @@ import {
   listSessions,
   listTasks,
   listThreads,
+  liveProgress,
   redeemPairingCode,
   revokeSession,
   setThreadProject,
@@ -265,6 +266,8 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Live run progress (step 5b), polled by the web's bottom bar.
+    ["GET", /^\/api\/runs\/live$/, () => liveProgress(db)],
     // Agent rooms (ADR-0032): hidden from chats; the owner can read them here.
     ["GET", /^\/api\/rooms$/, () => listRooms(db)],
     [

@@ -162,5 +162,10 @@
   "rooms.turns": "Turns",
   "rooms.open": "open",
   "rooms.closed": "closed",
-  "rooms.read": "Read"
+  "rooms.read": "Read",
+  "progress.lessThanMinute": "<1 min",
+  "progress.minutesLeft": "~{n} min",
+  "progress.left": "{time} left",
+  "progress.running": "Running now",
+  "progress.steps": "{done}/{total}"
 }

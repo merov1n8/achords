@@ -38,6 +38,7 @@ import {
   roomsOf,
   type Sensitivity,
   setRunPid,
+  setRunProgress,
   setSetting,
   startRun,
   type Task,
@@ -180,6 +181,9 @@ export const MAX_DELEGATION_DEPTH = 3;
 export const MAX_CHILDREN_PER_TASK = 5;
 export const MAX_WORKERS_PER_TASK = 3;
 export const MAX_ROOM_PARTICIPANTS = 3;
+// The owner's live bar shows % done from this checklist (Claude Code's TodoWrite tool).
+const PROGRESS_HINT =
+  "For work with more than one step, keep a short checklist with the TodoWrite tool and update it as you go; the owner sees your progress from it.";
 export const MAX_ROOM_ROUNDS = 3;
 // Discussion turns only read: never write, run commands or use hub tools (ADR-0032).
 const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
@@ -971,6 +975,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       hubRun = { file, revoke };
     }
 
+    // Live progress (step 5b): the agent keeps its own checklist; discussion turns are too short.
+    if (!task.roomId) {
+      built.req.tools = [...built.req.tools, "TodoWrite"];
+      built.req.allowedTools = [...built.req.allowedTools, "TodoWrite"];
+      built.req.appendSystemPrompt =
+        `${built.req.appendSystemPrompt ?? ""}\n\n${PROGRESS_HINT}`.trim();
+    }
     const run = startRun(db, {
       provider: built.provider.id,
       model: built.req.model,
@@ -986,6 +997,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ...built.req,
         ...(signal ? { signal } : {}),
         onSpawn: (pid) => setRunPid(db, run.id, pid),
+        onProgress: (p) => setRunProgress(db, run.id, p),
       });
       finishRun(
         db,

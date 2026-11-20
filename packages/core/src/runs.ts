@@ -85,3 +85,51 @@ export function finishRun(
     .run(status, info.exitCode ?? null, info.error ?? null, now, id);
   return r.changes === 1;
 }
+
+/** Latest checklist state of a running run (done of total, the step in progress). */
+export function setRunProgress(
+  db: Db,
+  id: string,
+  p: { done: number; total: number; current?: string },
+  now = Date.now(),
+): void {
+  db.prepare(
+    `UPDATE runs SET progress_done = ?, progress_total = ?, progress_label = ?, progress_at = ?
+     WHERE id = ? AND status = 'running'`,
+  ).run(p.done, p.total, p.current ?? null, now, id);
+}
+
+export interface LiveProgress {
+  runId: string;
+  taskId: string | null;
+  agentId: string | null;
+  title: string | null;
+  startedAt: number;
+  done: number | null;
+  total: number | null;
+  current: string | null;
+  progressAt: number | null;
+}
+
+/** What is running right now, with progress, for the web's live bar. */
+export function liveProgress(db: Db): LiveProgress[] {
+  return db
+    .prepare(
+      `SELECT r.id, r.task_id, r.agent_id, t.title, r.started_at, r.progress_done,
+              r.progress_total, r.progress_label, r.progress_at
+       FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+       WHERE r.status = 'running' ORDER BY r.started_at, r.rowid`,
+    )
+    .all()
+    .map((r) => ({
+      runId: r.id as string,
+      taskId: r.task_id as string | null,
+      agentId: r.agent_id as string | null,
+      title: r.title as string | null,
+      startedAt: Number(r.started_at),
+      done: r.progress_done === null ? null : Number(r.progress_done),
+      total: r.progress_total === null ? null : Number(r.progress_total),
+      current: r.progress_label as string | null,
+      progressAt: r.progress_at === null ? null : Number(r.progress_at),
+    }));
+}
