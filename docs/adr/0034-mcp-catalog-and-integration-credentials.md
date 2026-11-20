@@ -13,4 +13,6 @@ Status: Accepted (2026-11-20)
   - **Credential files and builtin servers.** Servers that only read credentials from a file (Google) get `files:`: the launcher writes a private JSON file (0600, private temp folder) with the resolved fields, passes its path in the named variable and deletes it when the server exits; agents cannot read it because their file tools are limited to their own folders. Small servers shipped with achords (`builtin:`, e.g. WordPress over the core REST API, so client sites need no plugin) run on the gateway's Node.
   - **Ecosystem first.** Where a maintained MCP server exists it is used, pinned and reviewed; thin own servers only where none is trustworthy.
 
+- Amendment (2026-11-20): a value `{account:<channel>}` takes a non-secret setting (e.g. a WordPress site address) from the project's accounts; secrets stay `vault:` references. Secret values are redacted from every message, so addresses that people need to read must not live in the vault.
+
 - Consequences: Adding an integration is a YAML file plus vault secrets, no code. Network allow-listing of MCP servers is not enforced yet (no containers, Phase 3 decision C); the catalog's `hosts` document the intent. Write tools stay unusable until step 3 lands.

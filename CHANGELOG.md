@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- The live progress bar no longer slides over the chat box while an agent is working.
+- WordPress links were shown as [REDACTED]: the site address is not a secret, so it now comes from the project's accounts (channel `wordpress`) instead of the vault.
 - **Security:** agent file and fetch permissions are now enforced by the CLI. A manifest granting `Read`/`Edit`/`Write`/`WebFetch` used to allow them everywhere (any file of the user, any web host), because a bare tool name in `--allowedTools` is unscoped. Rules are now scoped to the agent's `fs.read`/`fs.write` folders (its working folder when none) and its `network.allow` hosts; the rest is refused. Verified against the real CLI.
 
 - The web session cookie is named per gateway port (`achords_session_<port>`). Browsers share cookies across ports of one host, so pairing a second gateway on 127.0.0.1 (a test instance) silently replaced the owner's session and brought back the pairing screen. Existing browsers need to pair once more after this update.
@@ -32,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Publishing messages are written for people: an approval request shows the post itself (title, text without HTML, other fields as plain lines) instead of JSON, the result is one sentence with a link ("Saved as a draft. Open it: …"), and a task that sent something for approval ends with a single line instead of repeating it.
 - Credentials from the web: a project's WordPress connection (address, user, application password) can be set in the project editor, and missing integration secrets (e.g. the Meta token) right on Settings → Integrations. Values go to the vault and are never shown again.
 - Meta is limited per client like Google: the page and Instagram account IDs in a project's facebook and instagram accounts are the only ones agents can use there.
 - Publishing with approval: agents can now use the write tools of client integrations (WordPress drafts, Meta posts, Search Console submissions). By default every such action is posted in the conversation with Approve / Reject and runs only as approved; `publish_mode` in agent.yaml can set a channel to auto (runs and is reported), and `publish: review` or `publish: off` in a project's project.yaml can forbid it for that client.
