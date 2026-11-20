@@ -30,3 +30,39 @@ export function createRunTokens(): RunTokens {
     resolve: (token) => live.get(sha256(token)),
   };
 }
+
+/** What the launcher starts: the integration's MCP server with its resolved environment. */
+export interface McpLaunch {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+export interface McpTickets {
+  issue(launch: McpLaunch): { ticket: string; revoke: () => void };
+  /** Single use: the launch (with secrets) is handed out once, then the ticket is dead. */
+  redeem(ticket: string): McpLaunch | undefined;
+}
+
+/**
+ * One-time tickets for integration MCP servers (ADR-0034). The per-run config file only carries a
+ * ticket; the launcher trades it for the environment once, so the file never holds secrets and a
+ * ticket read from it later is useless. In memory only.
+ */
+export function createMcpTickets(): McpTickets {
+  const live = new Map<string, McpLaunch>();
+  return {
+    issue(launch) {
+      const ticket = randomBytes(32).toString("base64url");
+      const key = sha256(ticket);
+      live.set(key, launch);
+      return { ticket, revoke: () => live.delete(key) };
+    },
+    redeem(ticket) {
+      const key = sha256(ticket);
+      const launch = live.get(key);
+      live.delete(key);
+      return launch;
+    },
+  };
+}

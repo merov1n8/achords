@@ -33,3 +33,4 @@
 - [ADR-0031: Projects under workspaces (client preferences and working folders)](0031-projects-under-workspaces.md)
 - [ADR-0032: Agent rooms (bounded discussions between agents, hidden by default)](0032-agent-rooms.md)
 - [ADR-0033: Scheduler with cron rules in SQLite, run by the gateway tick](0033-scheduler.md)
+- [ADR-0034: MCP catalog and integration credentials](0034-mcp-catalog-and-integration-credentials.md)
