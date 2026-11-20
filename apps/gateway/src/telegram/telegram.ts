@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   AuthError,
+  appendMessage,
   createThread,
   type Db,
   getSetting,
@@ -49,6 +50,8 @@ export interface TelegramChannel {
   pollOnce(signal?: AbortSignal): Promise<void>;
   /** Sends agent messages from the owner's thread that were not delivered yet. */
   deliver(): Promise<void>;
+  /** A note for the owner (e.g. a quota warning) in the owner's thread; deliver() sends it. */
+  notify(text: string): void;
 }
 
 interface Update {
@@ -284,6 +287,16 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
         if (u.callback_query) await handlePress(u.callback_query);
         else await handle(u);
       }
+    },
+
+    notify(text) {
+      appendMessage(db, {
+        threadId: currentThread(),
+        role: "agent",
+        author: "system",
+        channel: "system",
+        content: text,
+      });
     },
 
     async deliver() {

@@ -242,6 +242,19 @@ describe("telegram channel", () => {
     expect(tg.sent.at(-1)?.text).toMatch(/local-only/);
   });
 
+  it("notify puts a note into the owner's thread; it is delivered like any agent message", async () => {
+    await pairOwner();
+    tg.sent.length = 0;
+    channel.notify("Heads-up: quota at 82%");
+    await channel.deliver();
+    expect(tg.sent).toEqual([{ chat_id: OWNER, text: "Heads-up: quota at 82%" }]);
+    const threadId = getSetting(db, "telegram.thread_id") as string;
+    expect(listMessages(db, threadId).at(-1)).toMatchObject({
+      author: "system",
+      content: "Heads-up: quota at 82%",
+    });
+  });
+
   it("/project shows, sets and clears the current thread's project", async () => {
     createProject(join(home, "projects"), {
       slug: "acme",

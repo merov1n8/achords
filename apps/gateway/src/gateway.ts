@@ -1,7 +1,14 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { homePaths, openCoreDatabase, readLivePid, setSetting } from "@achords/core";
+import {
+  appendMessage,
+  homePaths,
+  listThreads,
+  openCoreDatabase,
+  readLivePid,
+  setSetting,
+} from "@achords/core";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
 import { cliClaude, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
@@ -78,6 +85,21 @@ export function runGateway(home: string): Promise<number> {
       ),
     },
     redact,
+    // Quota warnings etc.: the owner's Telegram thread (web shows it too), else the latest chat.
+    notify: (text) => {
+      log(`notify: ${text}`);
+      if (telegram) return telegram.notify(text);
+      const latest = listThreads(db, 1)[0];
+      if (latest) {
+        appendMessage(db, {
+          threadId: latest.id,
+          role: "agent",
+          author: "system",
+          channel: "system",
+          content: text,
+        });
+      }
+    },
   });
   orchestrator.syncAgents();
 
