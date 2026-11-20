@@ -58,10 +58,13 @@ import { t } from "@achords/i18n";
 import type { Embedder, Memory } from "@achords/memory";
 import {
   agentSummary,
+  allowedIntegrationTools,
+  type Catalog,
   checkFs,
   checkModel,
   checkMove,
   DEFAULT_WORKFLOW_YAML,
+  grantedIntegrations,
   isLocalModel,
   loadAgents,
   loadProjects,
@@ -74,7 +77,7 @@ import {
 } from "@achords/policy";
 import type { ModelProvider, RunRequest } from "@achords/providers";
 import { z } from "zod";
-import type { RunTokens } from "../mcp/tokens.ts";
+import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
 
 const BOSS_ID = "boss";
 const WORKER_ID = "gateway";
@@ -119,6 +122,16 @@ export interface OrchestratorDeps {
   notify?: (text: string) => void;
   /** The hub's own MCP server for agent runs (ADR-0029); `url` is set once the API listens. */
   hub?: { url: string; tokens: RunTokens; serverEntry: string };
+  /**
+   * Integration MCP servers (ADR-0034), started through the launcher with a one-time ticket.
+   * `resolveSecret` reads a `vault:<id>` reference for an actor (audited); needs `hub` for its URL.
+   */
+  integrations?: {
+    catalog: () => Catalog;
+    tickets: McpTickets;
+    launcherEntry: string;
+    resolveSecret: (ref: string, actor: string) => string;
+  };
 }
 
 export interface Orchestrator {
@@ -961,6 +974,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let manifest: Manifest | undefined;
     let project: Project | undefined;
     let delegates: Manifest[] = [];
+    // Integration servers of this run, environments resolved (secrets included, in memory only).
+    let launches: { id: string; launch: McpLaunch; tools: string[] }[] = [];
     try {
       const all = agents();
       manifest = task.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
@@ -988,6 +1003,31 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           delegation: { can_delegate_to: [], accepts_from: [] },
           ...(tools.includes("Bash") && manifest.shell ? { shell: manifest.shell } : {}),
         };
+      }
+      // Integrations (ADR-0034): not for discussion turns or workers, deny by default otherwise.
+      if (manifest.mcp.length && !task.roomId && !task.workerSpec) {
+        if (!deps.integrations || !deps.hub) throw new Error("integrations are not available");
+        const granted = grantedIntegrations(manifest, deps.integrations.catalog());
+        if (!granted.ok) throw new Error(granted.reason);
+        const { resolveSecret } = deps.integrations;
+        const agentId = manifest.id;
+        launches = granted.entries.map((entry) => {
+          const env = Object.fromEntries(
+            Object.entries(entry.env).map(([key, value]) => {
+              if (!value.startsWith("vault:")) return [key, value];
+              if (value.includes("{project}") && !project) {
+                throw new Error(`integration ${entry.id} needs a project`);
+              }
+              const ref = project ? value.replaceAll("{project}", project.slug) : value;
+              return [key, resolveSecret(ref, `agent:${agentId}/mcp:${entry.id}`)];
+            }),
+          );
+          return {
+            id: entry.id,
+            launch: { command: entry.command, args: entry.args, env },
+            tools: allowedIntegrationTools(entry),
+          };
+        });
       }
       delegates = manifest.delegation.can_delegate_to
         .map((id) => all.get(id))
@@ -1047,8 +1087,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return;
     }
 
-    // Hub tools only for agents that may delegate: a private config file for this run only.
+    // Hub tools and integrations: one private MCP config file for this run only.
     let hubRun: { file: string; revoke: () => void } | undefined;
+    const servers: Record<string, unknown> = {};
+    const granted: string[] = [];
+    const revokers: (() => void)[] = [];
     // Every run may ask the owner; only agents allowed to delegate get `delegate` too.
     // Workers (depth 1) get no hub tools at all.
     if (deps.hub && !task.workerSpec && !task.roomId) {
@@ -1060,29 +1103,44 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ...(manifest.tools.length ? ["spawn_worker"] : []),
       ];
       const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id, hubTools);
+      revokers.push(revoke);
+      servers.achords = {
+        command: process.execPath,
+        args: ["--disable-warning=ExperimentalWarning", deps.hub.serverEntry],
+        env: {
+          ACHORDS_HUB_URL: deps.hub.url,
+          ACHORDS_RUN_TOKEN: token,
+          ACHORDS_TOOLS: hubTools.join(","),
+        },
+      };
+      granted.push(...hubTools.map((tool) => `mcp__achords__${tool}`));
+    }
+    if (deps.hub && deps.integrations) {
+      for (const l of launches) {
+        // Only a ticket goes into the file; the launcher trades it for the environment once.
+        const { ticket, revoke } = deps.integrations.tickets.issue(l.launch);
+        revokers.push(revoke);
+        servers[l.id] = {
+          command: process.execPath,
+          args: ["--disable-warning=ExperimentalWarning", deps.integrations.launcherEntry],
+          env: { ACHORDS_HUB_URL: deps.hub.url, ACHORDS_MCP_TICKET: ticket },
+        };
+        granted.push(...l.tools);
+      }
+    }
+    if (Object.keys(servers).length) {
       const runDir = join(home, "run");
       mkdirSync(runDir, { recursive: true, mode: 0o700 });
       const file = join(runDir, `mcp-${randomUUID()}.json`);
-      const config = {
-        mcpServers: {
-          achords: {
-            command: process.execPath,
-            args: ["--disable-warning=ExperimentalWarning", deps.hub.serverEntry],
-            env: {
-              ACHORDS_HUB_URL: deps.hub.url,
-              ACHORDS_RUN_TOKEN: token,
-              ACHORDS_TOOLS: hubTools.join(","),
-            },
-          },
+      writeFileSync(file, JSON.stringify({ mcpServers: servers }), { mode: 0o600 });
+      built.req.mcpConfigPath = file;
+      built.req.allowedTools = [...built.req.allowedTools, ...granted];
+      hubRun = {
+        file,
+        revoke: () => {
+          for (const r of revokers) r();
         },
       };
-      writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
-      built.req.mcpConfigPath = file;
-      built.req.allowedTools = [
-        ...built.req.allowedTools,
-        ...hubTools.map((t) => `mcp__achords__${t}`),
-      ];
-      hubRun = { file, revoke };
     }
 
     // Live progress (step 5b): the agent keeps its own checklist; discussion turns are too short.

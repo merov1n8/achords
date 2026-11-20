@@ -12,10 +12,11 @@ import {
   setSetting,
 } from "@achords/core";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
+import { loadCatalog } from "@achords/policy";
 import { cliClaude, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
-import { createRunTokens } from "./mcp/tokens.ts";
+import { createMcpTickets, createRunTokens } from "./mcp/tokens.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents, seedSchedules } from "./orchestrator/seed.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
@@ -28,6 +29,8 @@ const SHUTDOWN_WAIT_MS = 5000;
 const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
 const SEED_SCHEDULES = new URL("../../../seed/schedules/", import.meta.url).pathname;
 const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
+const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
+const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
 const WEB_DIST = new URL("../../web/dist/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
 const TELEGRAM_TOKEN_ID = "telegram.bot-token";
@@ -73,11 +76,19 @@ export function runGateway(home: string): Promise<number> {
   // The hub MCP server's URL is known once the API listens (port 0 in tests).
   const runTokens = createRunTokens();
   const hub = { url: "", tokens: runTokens, serverEntry: HUB_MCP_SERVER };
+  const mcpTickets = createMcpTickets();
 
   const orchestrator = createOrchestrator({
     db,
     home,
     hub,
+    integrations: {
+      // Read per run: catalog edits apply to the next run without a restart.
+      catalog: () => loadCatalog(SEED_CATALOG, join(home, "catalog")),
+      tickets: mcpTickets,
+      launcherEntry: MCP_LAUNCHER,
+      resolveSecret: (ref, actor) => getVault().resolveRef(ref, actor),
+    },
     memory,
     embedder,
     providers: {
@@ -214,6 +225,7 @@ export function runGateway(home: string): Promise<number> {
           orchestrator,
           vault: getVault,
           runTokens,
+          mcpTickets,
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
           transcriber,

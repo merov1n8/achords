@@ -41,7 +41,7 @@ import {
   updateProject,
 } from "@achords/policy";
 import type { Vault } from "@achords/secrets";
-import type { RunTokens } from "../mcp/tokens.ts";
+import type { McpTickets, RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { Transcriber } from "../voice/transcribe.ts";
 import { serveStatic } from "./static.ts";
@@ -81,6 +81,8 @@ export interface ApiDeps {
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
+  /** One-time tickets of integration MCP servers (ADR-0034), redeemed by the launcher. */
+  mcpTickets?: McpTickets;
   /** Opened lazily: the master key is only fetched when the vault is actually used. */
   vault?: () => Vault;
   /** Exact Host header values accepted (DNS-rebinding protection). */
@@ -727,6 +729,16 @@ export function createApiHandler(deps: ApiDeps) {
       if (!path.startsWith("/api/")) {
         if (mutating || !deps.staticDir) throw new HttpError(404, "not found");
         serveStatic(deps.staticDir, path, res);
+        return;
+      }
+      // The integration launcher trades its one-time ticket for the server's environment.
+      if (method === "POST" && path === "/api/agent/mcp-env") {
+        const auth = req.headers.authorization ?? "";
+        const launch = auth.startsWith("Bearer ")
+          ? deps.mcpTickets?.redeem(auth.slice(7))
+          : undefined;
+        if (!launch) throw new HttpError(401, "invalid ticket");
+        send(res, 200, launch);
         return;
       }
       // Agent runs (not browsers): authenticated by their run token only; no cookie, no CSRF.

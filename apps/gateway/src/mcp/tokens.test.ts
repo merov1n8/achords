@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRunTokens } from "./tokens.ts";
+import { createMcpTickets, createRunTokens } from "./tokens.ts";
 
 describe("run tokens", () => {
   it("identify the task and agent of a live run and stop working when revoked", () => {
@@ -17,5 +17,19 @@ describe("run tokens", () => {
     a.revoke();
     expect(tokens.resolve(a.token)).toBeUndefined();
     expect(tokens.resolve(b.token)).toBeDefined();
+  });
+});
+
+describe("integration tickets (ADR-0034)", () => {
+  it("hand out the launch exactly once and never after revocation", () => {
+    const tickets = createMcpTickets();
+    const launch = { command: "npx", args: ["x@1"], env: { TOKEN: "s3cret" } };
+    const a = tickets.issue(launch);
+    expect(tickets.redeem(a.ticket)).toEqual(launch);
+    expect(tickets.redeem(a.ticket)).toBeUndefined();
+    const b = tickets.issue(launch);
+    b.revoke();
+    expect(tickets.redeem(b.ticket)).toBeUndefined();
+    expect(tickets.redeem("forged")).toBeUndefined();
   });
 });
