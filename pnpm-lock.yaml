@@ -53,6 +53,9 @@ importers:
       '@achords/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
       zod:
         specifier: ^4.6.7
         version: 4.6.7

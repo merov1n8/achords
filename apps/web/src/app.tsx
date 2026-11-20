@@ -1,5 +1,6 @@
 import {
   Bot,
+  CalendarClock,
   ChevronDown,
   CircleCheck,
   Columns3,
@@ -25,6 +26,7 @@ import { LiveBar } from "./views/LiveBar.tsx";
 import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
 import { Rooms } from "./views/Rooms.tsx";
+import { Schedules } from "./views/Schedules.tsx";
 import { Usage } from "./views/Usage.tsx";
 import { Vault } from "./views/Vault.tsx";
 
@@ -98,6 +100,7 @@ export function App() {
         {section === "agents" && <Agents />}
         {section === "projects" && <Projects />}
         {section === "usage" && <Usage />}
+        {section === "schedules" && <Schedules />}
         {section === "settings" && sub === "vault" && <Vault />}
         {section === "settings" && sub === "rooms" && <Rooms />}
         {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
@@ -177,6 +180,10 @@ function Sidebar(props: {
       <a class={`nav ${section === "agents" ? "active" : ""}`} href="#/agents">
         <Bot class="icon" />
         {t("nav.agents")}
+      </a>
+      <a class={`nav ${section === "schedules" ? "active" : ""}`} href="#/schedules">
+        <CalendarClock class="icon" />
+        {t("nav.schedules")}
       </a>
       <a class={`nav ${section === "usage" ? "active" : ""}`} href="#/usage">
         <Gauge class="icon" />

@@ -14,8 +14,10 @@ import {
   closeRoom,
   complete,
   openRoom as createRoom,
+  createThread,
   type Db,
   defer,
+  dueSchedules,
   enqueueChild,
   enqueueRoot,
   extendLease,
@@ -28,6 +30,7 @@ import {
   isPaused,
   listChildren,
   listMessages,
+  markScheduleRun,
   moveCard,
   nextTurn,
   openRoomsOf,
@@ -41,6 +44,7 @@ import {
   setRunPid,
   setRunProgress,
   setSetting,
+  setThreadProject,
   startRun,
   type Task,
   upsertAgent,
@@ -167,6 +171,11 @@ export interface Orchestrator {
   runAction(data: string): { ok: boolean; message: string };
   /** A workspace's workflow and its permission matrix (read-only web view). */
   workflow(workspace: string): { workflow: Workflow; matrix: ReturnType<typeof permissionMatrix> };
+  /**
+   * Turns due schedules into tasks (ADR-0033), each reported in the schedule's own thread.
+   * Returns how many tasks were started.
+   */
+  runDueSchedules(now?: number): number;
   /** Claims and runs one task. Returns false if there was nothing to do. */
   workOnce(signal?: AbortSignal): Promise<boolean>;
   /**
@@ -870,6 +879,30 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         post(threadId, t("thread.bossError", { reason: (err as Error).message }));
         return "error";
       }
+    },
+
+    runDueSchedules(now = Date.now()) {
+      let started = 0;
+      for (const s of dueSchedules(db, now)) {
+        // Still running from last time: skip this occurrence rather than pile up work.
+        if (s.lastStatus === "queued" || s.lastStatus === "claimed") {
+          markScheduleRun(db, s.id, { taskId: null, threadId: null }, now);
+          continue;
+        }
+        const threadId =
+          s.threadId && getThread(db, s.threadId)
+            ? s.threadId
+            : createThread(db, { title: t("schedule.threadTitle", { name: s.name }) }).id;
+        setThreadProject(db, threadId, s.project);
+        const r = orchestrator.delegate(
+          { from: "boss", threadId },
+          { agent: s.agentId, title: s.title, instructions: s.instructions },
+        );
+        if (r.ok) started++;
+        else post(threadId, t("schedule.refused", { name: s.name, reason: r.reason }));
+        markScheduleRun(db, s.id, { taskId: r.ok ? r.taskId : null, threadId }, now);
+      }
+      return started;
     },
 
     async workOnce(signal) {
