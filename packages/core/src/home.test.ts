@@ -32,6 +32,7 @@ describe("homePaths", () => {
       pidFile: "/h/run/gateway.pid",
       stopFile: "/h/run/STOP",
       logDir: "/h/logs",
+      projectsDir: "/h/projects",
     });
   });
 });

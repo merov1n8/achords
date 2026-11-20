@@ -38,11 +38,14 @@ export interface Task {
   updatedAt: number;
   /** Kanban column (ADR-0030); null = no card of its own (child tasks, helpers). */
   column: string | null;
+  /** Project slug (ADR-0031), inherited by child tasks. */
+  project: string | null;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
   id: r.id as string,
   column: (r.board_column as string | null) ?? null,
+  project: (r.project as string | null) ?? null,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),
@@ -86,14 +89,16 @@ export function enqueue(
     sensitivity?: Task["sensitivity"];
     /** Root tasks only: one budget for the whole delegation chain. */
     budgetUsd?: number;
+    /** Project slug (ADR-0031). */
+    project?: string;
   },
   now = Date.now(),
 ): Task {
   const row = db
     .prepare(
       `INSERT INTO tasks (id, thread_id, parent_id, title, description, priority,
-         assignee_agent_id, max_attempts, sensitivity, budget_usd, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+         assignee_agent_id, max_attempts, sensitivity, budget_usd, project, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
@@ -106,6 +111,7 @@ export function enqueue(
       input.maxAttempts ?? 3,
       input.sensitivity ?? "normal",
       input.budgetUsd ?? null,
+      input.project ?? null,
       now,
       now,
     );

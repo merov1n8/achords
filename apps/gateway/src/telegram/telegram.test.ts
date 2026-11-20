@@ -14,6 +14,7 @@ import {
   listMessages,
   openCoreDatabase,
 } from "@achords/core";
+import { createProject } from "@achords/policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Transcriber } from "../voice/transcribe.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram.ts";
@@ -239,6 +240,31 @@ describe("telegram channel", () => {
     const threadId = getSetting(db, "telegram.thread_id") as string;
     expect(getThread(db, threadId)?.sensitivity).toBe("local-only");
     expect(tg.sent.at(-1)?.text).toMatch(/local-only/);
+  });
+
+  it("/project shows, sets and clears the current thread's project", async () => {
+    createProject(join(home, "projects"), {
+      slug: "acme",
+      name: "Acme shop",
+      workspace: "web-clients",
+    });
+    await pairOwner();
+    tg.sent.length = 0;
+    tg.msg(OWNER, "x");
+    tg.msg(OWNER, "/project");
+    tg.msg(OWNER, "/project acme");
+    tg.msg(OWNER, "/project nope");
+    await channel.pollOnce();
+    const threadId = getSetting(db, "telegram.thread_id") as string;
+    expect(getThread(db, threadId)?.project).toBe("acme");
+    expect(tg.sent.map((s) => s.text)).toEqual([
+      expect.stringMatching(/acme.*Acme shop[\s\S]*Current: none/),
+      expect.stringMatching(/Acme shop \(acme\)/),
+      expect.stringMatching(/No project nope/),
+    ]);
+    tg.msg(OWNER, "/project none");
+    await channel.pollOnce();
+    expect(getThread(db, threadId)?.project).toBeNull();
   });
 
   it("/approve and /reject decide agent proposals, for the owner only", async () => {

@@ -9,6 +9,7 @@ import {
   createThread,
   type Db,
   enqueue,
+  getThread,
   listMessages,
   openCoreDatabase,
   upsertAgent,
@@ -35,12 +36,14 @@ describe("HTTP API", () => {
   const logs: string[] = [];
   let agentsDir: string;
   let runDir: string;
+  let projectsDir: string;
   const heard: number[] = [];
 
   beforeEach(async () => {
     db = openCoreDatabase(":memory:");
     agentsDir = mkdtempSync(join(tmpdir(), "achords-api-agents-"));
     runDir = mkdtempSync(join(tmpdir(), "achords-api-run-"));
+    projectsDir = join(runDir, "projects");
     mkdirSync(join(agentsDir, "boss"));
     writeFileSync(
       join(agentsDir, "boss", "agent.yaml"),
@@ -104,6 +107,7 @@ describe("HTTP API", () => {
         },
         runTokens: tokens,
         agentsDir,
+        projectsDir,
         runDir,
         transcriber: {
           available: () => ({ ok: true }),
@@ -579,6 +583,48 @@ describe("HTTP API", () => {
     });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toMatch(/absolute/);
+  });
+
+  it("projects: list, create, and pick one for a thread", async () => {
+    const { call } = await pair();
+    const created = await call("/api/projects", {
+      method: "POST",
+      body: '{"slug":"acme","name":"Acme shop","workspace":"web-clients"}',
+    });
+    expect(created.status).toBe(201);
+    const list = (await (await call("/api/projects")).json()) as {
+      slug: string;
+      filesDir: string;
+    }[];
+    expect(list).toEqual([
+      expect.objectContaining({ slug: "acme", filesDir: join(projectsDir, "acme", "files") }),
+    ]);
+    expect(
+      (
+        await call("/api/projects", {
+          method: "POST",
+          body: '{"slug":"acme","name":"x","workspace":"w"}',
+        })
+      ).status,
+    ).toBe(409);
+
+    const thread = createThread(db, {});
+    const set = await call(`/api/threads/${thread.id}/project`, {
+      method: "PUT",
+      body: '{"project":"acme"}',
+    });
+    expect(set.status).toBe(200);
+    expect(getThread(db, thread.id)?.project).toBe("acme");
+    expect(
+      (
+        await call(`/api/threads/${thread.id}/project`, {
+          method: "PUT",
+          body: '{"project":"nope"}',
+        })
+      ).status,
+    ).toBe(404);
+    await call(`/api/threads/${thread.id}/project`, { method: "PUT", body: '{"project":null}' });
+    expect(getThread(db, thread.id)?.project).toBeNull();
   });
 
   it("only the owner (paired session + CSRF) decides proposals; agents cannot", async () => {

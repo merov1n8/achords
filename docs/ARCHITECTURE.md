@@ -117,6 +117,8 @@ Default layout, configurable:
 - `studio` (game dev, Unity), `web-clients` (client web work), `shared/marketing`.
   Each workspace has its own memory namespace, MD vault folder, MCP set and secrets scope. Marketing gets read-only access to the others' public material.
 
+- Projects (ADR-0031): a project level under a workspace for client work: `$ACHORDS_HOME/projects/<slug>/` with `project.yaml` (name, workspace), `PROJECT.md` (client preferences, stack, conventions, deploy rules), `files/` (working folder, managed in Finder by the owner) and an optional `workflow.yaml` replacing the workspace's. Threads carry a project (web chat header, Telegram `/project`), delegated tasks and children inherit it. Project runs get `PROJECT.md`; agents of the project's workspace work in `files/` (cwd and write root), others get the text only. Project memory lives in `<workspace>/<slug>`.
+
 ### 4.8 Memory
 
 - **Fast memory**: SQLite (`node:sqlite`, ADR-0022) with FTS5 + `sqlite-vec`. Hybrid retrieval fused with weighted Reciprocal Rank Fusion (semantic ×2; vector hits only within 0.1 cosine of the best, so mere presence earns nothing); trigram keyword index for Hungarian word forms. Separate `memory.db`; without the local embedding model memory falls back to keyword search and vectors are backfilled later. The boss recalls across all workspaces, sub-agents only their own plus `shared`; finished tasks are stored as redacted summaries. (Implemented: Phase 2 step 2; tiers, salience decay and the MD vault come later.)
