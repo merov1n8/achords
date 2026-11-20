@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const SERVER = new URL("./server.ts", import.meta.url).pathname;
 
-describe("hub MCP server (stdio JSON-RPC)", () => {
+describe("hub MCP server (official SDK over stdio)", () => {
   let gateway: Server;
   let url: string;
   let seen: { auth?: string | undefined; body: unknown }[];
@@ -66,7 +66,7 @@ describe("hub MCP server (stdio JSON-RPC)", () => {
     const init = await rpc("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "t" },
+      clientInfo: { name: "t", version: "1" },
     });
     expect(init.result).toMatchObject({
       protocolVersion: "2025-06-18",
@@ -119,7 +119,7 @@ describe("hub MCP server (stdio JSON-RPC)", () => {
       })
     ).result as { isError?: boolean; content: { text: string }[] };
     expect(bad.isError).toBe(true);
-    expect(bad.content[0]?.text).toMatch(/tools must be a list of strings/);
+    expect(bad.content[0]?.text).toMatch(/tools: must be a list of strings/);
     await rpc("tools/call", {
       name: "spawn_worker",
       arguments: { instructions: "run tests", tools: ["Read"], paths: ["/w/site"] },
