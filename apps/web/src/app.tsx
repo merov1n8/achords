@@ -96,17 +96,20 @@ export function App() {
       </div>
       <Sidebar section={section} sub={sub} open={drawer} device={device} />
       <main>
-        {section === "chat" && <Chat threadId={sub} onThread={(id) => go(`chat/${id}`)} />}
-        {section === "kanban" && <Kanban />}
-        {section === "agents" && <Agents />}
-        {section === "projects" && <Projects />}
-        {section === "usage" && <Usage />}
-        {section === "schedules" && <Schedules />}
-        {section === "settings" && sub === "vault" && <Vault />}
-        {section === "settings" && sub === "integrations" && <Integrations />}
-        {section === "settings" && sub === "rooms" && <Rooms />}
-        {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
-        {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
+        {/* Pages scroll here; the live bar sits below them and never covers the chat box. */}
+        <div class="page">
+          {section === "chat" && <Chat threadId={sub} onThread={(id) => go(`chat/${id}`)} />}
+          {section === "kanban" && <Kanban />}
+          {section === "agents" && <Agents />}
+          {section === "projects" && <Projects />}
+          {section === "usage" && <Usage />}
+          {section === "schedules" && <Schedules />}
+          {section === "settings" && sub === "vault" && <Vault />}
+          {section === "settings" && sub === "integrations" && <Integrations />}
+          {section === "settings" && sub === "rooms" && <Rooms />}
+          {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
+          {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
+        </div>
         <LiveBar />
       </main>
     </div>

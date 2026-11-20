@@ -156,6 +156,7 @@ const CHANNELS = [
   { id: "x", label: "X" },
   { id: "pinterest", label: "Pinterest" },
   { id: "website", label: t("projects.channel.website") },
+  { id: "wordpress", label: t("projects.channel.wordpress") },
 ];
 
 type Row = { channel: string; value: string };
@@ -229,11 +230,7 @@ function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }) {
 function WordPressConnection(props: { slug: string }) {
   const secrets = usePoll(() => api<SecretStatus[]>("/api/vault"), 30000);
   const isSet = (id: string) => secrets.data?.some((s) => s.id === id && s.set) ?? false;
-  const field = (
-    part: "url" | "user" | "password",
-    label: string,
-    type: "url" | "text" | "password",
-  ) => {
+  const field = (part: "user" | "password", label: string, type: "text" | "password") => {
     const id = `wordpress-${part}-${props.slug}`;
     return (
       <SecretInput
@@ -250,7 +247,6 @@ function WordPressConnection(props: { slug: string }) {
     <div class="field">
       {t("projects.wordpress")}
       <span class="muted small">{t("projects.wordpressHelp")}</span>
-      {field("url", t("projects.wordpressUrl"), "url")}
       {field("user", t("projects.wordpressUser"), "text")}
       {field("password", t("projects.wordpressPassword"), "password")}
     </div>

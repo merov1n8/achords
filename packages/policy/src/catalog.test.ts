@@ -209,6 +209,19 @@ describe("integration status (doctor, web)", () => {
     expect(status(["google-refresh-token"], []).find((s) => s.id === "ga")?.ready).toBe(false);
     const wp = status(["wordpress-acme"], ["npx"]).find((s) => s.id === "wordpress");
     expect(wp).toMatchObject({ perProject: true, projectsReady: ["acme"], missingSecrets: [] });
+    // Settings from project accounts count too.
+    writeFileSync(
+      join(owner, "site.yaml"),
+      'id: site\nname: S\ncommand: npx\nenv:\n  URL: "{account:wordpress}"\n',
+    );
+    const withSite = integrationStatus(
+      loadCatalog(seed, owner),
+      [agent],
+      [{ slug: "acme", integrations: { wordpress: ["https://a.example"] } }, ...projects.slice(1)],
+      () => true,
+      () => true,
+    ).find((s) => s.id === "site");
+    expect(withSite).toMatchObject({ perProject: true, projectsReady: ["acme"] });
   });
 });
 

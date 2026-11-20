@@ -74,6 +74,11 @@ describe("integrations in runs (ADR-0034)", () => {
       join(catalogDir, "ga.yaml"),
       `id: ga\nname: GA4\ncommand: uvx\nargs: ["ga@1.0.0"]\nenv:\n  TOKEN: "vault:google-refresh-token"\ntools:\n  read: [run_report, get_account_summaries]\nscope:\n  args: [property_id]\n`,
     );
+    writeFileSync(
+      join(catalogDir, "site.yaml"),
+      `id: site\nname: Site\ncommand: npx\nargs: ["site@1.0.0"]\nenv:\n  SITE_URL: "{account:wordpress}"\n  KEY: "vault:site-{project}"\ntools:\n  read: [ping]\n`,
+    );
+    agent("siter", "mcp: [site]");
     agent("analyst", "mcp: [ga]");
     agent("autopub", "mcp: [wp]\npublish_mode:\n  default: review\n  channels:\n    wp: auto");
     agent("boss", "");
@@ -350,11 +355,18 @@ describe("integrations in runs (ADR-0034)", () => {
 
       const sent = orch.requestPublish(
         { from: "task", taskId: task.id },
-        { integration: "wp", tool: "create_post", args: { title: "Spring sale" } },
+        {
+          integration: "wp",
+          tool: "create_post",
+          args: { title: "Spring sale", content: "<p>Hi</p>" },
+        },
       );
       expect(sent).toMatchObject({ ok: true, text: expect.stringMatching(/Sent to the owner/) });
       const msg = listMessages(db, task.threadId as string).at(-1);
-      expect(msg?.content).toMatch(/marketer wants to publish[\s\S]*"title": "Spring sale"/);
+      expect(msg?.content).toMatch(
+        /marketer asks to publish on wp[\s\S]*\*\*Spring sale\*\*\n\nHi/,
+      );
+      expect(msg?.content).not.toContain("{");
       const approve = msg?.actions?.[0]?.data ?? "";
       expect(approve).toMatch(/^publish:approve:/);
       expect(called).toEqual([]);
@@ -363,12 +375,13 @@ describe("integrations in runs (ADR-0034)", () => {
       expect(orch.runAction(approve).ok).toBe(false); // once only
       await new Promise((r) => setTimeout(r, 0));
       expect(called).toHaveLength(1);
-      expect(called[0]).toMatchObject({ tool: "create_post", args: { title: "Spring sale" } });
+      expect(called[0]).toMatchObject({
+        tool: "create_post",
+        args: { title: "Spring sale", content: "<p>Hi</p>" },
+      });
       expect(called[0]?.launch.env.WP_PASSWORD).toBe(SECRET);
       expect(resolved.at(-1)).toEqual(["vault:wp-acme", "owner-approved:agent:marketer/mcp:wp"]);
-      expect(listMessages(db, task.threadId as string).at(-1)?.content).toMatch(
-        /Done: wp create_post\.\ndraft 42 created/,
-      );
+      expect(listMessages(db, task.threadId as string).at(-1)?.content).toBe("draft 42 created");
     });
 
     it("refuses tools that are not write tools, and runs nothing on reject", async () => {
@@ -392,5 +405,35 @@ describe("integrations in runs (ADR-0034)", () => {
       expect(launches[1]?.publish).toBeUndefined();
       expect(seen[1]?.req.allowedTools).not.toContain("mcp__wp__create_post");
     });
+
+    it("a task that sent something for approval ends with one short line", async () => {
+      onRun = (task) => {
+        orch.requestPublish(
+          { from: "task", taskId: task.id },
+          { integration: "wp", tool: "create_post", args: { title: "T" } },
+        );
+      };
+      const task = await give("marketer", "acme");
+      const last = listMessages(db, task.threadId as string).at(-1)?.content;
+      expect(last).toBe("Check the blog: ready, waiting for your approval above.");
+    });
+  });
+
+  it("takes plain settings like a site address from the project's accounts", async () => {
+    const launches: McpLaunch[] = [];
+    const original = tickets.issue.bind(tickets);
+    tickets.issue = (launch) => {
+      launches.push(launch);
+      return original(launch);
+    };
+    const without = await give("siter", "acme");
+    expect(without.status).toBe("failed");
+    expect(without.error).toMatch(/needs the project's wordpress account/);
+    appendFileSync(
+      join(home, "projects", "acme", "project.yaml"),
+      'integrations:\n  wordpress: ["https://acme.example"]\n',
+    );
+    await give("siter", "acme");
+    expect(launches[0]?.env).toEqual({ SITE_URL: "https://acme.example", KEY: SECRET });
   });
 });
