@@ -408,6 +408,7 @@ export function createApiHandler(deps: ApiDeps) {
           dir: p.dir,
           filesDir: p.filesDir,
           doc: p.doc,
+          integrations: p.integrations,
         };
       },
     ],
@@ -426,6 +427,7 @@ export function createApiHandler(deps: ApiDeps) {
             ...(b.doc !== undefined
               ? { doc: typeof b.doc === "string" ? b.doc.slice(0, 50_000) : "" }
               : {}),
+            ...(b.integrations !== undefined ? { integrations: accountLists(b.integrations) } : {}),
           }),
         );
         return { slug: p.slug, name: p.name, workspace: p.workspace };
@@ -697,6 +699,18 @@ export function createApiHandler(deps: ApiDeps) {
     return out;
   };
 
+  /** Project accounts from the web editor: channel id → list of strings (ADR-0036). */
+  const accountLists = (v: unknown): Record<string, string[]> => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) {
+      throw new HttpError(400, "integrations: must be an object of lists");
+    }
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>).map(([key, list]) => [
+        key,
+        strList(list, `integrations.${key}`),
+      ]),
+    );
+  };
   const projectsDirOrThrow = () => {
     if (!deps.projectsDir) throw new HttpError(404, "projects are not configured");
     return deps.projectsDir;
