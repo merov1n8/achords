@@ -39,3 +39,4 @@
 - [ADR-0037: Publishing through the launcher: review and auto](0037-publishing-review-and-auto.md)
 - [ADR-0038: Prompt-injection guard without containers (isolation C)](0038-prompt-injection-guard.md)
 - [ADR-0039: Heartbeat monitors](0039-heartbeat-monitors.md)
+- [ADR-0040: OpenAI models through the codex CLI](0040-openai-models-through-codex-cli.md)

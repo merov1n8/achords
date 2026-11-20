@@ -90,7 +90,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 
 Single interface `ModelProvider { run(task, tools, limits) }` with adapters:
 
-- `cli-claude`, `cli-codex`: invoke the official binaries only. Never read, extract or proxy OAuth tokens.
+- `cli-claude`, `cli-codex`: invoke the official binaries only. Never read, extract or proxy OAuth tokens. `cli-codex` (ADR-0040): sandbox read-only or workspace-write from the run's tools, network only with owner-granted full access; no achords MCP tools yet.
 - CLI runs are isolated from the user's own CLI config: no MCP servers or connectors, no user/project settings or hooks, only the manifest's tools; prompt on stdin; own process group (ADR-0024).
 - `api-anthropic`, `api-openai`, `api-google`, `api-openrouter`.
 - `local-openai-compatible`: Ollama (default, MLX engine on Apple Silicon), `mlx-lm` server optional. Manifest models `local/<name>`; `keep_alive` frees RAM when idle; structured output via `response_format`. Text only for now: a run that needs tools is refused, never run without them. `packages/platform` recommends a model by RAM (24 GB → `qwen3:8b`, embeddings `bge-m3`, multilingual).
