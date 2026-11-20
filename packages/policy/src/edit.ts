@@ -99,3 +99,89 @@ export function createAgentFiles(agentsDir: string, a: NewAgent): { id: string }
   }
   return { id: a.id };
 }
+
+/** List fields an agent change may touch (owner-approved proposals, ADR-0041). */
+export const AGENT_LIST_FIELDS = {
+  mcp: ["mcp"],
+  tools: ["tools"],
+  fs_read: ["fs", "read"],
+  fs_write: ["fs", "write"],
+  network: ["network", "allow"],
+  shell: ["shell", "allow"],
+  delegate_to: ["delegation", "can_delegate_to"],
+  accept_from: ["delegation", "accepts_from"],
+  models: ["models", "allowed"],
+} as const;
+export type AgentListField = keyof typeof AGENT_LIST_FIELDS;
+
+export interface AgentPatch {
+  add?: Partial<Record<AgentListField, string[] | undefined>>;
+  remove?: Partial<Record<AgentListField, string[] | undefined>>;
+  defaultModel?: string;
+}
+
+/**
+ * The agent.yaml text after a change, comments and layout kept; validated like any manifest.
+ * Removing the last shell command removes the shell.
+ */
+export function patchManifestText(text: string, patch: AgentPatch, source = "agent.yaml"): string {
+  const doc = parseDocument(text);
+  for (const [field, path] of Object.entries(AGENT_LIST_FIELDS) as [
+    AgentListField,
+    readonly string[],
+  ][]) {
+    const add = patch.add?.[field] ?? [];
+    const remove = new Set(patch.remove?.[field] ?? []);
+    if (!add.length && !remove.size) continue;
+    const node = doc.getIn(path, true) as
+      | { flow?: boolean; comment?: string | null; commentBefore?: string | null }
+      | undefined;
+    const cur = (doc.getIn(path) as { toJSON?: () => unknown } | undefined)?.toJSON?.();
+    const list = Array.isArray(cur) ? (cur as string[]) : [];
+    const next = [...new Set([...list.filter((x) => !remove.has(x)), ...add])];
+    if (field === "shell" && next.length === 0) {
+      doc.deleteIn(["shell"]);
+      continue;
+    }
+    const fresh = doc.createNode(next, { flow: node ? node.flow === true : true });
+    // Keep the owner's notes on that line.
+    fresh.comment = node?.comment ?? null;
+    fresh.commentBefore = node?.commentBefore ?? null;
+    doc.setIn(path, fresh);
+  }
+  if (patch.defaultModel) doc.setIn(["models", "default"], patch.defaultModel);
+  const out = doc.toString({ flowCollectionPadding: false });
+  parseManifest(out, source); // throws with field paths if invalid
+  return out;
+}
+
+/** What a change does, one line per field, for the owner's approval message. */
+export function manifestChanges(before: string, after: string): string[] {
+  const a = parseManifest(before, "before");
+  const b = parseManifest(after, "after");
+  const lists: [string, string[], string[]][] = [
+    ["integrations", a.mcp, b.mcp],
+    ["tools", a.tools, b.tools],
+    ["read folders", a.fs.read, b.fs.read],
+    ["write folders", a.fs.write, b.fs.write],
+    ["websites", a.network.allow, b.network.allow],
+    ["shell commands", a.shell?.allow ?? [], b.shell?.allow ?? []],
+    ["may delegate to", a.delegation.can_delegate_to, b.delegation.can_delegate_to],
+    ["accepts work from", a.delegation.accepts_from, b.delegation.accepts_from],
+    ["models", a.models.allowed, b.models.allowed],
+  ];
+  const lines: string[] = [];
+  for (const [label, x, y] of lists) {
+    const added = y.filter((v) => !x.includes(v));
+    const removed = x.filter((v) => !y.includes(v));
+    if (added.length || removed.length) {
+      lines.push(
+        `${label}: ${[...added.map((v) => `+ ${v}`), ...removed.map((v) => `− ${v}`)].join(", ")}`,
+      );
+    }
+  }
+  if (a.models.default !== b.models.default) {
+    lines.push(`default model: ${a.models.default} → ${b.models.default}`);
+  }
+  return lines;
+}

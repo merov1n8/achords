@@ -1,5 +1,13 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -57,6 +65,9 @@ import {
 import { t } from "@achords/i18n";
 import type { Embedder, Memory } from "@achords/memory";
 import {
+  AGENT_LIST_FIELDS,
+  type AgentListField,
+  type AgentPatch,
   accountRef,
   agentSummary,
   allowedIntegrationTools,
@@ -73,8 +84,10 @@ import {
   loadProjects,
   loadWorkflow,
   type Manifest,
+  manifestChanges,
   type Project,
   parseManifest,
+  patchManifestText,
   permissionMatrix,
   publishMode,
   scopeTargets,
@@ -97,8 +110,16 @@ const MEMORY_HITS = 5;
 const DEFER_MS = 60_000;
 const SUMMARY_CHARS = 1500;
 
+const listChange = z
+  .object(
+    Object.fromEntries(
+      Object.keys(AGENT_LIST_FIELDS).map((k) => [k, z.array(z.string().min(1)).optional()]),
+    ) as Record<AgentListField, z.ZodOptional<z.ZodArray<z.ZodString>>>,
+  )
+  .partial();
+
 const decisionSchema = z.object({
-  action: z.enum(["answer", "ask", "delegate"]),
+  action: z.enum(["answer", "ask", "delegate", "change_agent"]),
   message: z.string().min(1).describe("What the owner reads. One line for delegate."),
   task: z
     .object({
@@ -109,6 +130,16 @@ const decisionSchema = z.object({
         .string()
         .min(1)
         .describe("Language the owner writes in (e.g. Hungarian); the agent reports in it"),
+    })
+    .optional(),
+  // ADR-0041: a proposed change to an existing agent; the owner approves the exact diff.
+  change: z
+    .object({
+      agent: z.string().min(1).describe("Agent id to change"),
+      add: listChange.optional().describe("Entries to add per field"),
+      remove: listChange.optional().describe("Entries to remove per field"),
+      default_model: z.string().optional(),
+      reason: z.string().min(1).describe("Why, in the owner's words"),
     })
     .optional(),
 });
@@ -154,7 +185,7 @@ export interface Orchestrator {
     threadId: string,
     text: string,
     channel: Channel,
-  ): Promise<"answer" | "ask" | "delegate" | "routed" | "error">;
+  ): Promise<"answer" | "ask" | "delegate" | "change_agent" | "routed" | "error">;
   /**
    * Ephemeral worker (ADR-0029): runs the caller's agent with a subset of its permissions;
    * requests beyond them are rejected, not trimmed. Max 3 per task; workers get no hub tools.
@@ -175,6 +206,11 @@ export interface Orchestrator {
   proposeAgent(
     from: { from: "task"; taskId: string },
     request: { yaml: string; reason: string },
+  ): { ok: true; proposalId: string } | { ok: false; reason: string };
+  /** ADR-0041: a change to an existing agent, posted as a diff with Approve / Reject. */
+  proposeAgentChange(
+    threadId: string,
+    request: { agent: string; patch: AgentPatch; reason: string; by: string },
   ): { ok: true; proposalId: string } | { ok: false; reason: string };
   /** Owner decision on a proposal (Telegram /approve, web). */
   decideProposal(
@@ -958,13 +994,79 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return { ok: true, proposalId: id };
     },
 
+    proposeAgentChange(threadId, request) {
+      const path = join(agentsDir, request.agent, "agent.yaml");
+      if (!SAFE_NAME.test(request.agent) || !existsSync(path)) {
+        return { ok: false, reason: `no agent ${request.agent}` };
+      }
+      const before = readFileSync(path, "utf8");
+      let after: string;
+      let changes: string[];
+      try {
+        after = patchManifestText(before, request.patch, `agents/${request.agent}/agent.yaml`);
+        changes = manifestChanges(before, after);
+      } catch (err) {
+        return { ok: false, reason: (err as Error).message };
+      }
+      if (!changes.length) return { ok: false, reason: "this changes nothing" };
+      const id = randomBytes(4).toString("hex");
+      db.prepare(
+        `INSERT INTO agent_proposals (id, proposed_by, thread_id, agent_id, yaml, reason, base_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        request.by,
+        threadId,
+        request.agent,
+        after,
+        request.reason,
+        createHash("sha256").update(before).digest("hex"),
+        Date.now(),
+      );
+      appendMessage(db, {
+        threadId,
+        role: "agent",
+        author: request.by,
+        channel: "system",
+        content: redact(
+          t("thread.changeProposal", {
+            agent: request.agent,
+            reason: request.reason,
+            changes: changes.map((c) => `- ${c}`).join("\n"),
+          }),
+        ).slice(0, MAX_POST),
+        actions: [
+          { label: t("action.approve"), data: `proposal:approve:${id}` },
+          { label: t("action.reject"), data: `proposal:reject:${id}` },
+        ],
+      });
+      return { ok: true, proposalId: id };
+    },
+
     decideProposal(id, approve) {
       const row = db
-        .prepare("SELECT agent_id, yaml FROM agent_proposals WHERE id = ? AND status = 'pending'")
+        .prepare(
+          "SELECT agent_id, yaml, base_hash FROM agent_proposals WHERE id = ? AND status = 'pending'",
+        )
         .get(id);
       if (!row) return { ok: false, reason: `no pending proposal ${id}` };
       const agentId = String(row.agent_id);
-      if (approve) {
+      if (approve && row.base_hash) {
+        // A change applies only to the file it was made against.
+        const path = join(agentsDir, agentId, "agent.yaml");
+        try {
+          const now = readFileSync(path, "utf8");
+          if (createHash("sha256").update(now).digest("hex") !== String(row.base_hash)) {
+            return { ok: false, reason: t("action.changeStale", { agent: agentId }) };
+          }
+          parseManifest(String(row.yaml), path);
+          const tmp = `${path}.tmp-${process.pid}`;
+          writeFileSync(tmp, String(row.yaml), { mode: 0o600 });
+          renameSync(tmp, path);
+        } catch (err) {
+          return { ok: false, reason: (err as Error).message };
+        }
+      } else if (approve) {
         try {
           parseManifest(String(row.yaml), "proposed agent.yaml"); // still valid?
           mkdirSync(join(agentsDir, agentId), { recursive: false, mode: 0o700 });
@@ -1240,7 +1342,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           [...workspaces, ...(project ? [projectSpace(project)] : [])],
           isLocalModel(bossModel),
         );
-        const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
+        // For change_agent (ADR-0041): what each agent has now, and what exists to give.
+        const settings = [...all.values()]
+          .map(
+            (m) =>
+              `- ${m.id}: mcp [${m.mcp.join(", ")}]; tools [${m.tools.join(", ")}]; models [${m.models.allowed.join(", ")}] default ${m.models.default}; write [${m.fs.write.join(", ")}]; read [${m.fs.read.join(", ")}]; websites [${m.network.allow.join(", ")}]; shell [${m.shell?.allow.join(", ") ?? ""}]; delegate_to [${m.delegation.can_delegate_to.join(", ")}]; accept_from [${m.delegation.accepts_from.join(", ")}]`,
+          )
+          .join("\n");
+        const catalogIds = deps.integrations
+          ? [...deps.integrations.catalog().keys()].join(", ")
+          : "";
+        const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
 
         const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
         // Structured output is an internal tool call, so allow a few turns.
@@ -1269,6 +1381,21 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         if (!res.ok) throw new Error(res.error ?? "boss run failed");
         const decision = decisionSchema.parse(res.structured);
 
+        if (decision.action === "change_agent") {
+          const c = decision.change;
+          if (!c) throw new Error("change_agent without a change");
+          const r = orchestrator.proposeAgentChange(threadId, {
+            agent: c.agent,
+            by: BOSS_ID,
+            reason: c.reason,
+            patch: {
+              ...(c.add ? { add: c.add } : {}),
+              ...(c.remove ? { remove: c.remove } : {}),
+              ...(c.default_model ? { defaultModel: c.default_model } : {}),
+            },
+          });
+          if (!r.ok) throw new Error(r.reason);
+        }
         if (decision.action === "delegate") {
           const task = decision.task;
           if (!task || task.assignee === BOSS_ID || !all.has(task.assignee)) {
