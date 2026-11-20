@@ -24,6 +24,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- The hub's own MCP server (delegate, ask_owner, …) runs on the official MCP TypeScript SDK (`@modelcontextprotocol/server`) instead of a hand-written JSON-RPC loop; same tools, same run tokens.
+
 - Sub-agents write their final report in the language the owner uses with the boss.
 
 ### Added
