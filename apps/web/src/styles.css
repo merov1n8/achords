@@ -677,3 +677,59 @@ main > .page {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
+
+/* Chat list in the sidebar: many chats, own scroll, actions per chat */
+.chatlist {
+  display: grid;
+  gap: 4px;
+}
+.chatlist-tools {
+  display: grid;
+  gap: 4px;
+  padding: 4px 6px 4px 30px;
+}
+.chatlist-tools .btn.active {
+  color: var(--text);
+  background: var(--surface);
+}
+.chatlist-items {
+  max-height: 45vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.threadrow .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.icon-btn {
+  padding: 2px 4px;
+  opacity: 0.6;
+}
+.threadrow:hover .icon-btn,
+.icon-btn:focus-visible {
+  opacity: 1;
+}
+.threadmenu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 6px 6px 30px;
+}
+.sub-heading {
+  padding: 8px 10px 2px 36px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: default;
+}
+.subgroup > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.sub-pad {
+  padding-left: 36px;
+}

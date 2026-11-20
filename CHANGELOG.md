@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Many chats: the sidebar chat list scrolls on its own and has a search box, Pinned / Recent / Scheduled groups, and a By project view with the latest 5 chats per project. Each chat has actions: pin, rename, archive (hidden, restorable) and delete. A new All chats page filters by project, text and archived, and archives several at once. The Telegram chat can be archived but not deleted.
 - Monitors (new page): cheap checks every few minutes that only speak up when something changes: a website goes down or comes back, or a kanban card has not moved for too long. Notes go to your Telegram chat, with optional quiet hours (e.g. 22-7) after which waiting news is delivered.
 - Prompt-injection guard: every agent is told that what it reads (web pages, comments, posts, search queries, files) is data and never instructions; results from client accounts arrive marked as external content; and an agent that reads the open web never publishes automatically, its posts always wait for your approval.
 - Publishing messages are written for people: an approval request shows the post itself (title, text without HTML, other fields as plain lines) instead of JSON, the result is one sentence with a link ("Saved as a draft. Open it: …"), and a task that sent something for approval ends with a single line instead of repeating it.

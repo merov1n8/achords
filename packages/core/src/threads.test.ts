@@ -4,11 +4,13 @@ import {
   appendMessage,
   clearActions,
   createThread,
+  deleteThread,
   getThread,
   listMessages,
   listMessagesAfter,
   listThreads,
   makeThreadLocalOnly,
+  updateThread,
 } from "./threads.ts";
 
 describe("threads", () => {
@@ -136,5 +138,35 @@ describe("threads", () => {
         content: "x",
       }),
     ).toThrow();
+  });
+
+  it("pins, renames, archives, searches and deletes chats", () => {
+    const db = openCoreDatabase(":memory:");
+    const a = createThread(db, { title: "Cart bug", project: "acme" }, 1);
+    const b = createThread(db, { title: "Blog post" }, 2);
+    appendMessage(db, {
+      threadId: b.id,
+      role: "user",
+      channel: "web",
+      content: "write about 100% growth",
+    });
+    expect(updateThread(db, a.id, { pinned: true, title: " Cart fix " })).toBe(true);
+    expect(getThread(db, a.id)).toMatchObject({ pinned: true, title: "Cart fix" });
+    // Search: title or any message; % is literal.
+    expect(listThreads(db, { q: "cart" }).map((t) => t.id)).toEqual([a.id]);
+    expect(listThreads(db, { q: "100%" }).map((t) => t.id)).toEqual([b.id]);
+    expect(listThreads(db, { q: "1%0" })).toEqual([]);
+    expect(listThreads(db, { project: "acme" }).map((t) => t.id)).toEqual([a.id]);
+    // Archived chats leave the list and come back.
+    updateThread(db, b.id, { archived: true });
+    expect(listThreads(db).map((t) => t.id)).toEqual([a.id]);
+    expect(listThreads(db, { archived: true }).map((t) => t.id)).toEqual([b.id]);
+    updateThread(db, b.id, { archived: false });
+    expect(listThreads(db)).toHaveLength(2);
+    // Delete takes the messages with it.
+    expect(deleteThread(db, b.id)).toBe(true);
+    expect(listMessages(db, b.id)).toEqual([]);
+    expect(deleteThread(db, b.id)).toBe(false);
+    expect(updateThread(db, "missing", { pinned: true })).toBe(false);
   });
 });

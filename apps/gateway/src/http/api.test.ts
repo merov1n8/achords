@@ -15,6 +15,7 @@ import {
   openCoreDatabase,
   recordUsageWindows,
   setRunProgress,
+  setSetting,
   startRun,
   upsertAgent,
 } from "@achords/core";
@@ -370,6 +371,32 @@ describe("HTTP API", () => {
       (await call("/api/monitors/quiet", { method: "PUT", body: '{"hours":"late"}' })).status,
     ).toBe(400);
     expect((await call(`/api/monitors/${id}`, { method: "DELETE" })).status).toBe(200);
+  });
+
+  it("chats: filter, pin, rename, archive, delete; the Telegram chat is not deletable", async () => {
+    const { call } = await pair();
+    const a = createThread(db, { title: "Cart bug", project: "acme" });
+    const b = createThread(db, { title: "Blog" });
+    const put = (id: string, body: object) =>
+      call(`/api/threads/${id}`, { method: "PUT", body: JSON.stringify(body) });
+    expect(
+      (await (await put(a.id, { pinned: true, title: "Cart fix" })).json()) as object,
+    ).toMatchObject({
+      pinned: true,
+      title: "Cart fix",
+    });
+    const ids = async (query: string) =>
+      ((await (await call(`/api/threads${query}`)).json()) as { id: string }[]).map((t) => t.id);
+    expect(await ids("?q=cart")).toEqual([a.id]);
+    expect(await ids("?project=acme")).toEqual([a.id]);
+    await put(b.id, { archived: true });
+    expect(await ids("")).not.toContain(b.id);
+    expect(await ids("?archived=1")).toEqual([b.id]);
+    expect((await put("nope", { pinned: true })).status).toBe(404);
+    setSetting(db, "telegram.thread_id", a.id);
+    expect((await call(`/api/threads/${a.id}`, { method: "DELETE" })).status).toBe(409);
+    expect((await call(`/api/threads/${b.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(await ids("?archived=1")).toEqual([]);
   });
 
   it("vault is write-only over HTTP", async () => {
