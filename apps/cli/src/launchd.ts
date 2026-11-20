@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
+import { t } from "@achords/i18n";
 
 export const LABEL = "dev.achords.gateway";
 
@@ -119,9 +120,7 @@ export const unsupportedService: ServiceManager = {
   kind: "none",
   isLoaded: () => false,
   start() {
-    throw new Error(
-      `service install is not supported on ${process.platform} yet; run the gateway in the foreground`,
-    );
+    throw new Error(t("cli.service.unsupported", { platform: process.platform }));
   },
   stop: () => false,
 };

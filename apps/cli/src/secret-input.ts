@@ -1,3 +1,4 @@
+import { t } from "@achords/i18n";
 /**
  * Reads a secret from stdin: hidden typing on a terminal, or the whole stream when piped.
  * Secrets never come from argv, which ends up in shell history and `ps` output.
@@ -25,7 +26,7 @@ export async function readSecret(prompt: string): Promise<string> {
     const onData = (key: string) => {
       for (const ch of key) {
         if (ch === "\r" || ch === "\n") return done();
-        if (ch === "\u0003") return done(new Error("cancelled"));
+        if (ch === "\u0003") return done(new Error(t("cli.secret.cancelled")));
         if (ch === "\u007f" || ch === "\b") value = value.slice(0, -1);
         else value += ch;
       }

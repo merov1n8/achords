@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { createPairingCode, type HomePaths, openCoreDatabase, setSetting } from "@achords/core";
+import { t } from "@achords/i18n";
 import type { Vault } from "@achords/secrets";
 import type { Check } from "./doctor.ts";
 
@@ -22,11 +23,11 @@ const yes = (a: string) => /^y(es)?$/i.test(a.trim());
 export async function runInit(d: InitDeps): Promise<number> {
   const { io, paths } = d;
 
-  io.print("Checking prerequisites…");
+  io.print(t("cli.init.checking"));
   const failed = (await d.doctor()).filter((c) => c.level === "fail");
   if (failed.length) {
     for (const c of failed) io.print(`  ✗ ${c.name}: ${c.detail}${c.fix ? ` — ${c.fix}` : ""}`);
-    io.print("Fix the above and run `achords init` again. Nothing was changed.");
+    io.print(t("cli.init.fixFirst"));
     return 1;
   }
 
@@ -35,42 +36,38 @@ export async function runInit(d: InitDeps): Promise<number> {
   try {
     // API-key mode is part of a later phase (ADR-0004); the CLI mode needs no keys here.
     setSetting(db, "providers.mode", "cli");
-    io.print("Provider: the official `claude` CLI with your own login (API-key mode comes later).");
+    io.print(t("cli.init.provider"));
 
     const vault = d.openVault();
     let telegram = false;
     try {
       if (vault.status(TELEGRAM_TOKEN).set) {
         telegram = true;
-        const replace = await io.ask("A Telegram bot token is already set. Replace it? [y/N]");
+        const replace = await io.ask(t("cli.init.replaceToken"));
         if (yes(replace)) await askToken(d, vault);
-        else io.print("Keeping the existing Telegram token.");
-      } else if (
-        yes(await io.ask("Set up Telegram now? You need a bot token from @BotFather. [y/N]"))
-      ) {
+        else io.print(t("cli.init.keepToken"));
+      } else if (yes(await io.ask(t("cli.init.setupTelegram")))) {
         telegram = await askToken(d, vault);
       }
     } finally {
       vault.close();
     }
 
-    io.print("Starting the gateway service…");
+    io.print(t("cli.init.starting"));
     try {
       io.print(d.start());
     } catch (err) {
-      io.print(`Could not start the gateway: ${(err as Error).message}`);
-      io.print("Run `achords doctor` for details, then `achords start`.");
+      io.print(t("cli.init.startFailed", { error: (err as Error).message }));
+      io.print(t("cli.init.startHint"));
       return 1;
     }
 
     if (telegram) {
       const code = createPairingCode(db, "telegram");
-      io.print(`Telegram: send this to your bot in a private chat:  /pair ${code}`);
+      io.print(t("cli.init.telegramCode", { code }));
     }
-    io.print(`Web UI: open http://127.0.0.1:7420 and enter:  ${createPairingCode(db, "web")}`);
-    io.print(
-      "Codes are single use and expire in 10 minutes (`achords pair web|telegram` for new ones).",
-    );
+    io.print(t("cli.init.webCode", { code: createPairingCode(db, "web") }));
+    io.print(t("cli.init.codesExpire"));
     return 0;
   } finally {
     db.close();
@@ -78,12 +75,12 @@ export async function runInit(d: InitDeps): Promise<number> {
 }
 
 async function askToken(d: InitDeps, vault: Vault): Promise<boolean> {
-  const token = (await d.io.ask("Telegram bot token (hidden):", { secret: true })).trim();
+  const token = (await d.io.ask(t("cli.init.tokenPrompt"), { secret: true })).trim();
   if (!token) {
-    d.io.print("No token entered; skipping Telegram.");
+    d.io.print(t("cli.init.noToken"));
     return false;
   }
   vault.set(TELEGRAM_TOKEN, token, "cli:init");
-  d.io.print("Telegram token stored in the vault.");
+  d.io.print(t("cli.init.tokenStored"));
   return true;
 }
