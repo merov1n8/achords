@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 // achords CLI. Control commands work without a running gateway.
-import { existsSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import { openHomeVault } from "@achords/secrets";
+import { connectGoogle, parseClientJson } from "./connect-google.ts";
 import { type ControlContext, kill, resume, start, status, stop } from "./control.ts";
 import { runDoctor, systemDoctorEnv } from "./doctor.ts";
 import { runInit } from "./init.ts";
@@ -139,6 +141,27 @@ async function run(
       db.close();
       console.log(t("cli.pair.code", { code }));
       console.log(purpose === "web" ? t("cli.pair.web") : t("cli.pair.telegram", { code }));
+      return 0;
+    }
+    case "connect": {
+      const [service, file] = args;
+      if (service !== "google" || !file) throw new Error(t("cli.connect.usage"));
+      const client = parseClientJson(readFileSync(file, "utf8"));
+      const vault = openHomeVault(ctx.paths.home);
+      try {
+        await connectGoogle({
+          client,
+          store: (id, value) => vault.set(id, value, "cli:connect-google"),
+          openUrl: (url) => {
+            const opener = process.platform === "darwin" ? "open" : "xdg-open";
+            execFile(opener, [url], () => {});
+          },
+          print: (line) => console.log(line),
+        });
+      } finally {
+        vault.close();
+      }
+      console.log(t("cli.connect.done", { file }));
       return 0;
     }
     case "secret": {

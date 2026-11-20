@@ -41,6 +41,21 @@ The API listens on `http://127.0.0.1:7420` (`ACHORDS_PORT` to change). Five wron
 
 On macOS the vault's master key is in the login Keychain (item `achords` / `master-key`). `ACHORDS_KEYSTORE=file` uses `$ACHORDS_HOME/master.key` (0600) instead, e.g. on headless hosts.
 
+## Connecting Google (Analytics, Search Console)
+
+Once per owner, not per client: clients add your Google account to their GA4 property (Viewer)
+and Search Console site, and the one sign-in reaches all of them.
+
+1. Google Cloud Console, your project: enable the Google Analytics Data API, Google Analytics
+   Admin API and Google Search Console API.
+2. OAuth consent screen: set the publishing status to "In production" (in "Testing" Google
+   revokes the refresh token after 7 days). Verification is not needed for own use; the sign-in
+   shows "Google hasn't verified this app": Advanced → Go to ….
+3. Create an OAuth client of type "Desktop app" and download its JSON.
+4. `pnpm achords connect google ~/Downloads/client_secret_….json`, sign in, tick every box.
+   The client and refresh token land in the vault (`google-client-id`, `google-client-secret`,
+   `google-refresh-token`, `google-project-id`); delete the JSON afterwards.
+
 ## Telegram
 
 1. Create a bot with @BotFather and copy its token.
