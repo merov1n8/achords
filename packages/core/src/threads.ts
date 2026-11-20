@@ -11,6 +11,11 @@ export interface Thread {
   sensitivity: Sensitivity;
   /** Project slug (ADR-0031); its PROJECT.md and folder apply to work started here. */
   project: string | null;
+  pinned: boolean;
+  /** Hidden from the chat list; restorable. */
+  archived: boolean;
+  /** A schedule reports here ("Scheduled: …"); listed in its own group. */
+  scheduled: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -47,6 +52,9 @@ const toThread = (r: Row): Thread => ({
   workspace: r.workspace as string | null,
   sensitivity: r.sensitivity as Sensitivity,
   project: (r.project as string | null) ?? null,
+  pinned: Number(r.pinned ?? 0) === 1,
+  archived: Number(r.archived ?? 0) === 1,
+  scheduled: Number(r.scheduled ?? 0) === 1,
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at),
 });
@@ -110,20 +118,82 @@ export function makeThreadLocalOnly(db: Db, id: string): boolean {
   );
 }
 
+const SCHEDULED = "EXISTS (SELECT 1 FROM schedules s WHERE s.thread_id = threads.id) AS scheduled";
+
 export function getThread(db: Db, id: string): Thread | undefined {
-  const row = db.prepare("SELECT * FROM threads WHERE id = ?").get(id);
+  const row = db.prepare(`SELECT *, ${SCHEDULED} FROM threads WHERE id = ?`).get(id);
   return row ? toThread(row) : undefined;
 }
 
-export function listThreads(db: Db, limit = 50): Thread[] {
+export interface ThreadFilter {
+  limit?: number;
+  /** Archived chats only (true), or none of them (default). */
+  archived?: boolean;
+  project?: string;
+  /** Text in the title or in any message. */
+  q?: string;
+}
+
+/** The owner's chats, newest first; agent rooms (ADR-0032) are never listed. */
+export function listThreads(db: Db, filter: ThreadFilter | number = {}): Thread[] {
+  const f = typeof filter === "number" ? { limit: filter } : filter;
+  const where = ["kind = 'chat'", "archived = ?"];
+  const args: (string | number)[] = [f.archived ? 1 : 0];
+  if (f.project) {
+    where.push("project = ?");
+    args.push(f.project);
+  }
+  if (f.q?.trim()) {
+    const like = `%${f.q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push(
+      "(title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.content LIKE ? ESCAPE '\\'))",
+    );
+    args.push(like, like);
+  }
+  return db
+    .prepare(
+      `SELECT *, ${SCHEDULED} FROM threads WHERE ${where.join(" AND ")}
+       ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
+    )
+    .all(...args, f.limit ?? 50)
+    .map(toThread);
+}
+
+/** Rename, pin or archive a chat. Returns false if there is no such chat. */
+export function updateThread(
+  db: Db,
+  id: string,
+  patch: { title?: string; pinned?: boolean; archived?: boolean },
+): boolean {
+  const sets: string[] = [];
+  const args: (string | number)[] = [];
+  if (patch.title !== undefined) {
+    sets.push("title = ?");
+    args.push(patch.title.trim());
+  }
+  if (patch.pinned !== undefined) {
+    sets.push("pinned = ?");
+    args.push(patch.pinned ? 1 : 0);
+  }
+  if (patch.archived !== undefined) {
+    sets.push("archived = ?");
+    args.push(patch.archived ? 1 : 0);
+  }
+  if (!sets.length) return getThread(db, id) !== undefined;
+  // Not updated_at: organizing a chat is not activity in it.
   return (
-    db
-      // Agent rooms (ADR-0032) are hidden threads, never among the owner's chats.
-      .prepare(
-        "SELECT * FROM threads WHERE kind = 'chat' ORDER BY updated_at DESC, rowid DESC LIMIT ?",
-      )
-      .all(limit)
-      .map(toThread)
+    Number(
+      db
+        .prepare(`UPDATE threads SET ${sets.join(", ")} WHERE id = ? AND kind = 'chat'`)
+        .run(...args, id).changes,
+    ) > 0
+  );
+}
+
+/** Deletes a chat and its messages for good; tasks and schedules keep running without it. */
+export function deleteThread(db: Db, id: string): boolean {
+  return (
+    Number(db.prepare("DELETE FROM threads WHERE id = ? AND kind = 'chat'").run(id).changes) > 0
   );
 }
 
