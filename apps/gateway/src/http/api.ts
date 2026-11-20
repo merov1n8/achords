@@ -4,16 +4,21 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import {
   AuthError,
+  createMonitor,
   createSchedule,
   createSession,
   createThread,
   type Db,
+  deleteMonitor,
   deleteSchedule,
+  getMonitor,
   getRoom,
   getSchedule,
+  getSetting,
   getThread,
   listAgents,
   listMessages,
+  listMonitors,
   listRooms,
   listSchedules,
   listSessions,
@@ -21,12 +26,15 @@ import {
   listThreads,
   listUsageWindows,
   liveProgress,
+  type MonitorInput,
   occurrences,
   redeemPairingCode,
   revokeSession,
   type ScheduleInput,
+  setSetting,
   setThreadProject,
   spendSince,
+  updateMonitor,
   updateSchedule,
   validateSession,
 } from "@achords/core";
@@ -342,6 +350,57 @@ export function createApiHandler(deps: ApiDeps) {
       ({ params }) => {
         if (!getSchedule(db, params[0] as string)) throw new HttpError(404, "no such schedule");
         deleteSchedule(db, params[0] as string);
+        return { ok: true };
+      },
+    ],
+    // Heartbeat monitors (ADR-0039).
+    ["GET", /^\/api\/monitors$/, () => listMonitors(db)],
+    // Before /:id, so "quiet" is not taken for a monitor id.
+    [
+      "GET",
+      /^\/api\/monitors\/quiet$/,
+      () => ({ hours: getSetting(db, "monitors.quiet_hours") ?? "" }),
+    ],
+    [
+      "PUT",
+      /^\/api\/monitors\/quiet$/,
+      async ({ body }) => {
+        const hours = String((await body()).hours ?? "").trim();
+        if (hours && !/^\d{1,2}-\d{1,2}$/.test(hours)) {
+          throw new HttpError(400, "quiet hours look like 22-7");
+        }
+        setSetting(db, "monitors.quiet_hours", hours);
+        return { hours };
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/monitors$/,
+      async ({ res, body }) => {
+        const input = monitorInput(await body(), true) as MonitorInput;
+        send(
+          res,
+          201,
+          attempt(() => createMonitor(db, input)),
+        );
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/monitors\/([\w-]{1,64})$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        if (!getMonitor(db, id)) throw new HttpError(404, "no such monitor");
+        const patch = monitorInput(await body(), false);
+        return attempt(() => updateMonitor(db, id, patch));
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/monitors\/([\w-]{1,64})$/,
+      ({ params }) => {
+        if (!getMonitor(db, params[0] as string)) throw new HttpError(404, "no such monitor");
+        deleteMonitor(db, params[0] as string);
         return { ok: true };
       },
     ],
@@ -684,6 +743,26 @@ export function createApiHandler(deps: ApiDeps) {
       if (err instanceof HttpError) throw err;
       throw new HttpError(400, (err as Error).message);
     }
+  };
+  const monitorInput = (b: Record<string, unknown>, full: boolean): Partial<MonitorInput> => {
+    const out: Partial<MonitorInput> = {};
+    if (full || b.name !== undefined) out.name = str(b.name, "name", 100);
+    if (full || b.kind !== undefined) out.kind = str(b.kind, "kind", 16) as MonitorInput["kind"];
+    if (full || b.every_minutes !== undefined) out.everyMinutes = Number(b.every_minutes);
+    if (b.enabled !== undefined) out.enabled = b.enabled === true;
+    if (full || b.config !== undefined) {
+      const c = b.config;
+      if (!c || typeof c !== "object" || Array.isArray(c) || JSON.stringify(c).length > 2000) {
+        throw new HttpError(400, "config must be a small object");
+      }
+      const cfg = c as Record<string, unknown>;
+      // Site checks fetch http(s) addresses only.
+      if (cfg.url !== undefined && !/^https?:\/\/[^/\s]+/i.test(String(cfg.url))) {
+        throw new HttpError(400, "url must start with http:// or https://");
+      }
+      out.config = cfg;
+    }
+    return out;
   };
   const scheduleInput = (b: Record<string, unknown>, full: boolean): Partial<ScheduleInput> => {
     const out: Partial<ScheduleInput> = {};

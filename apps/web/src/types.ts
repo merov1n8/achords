@@ -78,3 +78,17 @@ export interface IntegrationStatus {
   projectsScoped: string[];
   ready: boolean;
 }
+
+/** GET /api/monitors (ADR-0039). */
+export interface Monitor {
+  id: string;
+  name: string;
+  kind: "site" | "stuck";
+  config: Record<string, unknown>;
+  everyMinutes: number;
+  enabled: boolean;
+  state: "unknown" | "ok" | "alert";
+  detail: string | null;
+  lastCheckAt: number | null;
+  lastChangeAt: number | null;
+}

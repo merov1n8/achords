@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bot,
   CalendarClock,
   ChevronDown,
@@ -24,6 +25,7 @@ import { Devices } from "./views/Devices.tsx";
 import { Integrations } from "./views/Integrations.tsx";
 import { Kanban } from "./views/Kanban.tsx";
 import { LiveBar } from "./views/LiveBar.tsx";
+import { Monitors } from "./views/Monitors.tsx";
 import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
 import { Rooms } from "./views/Rooms.tsx";
@@ -104,6 +106,7 @@ export function App() {
           {section === "projects" && <Projects />}
           {section === "usage" && <Usage />}
           {section === "schedules" && <Schedules />}
+          {section === "monitors" && <Monitors />}
           {section === "settings" && sub === "vault" && <Vault />}
           {section === "settings" && sub === "integrations" && <Integrations />}
           {section === "settings" && sub === "rooms" && <Rooms />}
@@ -189,6 +192,10 @@ function Sidebar(props: {
       <a class={`nav ${section === "schedules" ? "active" : ""}`} href="#/schedules">
         <CalendarClock class="icon" />
         {t("nav.schedules")}
+      </a>
+      <a class={`nav ${section === "monitors" ? "active" : ""}`} href="#/monitors">
+        <Activity class="icon" />
+        {t("nav.monitors")}
       </a>
       <a class={`nav ${section === "usage" ? "active" : ""}`} href="#/usage">
         <Gauge class="icon" />
