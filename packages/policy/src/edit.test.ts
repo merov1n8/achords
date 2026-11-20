@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { updateManifestModels } from "./edit.ts";
+import { createAgentFiles, updateManifestModels, updateManifestName } from "./edit.ts";
 import { loadManifest } from "./manifest.ts";
 
 const YAML = `# Boss agent — my notes stay here
@@ -58,6 +58,42 @@ describe("updateManifestModels", () => {
     );
   });
 
+  it("renames an agent, keeping comments; an empty name is refused", () => {
+    updateManifestName(path, "Chief");
+    expect(readFileSync(path, "utf8")).toContain("name: Chief");
+    expect(readFileSync(path, "utf8")).toContain("# Boss agent — my notes stay here");
+    expect(() => updateManifestName(path, "")).toThrow(/name/);
+  });
+
+  it("creates a new agent folder with agent.yaml and AGENT.md, validated, never over an existing one", () => {
+    const made = createAgentFiles(dir, {
+      id: "qa",
+      name: "Tester",
+      role: "qa",
+      workspace: "web-clients",
+      roles: ["qa"],
+      models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+      tools: ["Read", "Grep"],
+      description: "Reviews web work before it is done.",
+    });
+    expect(made.id).toBe("qa");
+    expect(loadManifest(join(dir, "qa", "agent.yaml"))).toMatchObject({
+      name: "Tester",
+      roles: ["qa"],
+      tools: ["Read", "Grep"],
+      fs: { read: [], write: [] },
+    });
+    expect(readFileSync(join(dir, "qa", "AGENT.md"), "utf8")).toBe(
+      "# Tester\n\nReviews web work before it is done.\n",
+    );
+    expect(() => createAgentFiles(dir, { ...base(), id: "qa" })).toThrow(/exists/);
+    expect(() => createAgentFiles(dir, { ...base(), id: "../evil" })).toThrow(/id/);
+    expect(() =>
+      createAgentFiles(dir, { ...base(), id: "x", fs: { write: ["relative/path"] } }),
+    ).toThrow(/absolute/);
+    expect(existsSync(join(dir, "x"))).toBe(false); // nothing half-written
+  });
+
   it("validates before writing: an invalid change leaves the file untouched", () => {
     expect(() =>
       updateManifestModels(path, {
@@ -70,4 +106,13 @@ describe("updateManifestModels", () => {
     ).toThrow(/models.allowed/);
     expect(readFileSync(path, "utf8")).toBe(YAML);
   });
+});
+
+const base = () => ({
+  id: "b",
+  name: "B",
+  role: "r",
+  workspace: "w",
+  models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+  description: "d",
 });

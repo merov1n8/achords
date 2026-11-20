@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Agents view: rename an agent (id and role stay), and create a new agent from a form (id, name, job role, workspace, scope → `AGENT.md`, workflow roles, model). Every permission starts off: tools, write/read paths, shell commands, network hosts, delegation and budget are switched on one by one; the manifest is validated with the strict schema before anything is written.
+
 - `AGENT.md` per agent (replaces `prompt.md`, which still works on older installs): scope, what the agent does not do, hand-offs and way of working. The boss and delegating agents see each agent's one-paragraph scope when choosing who gets the work. New seeds for boss and web-dev.
 
 - Web kanban on the workflow (ADR-0030): workflow columns per workspace in one scrolling row, drag & drop with Pointer Events (mouse, pen; touch from the grip so the page still scrolls), keyboard moves (Space, ←/→, Enter, Esc), drop targets show whether a move follows the rules or is a logged override, subtask counts on cards, and a read-only rules table.
