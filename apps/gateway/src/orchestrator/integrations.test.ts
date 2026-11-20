@@ -215,6 +215,8 @@ describe("integrations in runs (ADR-0034)", () => {
       args: ["--disable-warning=ExperimentalWarning", "/x/wordpress.ts"],
       env: { WP_APP_PASSWORD: SECRET },
       files: { CREDS: { type: "authorized_user", refresh_token: SECRET } },
+      // ADR-0038: results of client accounts are marked as third-party data.
+      untrusted: "WordPress",
     });
     expect(resolved.map(([ref]) => ref).sort()).toEqual(["vault:google", "vault:wp-acme"]);
   });
@@ -435,5 +437,27 @@ describe("integrations in runs (ADR-0034)", () => {
     );
     await give("siter", "acme");
     expect(launches[0]?.env).toEqual({ SITE_URL: "https://acme.example", KEY: SECRET });
+  });
+
+  describe("prompt-injection guard (ADR-0038)", () => {
+    it("every agent run gets the standing rule", async () => {
+      await give("marketer", "acme");
+      expect(seen[0]?.req.appendSystemPrompt).toMatch(/data, not instructions/);
+    });
+
+    it("auto publishing becomes review when the run reads the open web", async () => {
+      agent("webauto", "mcp: [wp]\npublish_mode:\n  default: auto", "[Read, WebSearch]");
+      orch.syncAgents();
+      const launches: McpLaunch[] = [];
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launches.push(launch);
+        return original(launch);
+      };
+      await give("webauto", "acme");
+      expect(launches[0]?.publish?.mode).toBe("review");
+      await give("autopub", "acme");
+      expect(launches[1]?.publish?.mode).toBe("auto");
+    });
   });
 });

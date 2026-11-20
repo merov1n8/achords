@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Prompt-injection guard: every agent is told that what it reads (web pages, comments, posts, search queries, files) is data and never instructions; results from client accounts arrive marked as external content; and an agent that reads the open web never publishes automatically, its posts always wait for your approval.
 - Publishing messages are written for people: an approval request shows the post itself (title, text without HTML, other fields as plain lines) instead of JSON, the result is one sentence with a link ("Saved as a draft. Open it: …"), and a task that sent something for approval ends with a single line instead of repeating it.
 - Credentials from the web: a project's WordPress connection (address, user, application password) can be set in the project editor, and missing integration secrets (e.g. the Meta token) right on Settings → Integrations. Values go to the vault and are never shown again.
 - Meta is limited per client like Google: the page and Instagram account IDs in a project's facebook and instagram accounts are the only ones agents can use there.
