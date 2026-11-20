@@ -1,34 +1,63 @@
 import { describe, expect, it } from "vitest";
-import { ago, groupTasks } from "./kanban.ts";
+import { ago, boardColumns, columnLabel, dropKind, type Rule } from "./kanban.ts";
 import type { Task } from "./types.ts";
 
-const task = (id: string, status: Task["status"], updatedAt = 0): Task => ({
+const task = (id: string, over: Partial<Task> = {}): Task => ({
   id,
   title: id,
-  status,
-  assigneeAgentId: "web-dev",
+  status: "done",
+  assigneeAgentId: "dev",
   threadId: null,
+  parentId: null,
+  column: "in_progress",
   error: null,
   createdAt: 0,
-  updatedAt,
+  updatedAt: 0,
+  ...over,
 });
 
-describe("groupTasks", () => {
-  it("maps statuses to kanban columns, newest first", () => {
-    const cols = groupTasks([
-      task("a", "queued", 1),
-      task("b", "claimed"),
-      task("c", "done", 1),
-      task("d", "done", 5),
-      task("e", "failed"),
-      task("f", "cancelled"),
+const matrix: { to: string; rules: Rule[] }[] = [
+  { to: "review", rules: [{ from: "in_progress", by: "assignee" }] },
+  { to: "done", rules: [{ from: "review", by: "role:qa", not: "assignee" }] },
+  { to: "deployed", rules: [{ from: "done", by: "owner" }] },
+];
+
+describe("boardColumns", () => {
+  it("puts cards of the workspace into workflow columns, newest first, with child counts", () => {
+    const tasks = [
+      task("a", { updatedAt: 1 }),
+      task("b", { updatedAt: 5 }),
+      task("c", { column: "review" }),
+      task("child", { parentId: "a", column: null }),
+      task("other", { assigneeAgentId: "ops" }),
+    ];
+    const cols = boardColumns(["in_progress", "review"], tasks, new Set(["dev"]));
+    expect(cols.map((c) => [c.id, c.cards.map((k) => [k.task.id, k.children])])).toEqual([
+      [
+        "in_progress",
+        [
+          ["b", 0],
+          ["a", 1],
+        ],
+      ],
+      ["review", [["c", 0]]],
     ]);
-    expect(cols.map((c) => [c.title, c.tasks.map((t) => t.id)])).toEqual([
-      ["To do", ["a"]],
-      ["In progress", ["b"]],
-      ["Done", ["d", "c"]],
-      ["Failed", ["e", "f"]],
-    ]);
+  });
+});
+
+describe("dropKind", () => {
+  it("tells the owner whether a drop follows the rules or is an override", () => {
+    expect(dropKind(matrix, "done", "deployed")).toBe("allowed");
+    expect(dropKind(matrix, "in_progress", "done")).toBe("override");
+    expect(dropKind(matrix, "review", "done")).toBe("override"); // QA's move, not the owner's
+    expect(dropKind(matrix, "done", "done")).toBe("same");
+  });
+});
+
+describe("columnLabel", () => {
+  it("uses the catalog for known columns and a readable fallback for custom ones", () => {
+    expect(columnLabel("in_progress")).toBe("In progress");
+    expect(columnLabel("waiting_for_client")).toBe("Waiting for client");
   });
 });
 
