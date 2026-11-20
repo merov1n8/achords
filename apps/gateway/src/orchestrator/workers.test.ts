@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createThread, getTask, listMessages, openCoreDatabase, type Task } from "@achords/core";
@@ -102,7 +102,9 @@ describe("ephemeral workers and agent proposals (ADR-0029)", () => {
     expect(spawned).toMatchObject({ ok: true });
     const worker = calls.find((c) => c.task.parentId)?.req;
     expect(worker?.tools).toEqual(["Read", "Bash", "TodoWrite"]);
-    expect(worker?.allowedTools).toEqual(["Read", "Bash(npm test:*)", "TodoWrite"]);
+    // Reads only inside the granted path; no write tool, no write rule.
+    const site = realpathSync(join(ws, "site"));
+    expect(worker?.allowedTools).toEqual([`Read(/${site}/**)`, "Bash(npm test:*)", "TodoWrite"]);
     expect(worker?.cwd).toBe(join(ws, "site"));
     // Depth 1: no hub at all (cannot delegate, spawn, propose or ask).
     expect(worker?.mcpConfigPath).toBeUndefined();

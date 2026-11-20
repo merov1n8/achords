@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -236,6 +243,11 @@ describe("orchestrator", () => {
     // Bash is available, but only allow-listed commands run without approval.
     expect(req.allowedTools).toContain("Bash(git status:*)");
     expect(req.allowedTools).not.toContain("Bash");
+    // File tools only inside the agent's own folders: a bare "Read" would open the whole disk.
+    expect(req.allowedTools).not.toContain("Read");
+    expect(req.allowedTools).not.toContain("Edit");
+    expect(req.allowedTools).toContain(`Read(/${realpathSync(ws)}/**)`);
+    expect(req.allowedTools).toContain(`Edit(/${realpathSync(ws)}/**)`);
     expect(req.prompt).toContain("Build it");
     expect(req.appendSystemPrompt).toContain("# Web developer");
 
