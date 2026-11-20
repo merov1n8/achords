@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   appendMessage,
   homePaths,
+  isPaused,
   listThreads,
   openCoreDatabase,
   readLivePid,
@@ -15,7 +16,7 @@ import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
 import { createRunTokens } from "./mcp/tokens.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
-import { seedAgents } from "./orchestrator/seed.ts";
+import { seedAgents, seedSchedules } from "./orchestrator/seed.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
 import { whisperTranscriber } from "./voice/transcribe.ts";
 
@@ -24,6 +25,7 @@ const TICK_MS = 1000;
 // Upper bound for a cancelled run to finish killing its process group on shutdown.
 const SHUTDOWN_WAIT_MS = 5000;
 const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
+const SEED_SCHEDULES = new URL("../../../seed/schedules/", import.meta.url).pathname;
 const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const WEB_DIST = new URL("../../web/dist/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
@@ -102,6 +104,9 @@ export function runGateway(home: string): Promise<number> {
     },
   });
   orchestrator.syncAgents();
+  const seededSchedules = seedSchedules(SEED_SCHEDULES, db);
+  if (seededSchedules.length)
+    log(`seeded schedules (off until enabled): ${seededSchedules.join(", ")}`);
 
   // Voice notes (Telegram and web) are transcribed on this machine (ADR-0014).
   const transcriber = whisperTranscriber({
@@ -169,6 +174,14 @@ export function runGateway(home: string): Promise<number> {
           .finally(() => {
             delivering = false;
           });
+      }
+      // Scheduler (ADR-0033): due schedules become queued tasks; the worker below runs them.
+      if (!isPaused(db)) {
+        try {
+          orchestrator.runDueSchedules();
+        } catch (err) {
+          log(`scheduler error: ${(err as Error).message}`);
+        }
       }
       if (!working) {
         working = orchestrator

@@ -616,6 +616,47 @@ describe("HTTP API", () => {
     expect((await call("/api/rooms/nope/messages")).status).toBe(404);
   });
 
+  it("schedules: create (validated), list, toggle, upcoming runs, delete", async () => {
+    const { call } = await pair();
+    upsertAgent(db, { id: "web-dev", name: "Web dev", role: "web-dev", workspace: "w" });
+    const body = {
+      name: "Daily check",
+      cron: "0 9 * * *",
+      agentId: "web-dev",
+      title: "Check",
+      instructions: "Look.",
+    };
+    const created = await call("/api/schedules", { method: "POST", body: JSON.stringify(body) });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const bad = await call("/api/schedules", {
+      method: "POST",
+      body: JSON.stringify({ ...body, cron: "daily" }),
+    });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toMatch(/5 fields/);
+    expect(
+      (
+        await call("/api/schedules", {
+          method: "POST",
+          body: JSON.stringify({ ...body, agentId: "ghost" }),
+        })
+      ).status,
+    ).toBe(400);
+
+    const upcoming = (await (await call("/api/schedules/upcoming?days=7")).json()) as {
+      scheduleId: string;
+      at: number;
+    }[];
+    expect(upcoming.filter((u) => u.scheduleId === id).length).toBeGreaterThanOrEqual(6);
+
+    const off = await call(`/api/schedules/${id}`, { method: "PUT", body: '{"enabled":false}' });
+    expect(((await off.json()) as { enabled: boolean }).enabled).toBe(false);
+    expect(await (await call("/api/schedules/upcoming?days=7")).json()).toEqual([]);
+    expect((await call(`/api/schedules/${id}`, { method: "DELETE" })).status).toBe(200);
+    expect(await (await call("/api/schedules")).json()).toEqual([]);
+  });
+
   it("usage: latest quota windows and today's cost", async () => {
     const { call } = await pair();
     recordUsageWindows(db, "cli-claude", [

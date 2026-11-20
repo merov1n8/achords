@@ -647,3 +647,26 @@ main {
 .meter-row .grow {
   flex: 1;
 }
+
+/* Schedules */
+.week {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 1fr);
+  gap: 10px;
+  overflow-x: auto;
+}
+.day h2 {
+  margin-bottom: 8px;
+}
+.slot {
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+.slot.past {
+  opacity: 0.5;
+}
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}

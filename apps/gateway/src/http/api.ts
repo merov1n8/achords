@@ -4,23 +4,30 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import {
   AuthError,
+  createSchedule,
   createSession,
   createThread,
   type Db,
+  deleteSchedule,
   getRoom,
+  getSchedule,
   getThread,
   listAgents,
   listMessages,
   listRooms,
+  listSchedules,
   listSessions,
   listTasks,
   listThreads,
   listUsageWindows,
   liveProgress,
+  occurrences,
   redeemPairingCode,
   revokeSession,
+  type ScheduleInput,
   setThreadProject,
   spendSince,
+  updateSchedule,
   validateSession,
 } from "@achords/core";
 import { t } from "@achords/i18n";
@@ -268,6 +275,64 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Scheduler (ADR-0033): what runs when; the gateway tick starts them.
+    ["GET", /^\/api\/schedules$/, () => listSchedules(db)],
+    [
+      "GET",
+      /^\/api\/schedules\/upcoming$/,
+      ({ req }) => {
+        const days = Math.min(
+          31,
+          Math.max(1, Number(new URL(req.url ?? "/", "http://x").searchParams.get("days") ?? 7)),
+        );
+        const from = new Date();
+        from.setHours(0, 0, 0, 0);
+        const to = new Date(from);
+        to.setDate(to.getDate() + days);
+        return listSchedules(db)
+          .filter((s) => s.enabled)
+          .flatMap((s) =>
+            occurrences(s.cron, from.getTime(), to.getTime(), 200).map((at) => ({
+              scheduleId: s.id,
+              name: s.name,
+              agentId: s.agentId,
+              at,
+            })),
+          )
+          .sort((a, b) => a.at - b.at);
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/schedules$/,
+      async ({ res, body }) => {
+        const input = scheduleInput(await body(), true) as ScheduleInput;
+        send(
+          res,
+          201,
+          attempt(() => createSchedule(db, input)),
+        );
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/schedules\/([\w-]{1,64})$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        if (!getSchedule(db, id)) throw new HttpError(404, "no such schedule");
+        const patch = scheduleInput(await body(), false);
+        return attempt(() => updateSchedule(db, id, patch));
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/schedules\/([\w-]{1,64})$/,
+      ({ params }) => {
+        if (!getSchedule(db, params[0] as string)) throw new HttpError(404, "no such schedule");
+        deleteSchedule(db, params[0] as string);
+        return { ok: true };
+      },
+    ],
     // Usage meters (step 6): quota windows as the CLI reported them, and today's cost.
     [
       "GET",
@@ -559,6 +624,38 @@ export function createApiHandler(deps: ApiDeps) {
   ];
 
   const deviceOf = (s: Session) => ({ id: s.id, deviceName: s.deviceName });
+
+  /** Validation errors from core (e.g. a bad cron expression) become 400s with the reason. */
+  const attempt = <T>(fn: () => T): T => {
+    try {
+      return fn();
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(400, (err as Error).message);
+    }
+  };
+  const scheduleInput = (b: Record<string, unknown>, full: boolean): Partial<ScheduleInput> => {
+    const out: Partial<ScheduleInput> = {};
+    const text = (key: keyof ScheduleInput, max: number) => {
+      if (b[key] !== undefined || full)
+        (out as Record<string, unknown>)[key] = str(b[key], key, max);
+    };
+    text("name", 100);
+    text("cron", 100);
+    text("agentId", 64);
+    text("title", 200);
+    text("instructions", 20_000);
+    if (b.enabled !== undefined) out.enabled = b.enabled === true;
+    if (b.project !== undefined)
+      out.project = b.project === null || b.project === "" ? null : str(b.project, "project", 64);
+    if (out.agentId && !listAgents(db).some((a) => a.id === out.agentId)) {
+      throw new HttpError(400, `no agent ${out.agentId}`);
+    }
+    if (out.project && deps.projectsDir && !loadProjects(deps.projectsDir).has(out.project)) {
+      throw new HttpError(400, `no project ${out.project}`);
+    }
+    return out;
+  };
 
   const projectsDirOrThrow = () => {
     if (!deps.projectsDir) throw new HttpError(404, "projects are not configured");
