@@ -176,7 +176,10 @@ describe("hub MCP server tool filtering", () => {
     child.stdin?.write(
       `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "delegate", arguments: { agent: "a", title: "b", instructions: "c" } } })}\n`,
     );
-    await new Promise((r) => setTimeout(r, 500));
+    // Wait for both replies rather than a fixed time: the SDK starts slower on CI machines.
+    for (let i = 0; i < 100 && lines.filter((l) => l.id === 1 || l.id === 2).length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     child.kill();
     const list = lines.find((l) => l.id === 1)?.result as { tools: { name: string }[] };
     expect(list.tools.map((t) => t.name)).toEqual(["ask_owner"]);

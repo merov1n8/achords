@@ -20,7 +20,7 @@ import {
 } from "@achords/core";
 import { openVault, type Vault } from "@achords/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createRunTokens } from "../mcp/tokens.ts";
+import { createMcpTickets, createRunTokens } from "../mcp/tokens.ts";
 import { createApiHandler } from "./api.ts";
 
 describe("HTTP API", () => {
@@ -38,6 +38,7 @@ describe("HTTP API", () => {
   const rooms: unknown[] = [];
   let synced = 0;
   const tokens = createRunTokens();
+  const mcpTickets = createMcpTickets();
   const logs: string[] = [];
   let agentsDir: string;
   let runDir: string;
@@ -115,6 +116,7 @@ describe("HTTP API", () => {
           },
         },
         runTokens: tokens,
+        mcpTickets,
         agentsDir,
         projectsDir,
         runDir,
@@ -386,6 +388,19 @@ describe("HTTP API", () => {
     expect((await call("/api/threads", { method: "POST", body: "{nope" })).status).toBe(400);
     const big = JSON.stringify({ title: "x".repeat(70_000) });
     expect((await call("/api/threads", { method: "POST", body: big })).status).toBe(413);
+  });
+
+  it("integration launcher: a ticket yields the launch once; run tokens are not tickets", async () => {
+    const launch = { command: "npx", args: ["x@1"], env: { WP_PASSWORD: "s3cret-value" } };
+    const { ticket } = mcpTickets.issue(launch);
+    const redeem = (auth: string) =>
+      fetch(`${base}/api/agent/mcp-env`, { method: "POST", headers: { authorization: auth } });
+    const first = await redeem(`Bearer ${ticket}`);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual(launch);
+    expect((await redeem(`Bearer ${ticket}`)).status).toBe(401);
+    const run = tokens.issue("task-1", "web-dev", ["ask_owner"]);
+    expect((await redeem(`Bearer ${run.token}`)).status).toBe(401);
   });
 
   it("agent endpoint: caller identity comes only from the run token (no cookie, no CSRF)", async () => {
