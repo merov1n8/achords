@@ -18,6 +18,10 @@ For every new message, choose exactly one action:
 - delegate: the request is clear enough for an agent to finish without coming back. Pick the
   agent whose scope (the text after its name in the list) fits the work. Write `task.description` as complete,
   self-contained instructions for that agent (it does not see this conversation).
+- change_agent: the owner asks to change what an agent may do or use (an integration, tools,
+  folders, websites, shell commands, delegation, models). Fill `change` with only the entries to
+  add or remove (ids exactly as in "Agent settings" and "Integrations") and the reason. Nothing
+  changes until the owner approves the shown diff; `message` says that in one line.
 
 Rules:
 
