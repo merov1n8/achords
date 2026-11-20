@@ -4,11 +4,13 @@ export const PACKAGE_NAME = "@achords/policy";
 export { agentSummary } from "./agent-doc.ts";
 export {
   allowedIntegrationTools,
+  type CallScope,
   type Catalog,
   type CatalogEntry,
   catalogEntrySchema,
   grantedIntegrations,
   loadCatalog,
+  scopeRefusal,
   secretRefs,
 } from "./catalog.ts";
 export * from "./check.ts";

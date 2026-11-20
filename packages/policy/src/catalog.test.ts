@@ -6,6 +6,7 @@ import {
   allowedIntegrationTools,
   grantedIntegrations,
   loadCatalog,
+  scopeRefusal,
   secretRefs,
 } from "./catalog.ts";
 import { parseManifest } from "./manifest.ts";
@@ -139,5 +140,31 @@ describe("catalog entries with builtin servers and credential files", () => {
     expect(() =>
       write('id: g\nname: G\ncommand: uvx\nfiles:\n  F:\n    token: "vault:Bad"\n')(),
     ).toThrow(/invalid vault reference/);
+  });
+});
+
+describe("project scope of shared accounts (ADR-0036)", () => {
+  const ga = { args: ["property_id"], free: [], strip: "properties/", allowed: ["111"] };
+  const gsc = {
+    args: ["site_url", "site_urls"],
+    free: ["gsc_server_guide"],
+    allowed: ["sc-domain:a.com"],
+  };
+
+  it("passes the project's own values, in either spelling", () => {
+    expect(scopeRefusal(ga, "run_report", { property_id: "111" })).toBeUndefined();
+    expect(scopeRefusal(ga, "run_report", { property_id: "properties/111" })).toBeUndefined();
+    expect(scopeRefusal(ga, "run_report", { property_id: 111 })).toBeUndefined();
+    expect(scopeRefusal(gsc, "gsc_server_guide", {})).toBeUndefined();
+  });
+
+  it("refuses other clients, lists of everyone, and odd values", () => {
+    expect(scopeRefusal(ga, "run_report", { property_id: "222" })).toMatch(/222 is not part/);
+    expect(scopeRefusal(ga, "get_account_summaries", {})).toMatch(/not limited/);
+    expect(scopeRefusal(ga, "get_account_summaries", undefined)).toMatch(/not limited/);
+    expect(
+      scopeRefusal(gsc, "gsc_multi_property_health", { site_urls: ["sc-domain:a.com", "b.com"] }),
+    ).toMatch(/b.com/);
+    expect(scopeRefusal(ga, "run_report", { property_id: { id: "111" } })).toBeDefined();
   });
 });

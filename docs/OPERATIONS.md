@@ -55,6 +55,14 @@ and Search Console site, and the one sign-in reaches all of them.
 4. `pnpm achords connect google ~/Downloads/client_secret_….json`, sign in, tick every box.
    The client and refresh token land in the vault (`google-client-id`, `google-client-secret`,
    `google-refresh-token`, `google-project-id`); delete the JSON afterwards.
+5. Per client project, name its own property and site in `~/.achords/projects/<slug>/project.yaml`
+   (agents see nothing else, ADR-0036):
+
+   ```yaml
+   integrations:
+     ga4: ["324490876"]                      # GA4 property id (Admin → Property details)
+     search-console: ["sc-domain:example.com"] # exactly as Search Console lists it
+   ```
 
 ## Telegram
 
