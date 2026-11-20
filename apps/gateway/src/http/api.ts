@@ -15,12 +15,15 @@ import {
   listThreads,
   redeemPairingCode,
   revokeSession,
+  setThreadProject,
   validateSession,
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
   createAgentFiles,
+  createProject,
   loadManifest,
+  loadProjects,
   updateManifestModels,
   updateManifestName,
 } from "@achords/policy";
@@ -71,6 +74,8 @@ export interface ApiDeps {
   /** Local speech to text for web voice notes (ADR-0014) and its scratch folder. */
   transcriber?: Transcriber;
   runDir?: string;
+  /** Projects ($ACHORDS_HOME/projects, ADR-0031). */
+  projectsDir?: string;
   /** Agent manifests ($ACHORDS_HOME/agents) for the model settings. */
   agentsDir?: string;
   /** Chat models pulled in the local model server (suggestions only). */
@@ -257,6 +262,56 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Projects (ADR-0031): files are managed in Finder; the API lists, creates and assigns.
+    [
+      "GET",
+      /^\/api\/projects$/,
+      () =>
+        [...loadProjects(projectsDirOrThrow()).values()].map(
+          ({ slug, name, workspace, dir, filesDir }) => ({
+            slug,
+            name,
+            workspace,
+            dir,
+            filesDir,
+          }),
+        ),
+    ],
+    [
+      "POST",
+      /^\/api\/projects$/,
+      async ({ res, body }) => {
+        const b = await body();
+        try {
+          const p = createProject(projectsDirOrThrow(), {
+            slug: str(b.slug, "slug", 64),
+            name: str(b.name, "name", 100),
+            workspace: str(b.workspace, "workspace", 64),
+          });
+          log(`project created in the web UI: ${p.slug}`);
+          send(res, 201, { slug: p.slug, dir: p.dir, filesDir: p.filesDir });
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          const msg = (err as Error).message;
+          throw new HttpError(/already exists/.test(msg) ? 409 : 400, msg);
+        }
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/threads\/([\w-]+)\/project$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        if (!getThread(db, id)) throw new HttpError(404, "no such thread");
+        const raw = (await body()).project;
+        const project = raw === null ? null : str(raw, "project", 64);
+        if (project && !loadProjects(projectsDirOrThrow()).has(project)) {
+          throw new HttpError(404, `no project ${project}`);
+        }
+        setThreadProject(db, id, project);
+        return { ok: true, project };
+      },
+    ],
     // Kanban (ADR-0030): the owner moves cards; `from` is the column the browser showed.
     [
       "POST",
@@ -475,6 +530,11 @@ export function createApiHandler(deps: ApiDeps) {
   ];
 
   const deviceOf = (s: Session) => ({ id: s.id, deviceName: s.deviceName });
+
+  const projectsDirOrThrow = () => {
+    if (!deps.projectsDir) throw new HttpError(404, "projects are not configured");
+    return deps.projectsDir;
+  };
 
   const manifestPath = (id: string) => {
     const path = join(deps.agentsDir ?? "", id, "agent.yaml");

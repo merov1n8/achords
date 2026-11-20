@@ -29,9 +29,9 @@ export function enqueueChild(
     const row = db
       .prepare(
         `INSERT INTO tasks (id, thread_id, parent_id, root_id, depth, agent_chain, title,
-           description, assignee_agent_id, max_attempts, sensitivity, worker_spec, created_at,
-           updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+           description, assignee_agent_id, max_attempts, sensitivity, worker_spec, project,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(
         randomUUID(),
@@ -46,6 +46,7 @@ export function enqueueChild(
         input.maxAttempts ?? 3,
         sensitivity,
         input.workerSpec ? JSON.stringify(input.workerSpec) : null,
+        parent.project,
         now,
         now,
       );

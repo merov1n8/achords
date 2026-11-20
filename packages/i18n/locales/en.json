@@ -135,5 +135,9 @@
   "agents.form.delegatesTo": "May delegate to",
   "agents.form.budget": "Budget per run (USD)",
   "agents.form.budgetHelp": "Optional cap for one run.",
-  "agents.form.create": "Create agent"
+  "agents.form.create": "Create agent",
+  "telegram.projectList": "Projects: {list}\nCurrent: {current}\nUse /project <slug> to pick one, /project none to clear.",
+  "telegram.projectSet": "Project for this thread: {name} ({slug}). Its PROJECT.md applies to new work here.",
+  "telegram.projectCleared": "This thread has no project now.",
+  "telegram.projectUnknown": "No project {slug}. Projects: {list}"
 }

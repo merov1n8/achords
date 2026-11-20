@@ -23,6 +23,8 @@ export function homePaths(home: string) {
     // Emergency stop marker: while it exists the gateway refuses to start (`achords resume` clears).
     stopFile: join(runDir, "STOP"),
     logDir: join(home, "logs"),
+    // Projects under workspaces (ADR-0031): folders the owner manages in Finder.
+    projectsDir: join(home, "projects"),
   };
 }
 

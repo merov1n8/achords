@@ -177,6 +177,7 @@ export function runGateway(home: string): Promise<number> {
           vault: getVault,
           runTokens,
           agentsDir: join(home, "agents"),
+          projectsDir: paths.projectsDir,
           transcriber,
           runDir: paths.runDir,
           // Suggestions only: chat models pulled in Ollama (embedding models filtered out).
