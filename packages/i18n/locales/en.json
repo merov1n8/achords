@@ -91,5 +91,9 @@
   "agents.saved": "Saved to agent.yaml.",
   "common.close": "Close",
   "chat.mic": "Record a voice note (transcribed on this machine)",
-  "chat.micStop": "Stop recording"
+  "chat.micStop": "Stop recording",
+  "thread.moveRequest": "{actor} wants to move \"{title}\" from {from} to {to}.",
+  "action.moveApproved": "Moved \"{title}\" to {to}.",
+  "action.moveRejected": "Not moved: \"{title}\" stays in {from}.",
+  "action.noPendingMove": "No pending move for this card."
 }

@@ -80,6 +80,22 @@ const TOOLS = [
     endpoint: "/api/agent/propose_agent",
     done: "Proposal filed; the owner decides. Continue your task without the new agent.",
   },
+  {
+    name: "move_task",
+    description:
+      "Move a kanban card to another column (e.g. your finished work to review, or reviewed work to done). Only moves the workspace workflow allows for your role are accepted; some need the owner's approval.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "The card's task id" },
+        to: { type: "string", description: "Target column, e.g. review or done" },
+      },
+      required: ["task_id", "to"],
+      additionalProperties: false,
+    },
+    endpoint: "/api/agent/move_task",
+    done: "Card moved.",
+  },
 ] as const;
 
 const granted = () => TOOLS.filter((t) => GRANTED.has(t.name));
@@ -119,10 +135,13 @@ async function callTool(name: string, args: Json): Promise<Json> {
     });
     const out = (await res.json()) as {
       ok?: boolean;
+      pending?: boolean;
       taskId?: string;
       reason?: string;
       error?: string;
     };
+    if (out.ok && out.pending)
+      return text("Move requested; the owner decides. Continue or finish your turn.");
     if (out.ok) return text(tool.done.replace("{taskId}", out.taskId ?? ""));
     return text(`Refused: ${out.reason ?? out.error ?? `HTTP ${res.status}`}`, true);
   } catch (err) {

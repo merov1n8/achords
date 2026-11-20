@@ -34,7 +34,7 @@ export interface TelegramDeps {
   apiBase?: string;
   /** Long-poll timeout in seconds (0 in tests). */
   pollTimeoutS?: number;
-  orchestrator: Pick<Orchestrator, "handleMessage" | "decideProposal">;
+  orchestrator: Pick<Orchestrator, "handleMessage" | "runAction">;
   /** Local speech-to-text for voice notes (ADR-0014); without it voice notes get a hint. */
   transcriber?: Transcriber;
   /** Called after an owner-issued /stop has paused the queue and killed runs. */
@@ -101,14 +101,7 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     });
 
   /** Runs a button action; same effect as the matching text command. */
-  const runAction = (data: string): string => {
-    const m = /^proposal:(approve|reject):([\w-]{1,32})$/.exec(data);
-    if (!m) return t("action.unknown");
-    const out = deps.orchestrator.decideProposal(m[2] as string, m[1] === "approve");
-    return out.ok
-      ? t(m[1] === "approve" ? "action.approved" : "action.rejected", { agent: out.agentId })
-      : out.reason;
-  };
+  const runAction = (data: string): string => deps.orchestrator.runAction(data).message;
 
   async function handlePress(q: NonNullable<Update["callback_query"]>) {
     const chat = q.message?.chat;
