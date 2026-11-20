@@ -1,25 +1,52 @@
 import { t } from "./i18n.ts";
 import type { Task } from "./types.ts";
 
-export interface Column {
-  title: string;
-  tasks: Task[];
+export type Rule = { from: string; by: string; not?: string };
+export type Matrix = { to: string; rules: Rule[] }[];
+export interface BoardColumn {
+  id: string;
+  cards: { task: Task; children: number }[];
 }
 
-const COLUMNS: [string, Task["status"][]][] = [
-  ["kanban.todo", ["queued"]],
-  ["kanban.inProgress", ["claimed"]],
-  ["kanban.done", ["done"]],
-  ["kanban.failed", ["failed", "cancelled"]],
-];
-
-export function groupTasks(tasks: Task[]): Column[] {
-  return COLUMNS.map(([key, statuses]) => ({
-    title: t(key),
-    tasks: tasks
-      .filter((task) => statuses.includes(task.status))
-      .sort((a, b) => b.updatedAt - a.updatedAt),
+/** Cards of one workspace (by the assignee's workspace) in workflow column order. */
+export function boardColumns(
+  columns: string[],
+  tasks: Task[],
+  agentsInWorkspace: Set<string>,
+): BoardColumn[] {
+  const children = new Map<string, number>();
+  for (const task of tasks) {
+    if (task.parentId) children.set(task.parentId, (children.get(task.parentId) ?? 0) + 1);
+  }
+  const cards = tasks.filter(
+    (task) => task.column && task.assigneeAgentId && agentsInWorkspace.has(task.assigneeAgentId),
+  );
+  return columns.map((id) => ({
+    id,
+    cards: cards
+      .filter((task) => task.column === id)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((task) => ({ task, children: children.get(task.id) ?? 0 })),
   }));
+}
+
+/** For the owner every drop is possible; one that no owner rule grants is an override (logged). */
+export function dropKind(
+  matrix: Matrix,
+  from: string,
+  to: string,
+): "same" | "allowed" | "override" {
+  if (from === to) return "same";
+  const rules = matrix.find((r) => r.to === to)?.rules ?? [];
+  return rules.some((r) => r.from === from && r.by === "owner") ? "allowed" : "override";
+}
+
+export function columnLabel(id: string): string {
+  const key = `kanban.col.${id}`;
+  const label = t(key);
+  if (label !== key) return label;
+  const words = id.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /** Compact age for cards and lists ("card aging"). */

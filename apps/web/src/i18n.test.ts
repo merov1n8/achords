@@ -42,10 +42,6 @@ describe("i18n", () => {
       "appearance.theme.dark",
       "appearance.accent.violet",
       "appearance.accent.teal",
-      "kanban.todo",
-      "kanban.inProgress",
-      "kanban.done",
-      "kanban.failed",
     ])
       used.add(k);
     const missing = [...used].filter((k) => !(k in en));
