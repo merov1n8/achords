@@ -29,6 +29,7 @@ describe("HTTP API", () => {
   const questions: { from: unknown; question: string }[] = [];
   const workerCalls: { from: unknown; request: unknown }[] = [];
   const decisions: { id: string; approve: boolean }[] = [];
+  const moves: unknown[] = [];
   const tokens = createRunTokens();
   const logs: string[] = [];
   let agentsDir: string;
@@ -71,6 +72,20 @@ describe("HTTP API", () => {
             decisions.push({ id, approve });
             return { ok: true, agentId: "tester" };
           },
+          runAction: (data) => {
+            const [, verb, id] = data.split(":");
+            decisions.push({ id: id as string, approve: verb === "approve" });
+            return { ok: true, message: "Approved: agent tester." };
+          },
+          moveTask: (from, request) => {
+            moves.push({ from, request });
+            return { ok: true };
+          },
+          ownerMove: (_taskId, from, to) =>
+            from === "stale"
+              ? { ok: false, reason: "the card was moved meanwhile" }
+              : { ok: true, override: to === "deployed" },
+          workflow: () => ({ workflow: { columns: ["a"] }, matrix: [] }) as never,
           askOwner: (from, question) => {
             questions.push({ from, question });
             return { ok: true };
@@ -428,6 +443,41 @@ describe("HTTP API", () => {
       from: { from: "task", taskId: "task-5" },
       request: { instructions: "x", tools: ["Read"], paths: [] },
     });
+  });
+
+  it("kanban: the owner moves cards (stale views refused); agents move only via their run token", async () => {
+    const { call } = await pair();
+    const ok = await call("/api/tasks/t1/move", {
+      method: "POST",
+      body: '{"from":"in_progress","to":"deployed"}',
+    });
+    expect(await ok.json()).toEqual({ ok: true, override: true });
+    expect(logs.some((l) => /owner override on task t1/.test(l))).toBe(true);
+    const stale = await call("/api/tasks/t1/move", {
+      method: "POST",
+      body: '{"from":"stale","to":"done"}',
+    });
+    expect(stale.status).toBe(409);
+
+    const token = tokens.issue("task-9", "qa", ["move_task"]).token;
+    const agent = await fetch(`${base}/api/agent/move_task`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: '{"task_id":"t1","to":"done","as":"owner"}',
+    });
+    expect(await agent.json()).toEqual({ ok: true });
+    // Identity from the token; extra fields ignored.
+    expect(moves.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-9" },
+      request: { taskId: "t1", to: "done" },
+    });
+    const notGranted = tokens.issue("task-9", "qa", ["ask_owner"]).token;
+    const refused = await fetch(`${base}/api/agent/move_task`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${notGranted}`, "content-type": "application/json" },
+      body: '{"task_id":"t1","to":"done"}',
+    });
+    expect(refused.status).toBe(403);
   });
 
   it("message actions can be run from the web (owner session + CSRF)", async () => {

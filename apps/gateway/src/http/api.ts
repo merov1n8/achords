@@ -43,7 +43,16 @@ export interface ApiDeps {
   db: Db;
   orchestrator: Pick<
     Orchestrator,
-    "handleMessage" | "delegate" | "askOwner" | "spawnWorker" | "proposeAgent" | "decideProposal"
+    | "handleMessage"
+    | "delegate"
+    | "askOwner"
+    | "spawnWorker"
+    | "proposeAgent"
+    | "decideProposal"
+    | "moveTask"
+    | "ownerMove"
+    | "runAction"
+    | "workflow"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -240,6 +249,28 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Kanban (ADR-0030): the owner moves cards; `from` is the column the browser showed.
+    [
+      "POST",
+      /^\/api\/tasks\/([\w-]{1,64})\/move$/,
+      async ({ params, body }) => {
+        const b = await body();
+        const out = deps.orchestrator.ownerMove(
+          params[0] as string,
+          str(b.from, "from", 32),
+          str(b.to, "to", 32),
+        );
+        if (!out.ok) throw new HttpError(409, out.reason);
+        if (out.override)
+          log(`kanban: owner override on task ${params[0]}: ${String(b.from)} → ${String(b.to)}`);
+        return out;
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/workflow\/([\w-]{1,64})$/,
+      ({ params }) => deps.orchestrator.workflow(params[0] as string),
+    ],
     // Web voice note → text on this machine; the browser puts it in the composer to review.
     [
       "POST",
@@ -270,15 +301,12 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/actions$/,
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
-        const m = /^proposal:(approve|reject):([\w-]{1,32})$/.exec(data);
-        if (!m) throw new HttpError(400, "unknown action");
-        const approve = m[1] === "approve";
-        const out = deps.orchestrator.decideProposal(m[2] as string, approve);
-        if (!out.ok) throw new HttpError(409, out.reason);
-        return {
-          ok: true,
-          message: t(approve ? "action.approved" : "action.rejected", { agent: out.agentId }),
-        };
+        if (!/^(proposal|move):(approve|reject):[\w-]{1,36}$/.test(data)) {
+          throw new HttpError(400, "unknown action");
+        }
+        const out = deps.orchestrator.runAction(data);
+        if (!out.ok) throw new HttpError(409, out.message);
+        return out;
       },
     ],
     // Agent proposals: owner-only (session + CSRF); agents can only file them.
@@ -403,7 +431,7 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
         const tool = path.slice("/api/agent/".length);
-        const AGENT_TOOLS = ["delegate", "ask_owner", "spawn_worker", "propose_agent"];
+        const AGENT_TOOLS = ["delegate", "ask_owner", "spawn_worker", "propose_agent", "move_task"];
         if (method !== "POST" || !AGENT_TOOLS.includes(tool)) throw new HttpError(404, "not found");
         if (!caller.tools.includes(tool)) {
           throw new HttpError(403, `tool ${tool} not granted to this run`);
@@ -425,12 +453,17 @@ export function createApiHandler(deps: ApiDeps) {
                   tools: strList(b.tools, "tools"),
                   paths: strList(b.paths, "paths"),
                 })
-              : tool === "propose_agent"
-                ? o.proposeAgent(from, {
-                    yaml: str(b.manifest_yaml, "manifest_yaml", 20_000),
-                    reason: str(b.reason, "reason", 2000),
+              : tool === "move_task"
+                ? o.moveTask(from, {
+                    taskId: str(b.task_id, "task_id", 64),
+                    to: str(b.to, "to", 32),
                   })
-                : o.askOwner(from, str(b.question, "question", 2000));
+                : tool === "propose_agent"
+                  ? o.proposeAgent(from, {
+                      yaml: str(b.manifest_yaml, "manifest_yaml", 20_000),
+                      reason: str(b.reason, "reason", 2000),
+                    })
+                  : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

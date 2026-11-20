@@ -136,11 +136,17 @@ describe("telegram channel", () => {
       apiBase: `http://127.0.0.1:${(tg.server.address() as AddressInfo).port}`,
       pollTimeoutS: 0,
       orchestrator: {
-        decideProposal: (id, approve) => {
-          decided.push(`${id}:${approve}`);
-          return id === "abc123"
-            ? { ok: true, agentId: "tester" }
-            : { ok: false, reason: "no pending proposal" };
+        // Same contract as the orchestrator: proposal:<verb>:<id> → message.
+        runAction: (data) => {
+          const m = /^proposal:(approve|reject):(.+)$/.exec(data);
+          if (!m) return { ok: false, message: "Unknown action." };
+          decided.push(`${m[2]}:${m[1] === "approve"}`);
+          return m[2] === "abc123"
+            ? {
+                ok: true,
+                message: `${m[1] === "approve" ? "Approved" : "Rejected"}: agent tester.`,
+              }
+            : { ok: false, message: "no pending proposal" };
         },
         handleMessage: async (threadId, text) => {
           handled.push({ threadId, text });
@@ -299,7 +305,7 @@ describe("telegram channel", () => {
         apiBase: `http://127.0.0.1:${(tg.server.address() as AddressInfo).port}`,
         pollTimeoutS: 0,
         orchestrator: {
-          decideProposal: () => ({ ok: false, reason: "x" }),
+          runAction: () => ({ ok: false, message: "x" }),
           handleMessage: async (threadId, text) => {
             handled.push({ threadId, text });
             return "answer";
@@ -398,7 +404,7 @@ describe("telegram channel", () => {
       pollTimeoutS: 0,
       orchestrator: {
         handleMessage: async () => "answer",
-        decideProposal: () => ({ ok: false, reason: "x" }),
+        runAction: () => ({ ok: false, message: "x" }),
       },
       onEmergencyStop: () => {},
       log: (m) => logs.push(m),

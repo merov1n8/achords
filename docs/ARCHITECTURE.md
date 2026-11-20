@@ -139,6 +139,7 @@ Default layout, configurable:
 ### 4.11 Kanban
 
 - Workflow per workspace (ADR-0030, planned): `workflow.yaml` with columns, transitions (`by: assignee | role:<x> | owner`, `not: assignee` for four-eyes) and `on_enter` automation (`assign: role:qa`, `approve: owner`). Agents move cards via the `move_task` hub tool only; the owner may drag & drop anything (Pointer Events, touch-friendly), logged. A permission matrix view shows who may do what.
+- Status: implemented in the gateway. Workflows live in `$ACHORDS_HOME/workflows/<workspace>.yaml` (seeded with the default once, never overwritten). Only root tasks get cards; a task given to an agent starts in `start`, a successful run lands in `finish` (review) unless the agent moved the card itself (maintainer decision). `on_enter assign: role:x` hands the card to the first agent of the workspace with that role (not the assignee) as a child task that is told which card to move; with nobody in that role the owner decides. `approve: owner` parks an agent's move and posts Approve/Reject buttons (`move:<verb>:<taskId>`). Every move is logged in `task_moves`; owner moves no rule grants are flagged as overrides. Web drag & drop and the matrix view follow.
 
 - Cards created by the user or the orchestrator; AI breakdown into subtasks, swimlanes by owner/priority, per-column WIP limits, card aging.
 
