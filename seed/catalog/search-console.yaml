@@ -41,3 +41,8 @@ tools:
     - gsc_claim_check
     - gsc_multi_property_health
   write: [gsc_sitemap_submit, gsc_index_notify, gsc_index_notify_batch]
+# In a project run only the client's own sites (project.yaml integrations.search-console) pass;
+# gsc_properties_list lists every client, so it is refused there.
+scope:
+  args: [site_url, site_urls]
+  free: [gsc_server_guide]

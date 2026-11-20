@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,7 +20,12 @@ import {
 import { createProject, loadCatalog } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMcpTickets, createRunTokens, type McpTickets } from "../mcp/tokens.ts";
+import {
+  createMcpTickets,
+  createRunTokens,
+  type McpLaunch,
+  type McpTickets,
+} from "../mcp/tokens.ts";
 import { createOrchestrator, type Orchestrator } from "./orchestrator.ts";
 
 const result = (): RunResult => ({
@@ -55,6 +68,11 @@ describe("integrations in runs (ADR-0034)", () => {
       join(catalogDir, "blender.yaml"),
       `id: blender\nname: Blender\ncommand: uvx\nargs: ["blender-mcp==1.0.0"]\ntools:\n  read: [get_scene_info]\n  write: [execute_blender_code]\n`,
     );
+    writeFileSync(
+      join(catalogDir, "ga.yaml"),
+      `id: ga\nname: GA4\ncommand: uvx\nargs: ["ga@1.0.0"]\nenv:\n  TOKEN: "vault:google-refresh-token"\ntools:\n  read: [run_report, get_account_summaries]\nscope:\n  args: [property_id]\n`,
+    );
+    agent("analyst", "mcp: [ga]");
     agent("boss", "");
     agent("marketer", "mcp: [wp]");
     agent("shelly", 'mcp: [wp]\nshell:\n  allow: ["ls"]');
@@ -268,6 +286,35 @@ describe("integrations in runs (ADR-0034)", () => {
       setSetting(db, `elevation:${old.taskId}`, String(Date.now() - 1));
       await drain();
       expect(seen[1]?.req.allowedTools).not.toContain("WebFetch");
+    });
+  });
+
+  describe("project scope of shared accounts (ADR-0036)", () => {
+    it("hands the project's targets to the launcher and names them in the prompt", async () => {
+      appendFileSync(
+        join(home, "projects", "acme", "project.yaml"),
+        'integrations:\n  ga: ["111"]\n',
+      );
+      let launched: McpLaunch | undefined;
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launched = launch;
+        return original(launch);
+      };
+      await give("analyst", "acme");
+      expect(launched?.scope).toEqual({ args: ["property_id"], free: [], allowed: ["111"] });
+      expect(seen[0]?.req.prompt).toMatch(/own integration targets[^\n]*ga: 111/);
+    });
+
+    it("leaves a scoped integration out without targets or without a project", async () => {
+      await give("analyst", "acme");
+      await give("analyst");
+      for (const run of seen) {
+        expect(JSON.parse(run.config ?? "{}").mcpServers?.ga).toBeUndefined();
+        expect(run.req.allowedTools).not.toContain("mcp__ga__run_report");
+      }
+      expect(seen[0]?.req.prompt).toMatch(/project.yaml of acme names no targets\): ga/);
+      expect(seen[1]?.req.prompt).toMatch(/no client project\): ga/);
     });
   });
 });

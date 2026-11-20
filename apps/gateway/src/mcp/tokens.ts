@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import type { CallScope } from "@achords/policy";
 
 export interface RunIdentity {
   taskId: string;
@@ -38,6 +39,8 @@ export interface McpLaunch {
   env: Record<string, string>;
   /** Env var → JSON fields of a private credentials file the launcher writes (path in the var). */
   files: Record<string, Record<string, string>>;
+  /** Project scope (ADR-0036): the launcher refuses calls outside the client's own values. */
+  scope?: CallScope;
 }
 
 export interface McpTickets {

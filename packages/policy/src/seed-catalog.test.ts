@@ -44,4 +44,12 @@ describe("shipped integration catalog", () => {
     expect(secretRefs(catalog.get("blender") as never)).toEqual([]);
     expect(secretRefs(catalog.get("unity") as never)).toEqual([]);
   });
+
+  it("limits the shared Google accounts to the project's own targets (ADR-0036)", () => {
+    expect(catalog.get("ga4")?.scope?.args).toEqual(["property_id"]);
+    expect(catalog.get("search-console")?.scope?.args).toEqual(["site_url", "site_urls"]);
+    // Tools that list every client are not free.
+    expect(catalog.get("ga4")?.scope?.free).not.toContain("get_account_summaries");
+    expect(catalog.get("search-console")?.scope?.free).not.toContain("gsc_properties_list");
+  });
 });
