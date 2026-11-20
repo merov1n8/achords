@@ -46,3 +46,7 @@ tools:
 scope:
   args: [site_url, site_urls]
   free: [gsc_server_guide]
+# Connection test (web Integrations page).
+test:
+  tool: gsc_property_get
+  args: { site_url: "{target}" }

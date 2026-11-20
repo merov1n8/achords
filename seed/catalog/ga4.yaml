@@ -32,3 +32,7 @@ tools:
 scope:
   args: [property_id]
   strip: "properties/"
+# Connection test (web Integrations page).
+test:
+  tool: get_property_details
+  args: { property_id: "{target}" }

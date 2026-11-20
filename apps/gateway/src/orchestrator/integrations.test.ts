@@ -74,7 +74,7 @@ describe("integrations in runs (ADR-0034)", () => {
     );
     writeFileSync(
       join(catalogDir, "ga.yaml"),
-      `id: ga\nname: GA4\ncommand: uvx\nargs: ["ga@1.0.0"]\nenv:\n  TOKEN: "vault:google-refresh-token"\ntools:\n  read: [run_report, get_account_summaries]\nscope:\n  args: [property_id]\n`,
+      `id: ga\nname: GA4\ncommand: uvx\nargs: ["ga@1.0.0"]\nenv:\n  TOKEN: "vault:google-refresh-token"\ntools:\n  read: [run_report, get_account_summaries]\nscope:\n  args: [property_id]\ntest:\n  tool: run_report\n  args: { property_id: "{target}" }\n`,
     );
     writeFileSync(
       join(catalogDir, "site.yaml"),
@@ -537,6 +537,25 @@ describe("integrations in runs (ADR-0034)", () => {
         news: false,
         state: "ok",
       });
+    });
+  });
+
+  it("connection test: one read call, with the project's own target (web)", async () => {
+    appendFileSync(
+      join(home, "projects", "acme", "project.yaml"),
+      'integrations:\n  ga: ["111"]\n',
+    );
+    callText = "Property 111: Acme";
+    expect(await orch.testIntegration("ga")).toMatchObject({ ok: false, text: /pick a project/ });
+    expect(await orch.testIntegration("ga", "acme")).toEqual({
+      ok: true,
+      text: "Property 111: Acme",
+    });
+    expect(called.at(-1)).toMatchObject({ tool: "run_report", args: { property_id: "111" } });
+    expect(resolved.at(-1)?.[1]).toBe("owner:test/mcp:ga");
+    expect(await orch.testIntegration("wp", "acme")).toMatchObject({
+      ok: false,
+      text: /no connection test/,
     });
   });
 });

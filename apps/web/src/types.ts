@@ -81,6 +81,7 @@ export interface IntegrationStatus {
   scoped: boolean;
   projectsScoped: string[];
   ready: boolean;
+  testable: boolean;
 }
 
 /** GET /api/monitors (ADR-0039). */

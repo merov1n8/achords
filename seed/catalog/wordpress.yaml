@@ -14,3 +14,6 @@ env:
 tools:
   read: [site_info, list_posts, get_post]
   write: [create_draft]
+# Connection test (web Integrations page).
+test:
+  tool: site_info

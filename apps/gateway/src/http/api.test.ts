@@ -117,6 +117,7 @@ describe("HTTP API", () => {
             questions.push({ from, question: `publish: ${JSON.stringify(request)}` });
             return { ok: true, text: "sent" };
           },
+          testIntegration: async (id, project) => ({ ok: true, text: `${id}:${project ?? "-"}` }),
           logPublish: (from, report) => {
             questions.push({ from, question: `log: ${report.tool}` });
             return { ok: true, text: "logged" };
@@ -146,6 +147,7 @@ describe("HTTP API", () => {
             scoped: true,
             projectsScoped: [],
             ready: false,
+            testable: true,
           },
         ],
         transcriber: {
@@ -333,6 +335,11 @@ describe("HTTP API", () => {
     expect(agents.map((a) => a.id)).toEqual(["web-dev"]);
     const integrations = (await (await call("/api/integrations")).json()) as { id: string }[];
     expect(integrations.map((i) => i.id)).toEqual(["ga4"]);
+    const test = await call("/api/integrations/ga4/test", {
+      method: "POST",
+      body: '{"project":"acme"}',
+    });
+    expect(await test.json()).toEqual({ ok: true, text: "ga4:acme" });
   });
 
   it("monitors: create, list, edit, quiet hours, delete (ADR-0039)", async () => {

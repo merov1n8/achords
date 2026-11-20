@@ -34,6 +34,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Test connection on Settings → Integrations: one read call through the same path agents use (for client integrations with a chosen project, e.g. its GA4 property or Facebook page) shows whether the credentials and accounts work.
+- All chats: a checkbox in the table header selects every chat shown.
 - Integration monitors: watch a read call of an integration (e.g. new comments on a Facebook page, Search Console queries) every N minutes; when the result changes, the local model decides whether it is news by your own question ("a new review under 4 stars") and tells you in one or two sentences. Unchanged results cost nothing and use no quota.
 - OpenAI models: any agent can run on GPT models through the official codex CLI (`cli-codex/<model>`, e.g. gpt-6.2-astra, gpt-6.2-sol); pick them per agent on the Agents page. For now such runs work with their own files only (no delegation, questions or integrations), and a used-up subscription limit makes the task wait instead of fail.
 - Many chats: the sidebar chat list scrolls on its own and has a search box, Pinned / Recent / Scheduled groups, and a By project view with the latest 5 chats per project. Each chat has actions: pin, rename, archive (hidden, restorable) and delete. A new All chats page filters by project, text and archived, and archives several at once. The Telegram chat can be archived but not deleted.

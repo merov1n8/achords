@@ -104,7 +104,18 @@ export function AllChats(props: { project?: string | undefined }) {
           <table>
             <thead>
               <tr>
-                <th />
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label={t("chats.selectAll")}
+                    checked={list.length > 0 && list.every((th) => selected.has(th.id))}
+                    onChange={(e) =>
+                      setSelected(
+                        e.currentTarget.checked ? new Set(list.map((th) => th.id)) : new Set(),
+                      )
+                    }
+                  />
+                </th>
                 <th>{t("chats.title")}</th>
                 <th>{t("chats.project")}</th>
                 <th>{t("chats.updated")}</th>

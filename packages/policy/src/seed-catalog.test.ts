@@ -61,4 +61,11 @@ describe("shipped integration catalog", () => {
       expect([...(meta?.tools.read ?? []), ...(meta?.tools.write ?? [])], t).toContain(t);
     }
   });
+
+  it("connection tests only read", () => {
+    for (const e of catalog.values()) {
+      if (e.test) expect(e.tools.read, e.id).toContain(e.test.tool);
+    }
+    expect(catalog.get("wordpress")?.test?.tool).toBe("site_info");
+  });
 });

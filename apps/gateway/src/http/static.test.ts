@@ -50,6 +50,7 @@ describe("static web UI", () => {
           requestAccess: () => ({ ok: false, reason: "n/a" }),
           requestPublish: () => ({ ok: false, reason: "n/a" }),
           logPublish: () => ({ ok: false, reason: "n/a" }),
+          testIntegration: async () => ({ ok: false, text: "n/a" }),
           spawnWorker: () => ({ ok: false, reason: "n/a" }),
           proposeAgent: () => ({ ok: false, reason: "n/a" }),
           decideProposal: () => ({ ok: false, reason: "n/a" }),

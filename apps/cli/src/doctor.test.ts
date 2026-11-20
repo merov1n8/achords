@@ -147,6 +147,7 @@ describe("doctor", () => {
       scoped: false,
       projectsScoped: [],
       ready: true,
+      testable: false,
     };
     const checks = integrationChecks([
       { ...base, id: "unused", usedBy: [] },

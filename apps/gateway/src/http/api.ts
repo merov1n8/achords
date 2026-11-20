@@ -91,6 +91,7 @@ export interface ApiDeps {
     | "openRoom"
     | "requestAccess"
     | "requestPublish"
+    | "testIntegration"
     | "logPublish"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
@@ -643,6 +644,17 @@ export function createApiHandler(deps: ApiDeps) {
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
     ["GET", /^\/api\/integrations$/, () => deps.integrations?.() ?? []],
+    [
+      "POST",
+      /^\/api\/integrations\/([a-z0-9][a-z0-9-]{0,63})\/test$/,
+      async ({ params, body }) => {
+        const b = await body();
+        return deps.orchestrator.testIntegration(
+          params[0] as string,
+          b.project ? str(b.project, "project", 64) : undefined,
+        );
+      },
+    ],
     [
       "GET",
       /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})$/,
