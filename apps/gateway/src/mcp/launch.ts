@@ -28,6 +28,7 @@ const launch = (await res.json()) as {
   env: Record<string, string>;
   files?: Record<string, Record<string, string>>;
   scope?: CallScope;
+  publish?: { integration: string; mode: "review" | "auto"; tools: string[]; token: string };
 };
 
 // Credentials files for servers that only read files: private folder, removed on exit. Agents
@@ -45,17 +46,53 @@ const cleanup = () => {
 };
 
 const { ACHORDS_MCP_TICKET: _t, ACHORDS_HUB_URL: _h, ...inherited } = process.env;
-const { scope } = launch;
+const { scope, publish } = launch;
 const child = spawn(launch.command, launch.args, {
   // With a project scope the launcher sits between the CLI and the server (ADR-0036).
-  stdio: scope ? ["pipe", "pipe", "inherit"] : "inherit",
+  stdio: scope || publish ? ["pipe", "pipe", "inherit"] : "inherit",
   env: { ...inherited, ...launch.env, ...fileEnv },
 });
-if (scope && child.stdin && child.stdout) {
+/** Publishing (ADR-0037): the gateway decides; the agent never holds the outcome. */
+const toHub = async (path: string, body: unknown): Promise<string> => {
+  try {
+    const res = await fetch(`${HUB}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${publish?.token ?? ""}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const out = (await res.json()) as { text?: string; reason?: string; error?: string };
+    return out.text ?? `Refused: ${out.reason ?? out.error ?? `HTTP ${res.status}`}`;
+  } catch (err) {
+    return `Refused: hub not reachable (${(err as Error).name})`;
+  }
+};
+const toolReply = (id: unknown, text: string, isError = false) =>
+  `${JSON.stringify({ jsonrpc: "2.0", id: id ?? null, result: { content: [{ type: "text", text }], ...(isError ? { isError } : {}) } })}\n`;
+
+if ((scope || publish) && child.stdin && child.stdout) {
   const toServer = child.stdin;
+  // auto mode: calls sent to the server, reported once their answer comes back.
+  const autoCalls = new Map<unknown, { tool: string; args: unknown }>();
   // Whole lines only, so a refusal never lands inside a server message.
   createInterface({ input: child.stdout }).on("line", (line) => {
     process.stdout.write(`${line}\n`);
+    if (!autoCalls.size) return;
+    try {
+      const m = JSON.parse(line) as { id?: unknown; result?: unknown; error?: unknown };
+      const call = autoCalls.get(m.id);
+      if (!call) return;
+      autoCalls.delete(m.id);
+      void toHub("/api/agent/publish_log", {
+        integration: publish?.integration,
+        tool: call.tool,
+        arguments: call.args,
+        result: JSON.stringify(m.result ?? m.error ?? null).slice(0, 2000),
+      });
+    } catch {}
   });
   createInterface({ input: process.stdin })
     .on("line", (line) => {
@@ -78,17 +115,30 @@ if (scope && child.stdin && child.stdout) {
         method?: string;
         params?: { name?: string; arguments?: Record<string, unknown> };
       };
+      const tool = String(m.params?.name ?? "");
       const refusal =
-        m.method === "tools/call"
-          ? scopeRefusal(scope, String(m.params?.name ?? ""), m.params?.arguments)
+        m.method === "tools/call" && scope
+          ? scopeRefusal(scope, tool, m.params?.arguments)
           : undefined;
-      if (refusal === undefined) {
-        toServer.write(`${line}\n`);
+      if (refusal !== undefined) {
+        process.stdout.write(toolReply(m.id, `Refused: ${refusal}`, true));
         return;
       }
-      process.stdout.write(
-        `${JSON.stringify({ jsonrpc: "2.0", id: m.id ?? null, result: { content: [{ type: "text", text: `Refused: ${refusal}` }], isError: true } })}\n`,
-      );
+      if (m.method === "tools/call" && publish?.tools.includes(tool)) {
+        if (publish.mode === "review") {
+          // The server never sees it; the owner approves exactly these arguments.
+          void toHub("/api/agent/publish", {
+            integration: publish.integration,
+            tool,
+            arguments: m.params?.arguments ?? {},
+          }).then((text) =>
+            process.stdout.write(toolReply(m.id, text, text.startsWith("Refused"))),
+          );
+          return;
+        }
+        autoCalls.set(m.id, { tool, args: m.params?.arguments ?? {} });
+      }
+      toServer.write(`${line}\n`);
     })
     .on("close", () => toServer.end());
 }

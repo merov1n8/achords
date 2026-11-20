@@ -12,6 +12,8 @@ export {
   type IntegrationStatus,
   integrationStatus,
   loadCatalog,
+  type PublishMode,
+  publishMode,
   scopeRefusal,
   secretRefs,
 } from "./catalog.ts";

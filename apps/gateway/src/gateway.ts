@@ -16,6 +16,7 @@ import { integrationStatus, loadAgents, loadCatalog, loadProjects } from "@achor
 import { cliClaude, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
+import { callTool } from "./mcp/call.ts";
 import { createMcpTickets, createRunTokens } from "./mcp/tokens.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents, seedSchedules } from "./orchestrator/seed.ts";
@@ -90,6 +91,19 @@ export function runGateway(home: string): Promise<number> {
       launcherEntry: MCP_LAUNCHER,
       builtins: BUILTIN_MCP,
       resolveSecret: (ref, actor) => getVault().resolveRef(ref, actor),
+      // Owner-approved publishing: the same launcher, with a fresh one-time ticket.
+      call: (launch, tool, args) => {
+        const { ticket, revoke } = mcpTickets.issue(launch);
+        return callTool(
+          {
+            command: process.execPath,
+            args: ["--disable-warning=ExperimentalWarning", MCP_LAUNCHER],
+            env: { ACHORDS_HUB_URL: hub.url, ACHORDS_MCP_TICKET: ticket },
+          },
+          tool,
+          args,
+        ).finally(revoke);
+      },
     },
     memory,
     embedder,

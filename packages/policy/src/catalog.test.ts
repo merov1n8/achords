@@ -7,6 +7,7 @@ import {
   grantedIntegrations,
   integrationStatus,
   loadCatalog,
+  publishMode,
   scopeRefusal,
   secretRefs,
 } from "./catalog.ts";
@@ -207,5 +208,19 @@ describe("integration status (doctor, web)", () => {
     expect(status(["google-refresh-token"], []).find((s) => s.id === "ga")?.ready).toBe(false);
     const wp = status(["wordpress-acme"], ["npx"]).find((s) => s.id === "wordpress");
     expect(wp).toMatchObject({ perProject: true, projectsReady: ["acme"], missingSecrets: [] });
+  });
+});
+
+describe("publish mode (ADR-0037)", () => {
+  const agent = parseManifest(
+    "id: m\nname: m\nrole: m\nworkspace: w\nmodels:\n  default: cli-claude/sonnet\npublish_mode:\n  default: review\n  channels:\n    wordpress: auto\n",
+    "t",
+  );
+  it("takes the channel setting, else the default; a project only tightens it", () => {
+    expect(publishMode(agent, "wordpress")).toBe("auto");
+    expect(publishMode(agent, "meta")).toBe("review");
+    expect(publishMode(agent, "wordpress", { publish: "review" })).toBe("review");
+    expect(publishMode(agent, "wordpress", { publish: "off" })).toBe("off");
+    expect(publishMode(agent, "meta", {})).toBe("review");
   });
 });

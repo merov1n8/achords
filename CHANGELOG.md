@@ -32,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Publishing with approval: agents can now use the write tools of client integrations (WordPress drafts, Meta posts, Search Console submissions). By default every such action is posted in the conversation with Approve / Reject and runs only as approved; `publish_mode` in agent.yaml can set a channel to auto (runs and is reported), and `publish: review` or `publish: off` in a project's project.yaml can forbid it for that client.
 - Integration checks: `achords doctor` and the new web page Settings → Integrations show, for every integration an agent uses, whether its program is on the service's PATH, which vault secrets are missing, and which client projects are set up, each with the fix.
 - Client accounts in the web project editor: social pages, ad accounts, Analytics properties, Search Console sites and websites, several per channel. Agents of the project see them; Google Analytics and Search Console entries also set what agents may query (ADR-0036).
 - Client separation for shared accounts: in `project.yaml`, `integrations: { ga4: ["<property id>"], search-console: ["sc-domain:<site>"] }` names the client's own data. Agents working on that project can only query those; requests for other clients are refused before they reach Google. Without these entries Analytics and Search Console are not offered in the run.
