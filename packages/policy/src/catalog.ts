@@ -34,6 +34,18 @@ export const catalogEntrySchema = z
       })
       .strict()
       .default({ read: [], write: [] }),
+    // Per-client scope (ADR-0036): a shared account reaches every client, so in a project run
+    // the launcher only passes calls whose `args` values are the project's own (project.yaml
+    // `integrations.<id>`). Tools without such an argument are refused unless listed in `free`.
+    scope: z
+      .object({
+        args: z.array(z.string().regex(TOOL)).min(1),
+        free: z.array(z.string().regex(TOOL)).default([]),
+        // Prefix ignored when comparing, e.g. "properties/" for GA4 property ids.
+        strip: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((e, ctx) => {
@@ -114,3 +126,39 @@ export const allowedIntegrationTools = (entry: CatalogEntry, elevated = false): 
   [...entry.tools.read, ...(elevated && !secretRefs(entry).length ? entry.tools.write : [])].map(
     (t) => `mcp__${entry.id}__${t}`,
   );
+
+export interface CallScope {
+  args: string[];
+  free: string[];
+  strip?: string | undefined;
+  /** The project's own values (properties, sites, pages). */
+  allowed: string[];
+}
+
+/** Why a tool call leaves the project's scope, or undefined when it may pass. */
+export function scopeRefusal(
+  scope: CallScope,
+  tool: string,
+  input: Record<string, unknown> | undefined,
+): string | undefined {
+  const norm = (v: string) =>
+    scope.strip && v.startsWith(scope.strip) ? v.slice(scope.strip.length) : v;
+  const allowed = new Set(scope.allowed.map(norm));
+  const values: unknown[] = [];
+  for (const arg of scope.args) {
+    const v = input?.[arg];
+    if (v === undefined) continue;
+    values.push(...(Array.isArray(v) ? v : [v]));
+  }
+  if (!values.length) {
+    return scope.free.includes(tool)
+      ? undefined
+      : `${tool} is not limited to this project's ${scope.args[0]}; use a tool that takes one`;
+  }
+  const foreign = values.find(
+    (v) => !(typeof v === "string" || typeof v === "number") || !allowed.has(norm(String(v))),
+  );
+  return foreign === undefined
+    ? undefined
+    : `${String(foreign)} is not part of this project (allowed: ${scope.allowed.join(", ")})`;
+}

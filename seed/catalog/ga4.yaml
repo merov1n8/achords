@@ -27,3 +27,8 @@ tools:
     - run_realtime_report
     - run_funnel_report
     - run_conversions_report
+# In a project run only the client's own property ids (project.yaml integrations.ga4) pass;
+# get_account_summaries lists every client, so it is refused there.
+scope:
+  args: [property_id]
+  strip: "properties/"

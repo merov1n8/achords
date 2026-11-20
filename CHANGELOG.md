@@ -32,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Client separation for shared accounts: in `project.yaml`, `integrations: { ga4: ["<property id>"], search-console: ["sc-domain:<site>"] }` names the client's own data. Agents working on that project can only query those; requests for other clients are refused before they reach Google. Without these entries Analytics and Search Console are not offered in the run.
 - Full access on request: an agent can ask for it in the conversation (Approve / Reject). For 4 hours that task can read any website, search the web and use the write tools of Blender and Unity. Client integrations with credentials (Google, Meta, WordPress) are left out while it is on.
 - `achords connect google <client.json>`: one Google sign-in in the browser (Desktop-app OAuth client, loopback redirect, PKCE) for Analytics and Search Console. The client credentials and the refresh token go straight into the vault; achords never sees the password. Clients grant your Google account access to their properties, so one sign-in covers all of them.
 - First integrations in the catalog: WordPress (no plugin needed: reads posts and pages, creates drafts, never publishes; per client project credentials), Google Analytics 4, Google Search Console, Meta (Facebook Pages and Instagram), Blender and Unity. Ecosystem servers are pinned to exact versions, telemetry is switched off, and agents get only reading tools for now.

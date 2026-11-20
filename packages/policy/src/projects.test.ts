@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -61,5 +69,16 @@ describe("projects", () => {
 
   it("an empty or missing projects folder is fine", () => {
     expect(loadProjects(join(dir, "nope")).size).toBe(0);
+  });
+
+  it("reads integration targets and keeps them when the project is edited (ADR-0036)", () => {
+    createProject(dir, { slug: "roca", name: "Roca", workspace: "shared" });
+    appendFileSync(
+      join(dir, "roca", "project.yaml"),
+      'integrations:\n  ga4: ["324490876"]\n  search-console: ["sc-domain:roca.com"]\n',
+    );
+    const want = { ga4: ["324490876"], "search-console": ["sc-domain:roca.com"] };
+    expect(loadProjects(dir).get("roca")?.integrations).toEqual(want);
+    expect(updateProject(dir, "roca", { name: "Roca Espais" }).integrations).toEqual(want);
   });
 });

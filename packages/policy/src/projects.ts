@@ -1,19 +1,26 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 
 // ADR-0031: a project = $ACHORDS_HOME/projects/<slug>/ with project.yaml, PROJECT.md, files/.
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 const projectSchema = z
-  .object({ name: z.string().min(1), workspace: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i) })
+  .object({
+    name: z.string().min(1),
+    workspace: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
+    // Catalog id → this client's own properties/sites/pages (ADR-0036).
+    integrations: z.record(z.string(), z.array(z.string().min(1)).min(1)).default({}),
+  })
   .strict();
 
 export interface Project {
   slug: string;
   name: string;
   workspace: string;
+  /** Catalog id → this client's own properties/sites/pages (ADR-0036). */
+  integrations: Record<string, string[]>;
   dir: string;
   filesDir: string;
   /** PROJECT.md: client preferences, stack, conventions, deploy rules. */
@@ -81,10 +88,15 @@ export function updateProject(
   const data = projectSchema.parse({
     name: (patch.name ?? cur.name).trim(),
     workspace: (patch.workspace ?? cur.workspace).trim(),
+    integrations: cur.integrations,
   });
+  // Owner-edited fields the web form does not show (integration targets) are kept.
+  const extra = Object.keys(data.integrations).length
+    ? stringifyYaml({ integrations: data.integrations })
+    : "";
   writeFileSync(
     join(cur.dir, "project.yaml"),
-    `name: ${JSON.stringify(data.name)}\nworkspace: ${data.workspace}\n`,
+    `name: ${JSON.stringify(data.name)}\nworkspace: ${data.workspace}\n${extra}`,
   );
   if (patch.doc !== undefined) writeFileSync(join(cur.dir, "PROJECT.md"), patch.doc);
   return loadProjects(projectsDir).get(slug) as Project;
