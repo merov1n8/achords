@@ -81,4 +81,22 @@ describe("projects", () => {
     expect(loadProjects(dir).get("roca")?.integrations).toEqual(want);
     expect(updateProject(dir, "roca", { name: "Roca Espais" }).integrations).toEqual(want);
   });
+
+  it("sets the account lists from the web editor, dropping empty entries", () => {
+    createProject(dir, { slug: "acme", name: "Acme", workspace: "w" });
+    const p = updateProject(dir, "acme", {
+      integrations: {
+        instagram: [" @acme ", "@acme.shop", ""],
+        facebook: [],
+        "search-console": ["sc-domain:acme.com"],
+      },
+    });
+    expect(p.integrations).toEqual({
+      instagram: ["@acme", "@acme.shop"],
+      "search-console": ["sc-domain:acme.com"],
+    });
+    expect(readFileSync(join(dir, "acme", "project.yaml"), "utf8")).toMatch(/instagram:/);
+    expect(updateProject(dir, "acme", { integrations: {} }).integrations).toEqual({});
+    expect(() => updateProject(dir, "acme", { integrations: { "Bad Key": ["x"] } })).toThrow();
+  });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createThread, getTask, openCoreDatabase, type Task } from "@achords/core";
 import type { Memory } from "@achords/memory";
-import { createProject } from "@achords/policy";
+import { createProject, updateProject } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createOrchestrator, type Orchestrator } from "./orchestrator.ts";
@@ -112,11 +112,15 @@ describe("projects in runs (ADR-0031)", () => {
   });
 
   it("an agent of the project's workspace works in files/ and gets PROJECT.md", async () => {
+    updateProject(join(home, "projects"), "acme", {
+      integrations: { instagram: ["@acme", "@acme.shop"] },
+    });
     give("web-dev", "acme");
     await drain();
     const req = calls[0]?.req;
     expect(req?.cwd).toBe(join(home, "projects", "acme", "files"));
     expect(req?.prompt).toContain("Never touch the live shop.");
+    expect(req?.prompt).toContain("Client accounts:\n- instagram: @acme, @acme.shop");
   });
 
   it("an agent of another workspace gets the text but not the folder", async () => {
