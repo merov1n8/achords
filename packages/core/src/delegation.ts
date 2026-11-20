@@ -20,6 +20,8 @@ export function enqueueChild(
     maxAttempts?: number;
     /** Ephemeral worker: runs the caller's agent with these restricted permissions. */
     workerSpec?: { tools: string[]; paths: string[] };
+    /** A discussion turn (ADR-0032). */
+    roomId?: string;
   },
   now = Date.now(),
 ): Task {
@@ -30,8 +32,8 @@ export function enqueueChild(
       .prepare(
         `INSERT INTO tasks (id, thread_id, parent_id, root_id, depth, agent_chain, title,
            description, assignee_agent_id, max_attempts, sensitivity, worker_spec, project,
-           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+           room_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(
         randomUUID(),
@@ -47,6 +49,7 @@ export function enqueueChild(
         sensitivity,
         input.workerSpec ? JSON.stringify(input.workerSpec) : null,
         parent.project,
+        input.roomId ?? null,
         now,
         now,
       );

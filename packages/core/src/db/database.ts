@@ -41,8 +41,14 @@ export function openCoreDatabase(path: string): Db {
 }
 
 // BEGIN IMMEDIATE takes the write lock up front, so read-then-write sequences cannot interleave.
+// Connections inside transaction(); an inner call joins the outer one (SQLite has no nested
+// BEGIN), so helpers that need atomicity can be composed.
+const inTransaction = new WeakSet<Db>();
+
 export function transaction<T>(db: Db, fn: () => T): T {
+  if (inTransaction.has(db)) return fn();
   db.exec("BEGIN IMMEDIATE");
+  inTransaction.add(db);
   try {
     const out = fn();
     db.exec("COMMIT");
@@ -50,5 +56,7 @@ export function transaction<T>(db: Db, fn: () => T): T {
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
+  } finally {
+    inTransaction.delete(db);
   }
 }

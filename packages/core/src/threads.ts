@@ -116,10 +116,15 @@ export function getThread(db: Db, id: string): Thread | undefined {
 }
 
 export function listThreads(db: Db, limit = 50): Thread[] {
-  return db
-    .prepare("SELECT * FROM threads ORDER BY updated_at DESC, rowid DESC LIMIT ?")
-    .all(limit)
-    .map(toThread);
+  return (
+    db
+      // Agent rooms (ADR-0032) are hidden threads, never among the owner's chats.
+      .prepare(
+        "SELECT * FROM threads WHERE kind = 'chat' ORDER BY updated_at DESC, rowid DESC LIMIT ?",
+      )
+      .all(limit)
+      .map(toThread)
+  );
 }
 
 export function appendMessage(

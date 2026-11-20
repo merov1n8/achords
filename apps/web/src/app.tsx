@@ -22,6 +22,7 @@ import { Devices } from "./views/Devices.tsx";
 import { Kanban } from "./views/Kanban.tsx";
 import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
+import { Rooms } from "./views/Rooms.tsx";
 import { Vault } from "./views/Vault.tsx";
 
 /** Hash routes: #/chat/<threadId>, #/kanban, #/projects, #/agents, #/settings/<section>. */
@@ -94,6 +95,7 @@ export function App() {
         {section === "agents" && <Agents />}
         {section === "projects" && <Projects />}
         {section === "settings" && sub === "vault" && <Vault />}
+        {section === "settings" && sub === "rooms" && <Rooms />}
         {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
         {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
       </main>
@@ -183,6 +185,7 @@ function Sidebar(props: {
         )}
         {subLink("#/settings/vault", t("nav.vault"), sub === "vault")}
         {subLink("#/settings/devices", t("nav.devices"), sub === "devices")}
+        {subLink("#/settings/rooms", t("nav.rooms"), sub === "rooms")}
       </Group>
       <div class="foot muted">
         <CircleCheck class="icon" />

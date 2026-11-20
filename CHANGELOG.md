@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Agent rooms (ADR-0032): an agent can open a short discussion (`open_room`) with up to 3 agents it may delegate to, 1–3 rounds, read-only turns; it resumes with the transcript and writes the decision. Rooms never show up in chats or Telegram; the owner can read them under Settings › Agent rooms.
+
 - Projects in the web UI: a Projects page (list with working folder paths, create form) and a project picker in the chat header.
 
 - Projects (ADR-0031), backend: `projects/<slug>/` with `project.yaml`, `PROJECT.md`, `files/` and an optional own workflow. Pick a project for a Telegram thread with `/project <slug>` (`/project` lists, `/project none` clears); API for listing, creating and assigning. Project work gets `PROJECT.md` in every run, agents of the project's workspace work directly in `files/`, and project memory is kept apart from other clients'. Web screens follow.

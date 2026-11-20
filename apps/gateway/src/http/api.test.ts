@@ -31,6 +31,7 @@ describe("HTTP API", () => {
   const workerCalls: { from: unknown; request: unknown }[] = [];
   const decisions: { id: string; approve: boolean }[] = [];
   const moves: unknown[] = [];
+  const rooms: unknown[] = [];
   let synced = 0;
   const tokens = createRunTokens();
   const logs: string[] = [];
@@ -90,6 +91,10 @@ describe("HTTP API", () => {
               ? { ok: false, reason: "the card was moved meanwhile" }
               : { ok: true, override: to === "deployed" },
           workflow: () => ({ workflow: { columns: ["a"] }, matrix: [] }) as never,
+          openRoom: (from, request) => {
+            rooms.push({ from, request });
+            return { ok: true, roomId: "r1" };
+          },
           syncAgents: () => {
             synced++;
             return [];
@@ -583,6 +588,28 @@ describe("HTTP API", () => {
     });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toMatch(/absolute/);
+  });
+
+  it("agent rooms: agents open them with their run token; the owner reads them (ADR-0032)", async () => {
+    const token = tokens.issue("task-7", "dev", ["open_room"]).token;
+    const res = await fetch(`${base}/api/agent/open_room`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        topic: "Hero",
+        question: "Short?",
+        participants: ["qa"],
+        rounds: "2",
+      }),
+    });
+    expect(await res.json()).toEqual({ ok: true, roomId: "r1" });
+    expect(rooms.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-7" },
+      request: { topic: "Hero", question: "Short?", participants: ["qa"], rounds: 2 },
+    });
+    const { call } = await pair();
+    expect(await (await call("/api/rooms")).json()).toEqual([]);
+    expect((await call("/api/rooms/nope/messages")).status).toBe(404);
   });
 
   it("projects: list, create, and pick one for a thread", async () => {

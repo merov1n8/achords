@@ -57,6 +57,7 @@ describe("static web UI", () => {
             throw new Error("n/a");
           },
           syncAgents: () => [],
+          openRoom: () => ({ ok: false, reason: "n/a" }),
         },
         allowedHosts: [`127.0.0.1:${port}`],
         staticDir,

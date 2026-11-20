@@ -40,12 +40,15 @@ export interface Task {
   column: string | null;
   /** Project slug (ADR-0031), inherited by child tasks. */
   project: string | null;
+  /** Set on a discussion turn (ADR-0032): the room this task speaks in. */
+  roomId: string | null;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
   id: r.id as string,
   column: (r.board_column as string | null) ?? null,
   project: (r.project as string | null) ?? null,
+  roomId: (r.room_id as string | null) ?? null,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),
