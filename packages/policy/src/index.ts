@@ -3,6 +3,8 @@ export const PACKAGE_NAME = "@achords/policy";
 
 export { agentSummary } from "./agent-doc.ts";
 export {
+  accountRef,
+  accountRefs,
   allowedIntegrationTools,
   type CallScope,
   type Catalog,

@@ -1,5 +1,6 @@
 # Builtin server over the WordPress REST API (no plugin needed on the site).
-# Per client project: achords secret set wordpress-url-<project>      (e.g. https://shop.example.com)
+# Per client project: the site address as the project's "wordpress" account (web: Projects → Edit →
+# Accounts; not a secret, so links in messages stay readable), and in the vault:
 #                     achords secret set wordpress-user-<project>     (the WordPress user name)
 #                     achords secret set wordpress-password-<project> (Users > Profile > Application Passwords)
 id: wordpress
@@ -7,7 +8,7 @@ name: WordPress
 description: Read posts and pages, create drafts. Publishing only by the owner.
 builtin: wordpress
 env:
-  WP_URL: "vault:wordpress-url-{project}"
+  WP_URL: "{account:wordpress}"
   WP_USER: "vault:wordpress-user-{project}"
   WP_APP_PASSWORD: "vault:wordpress-password-{project}"
 tools:

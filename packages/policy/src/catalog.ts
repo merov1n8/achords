@@ -87,6 +87,20 @@ export function loadCatalog(seedDir: string, ownerDir: string): Catalog {
   return catalog;
 }
 
+/** `{account:<channel>}`: a non-secret value from the project's accounts (first entry). */
+export function accountRef(value: string): string | undefined {
+  return /^\{account:([a-z0-9][a-z0-9-]{0,63})\}$/.exec(value)?.[1];
+}
+
+/** Project account channels an entry reads its settings from. */
+export function accountRefs(entry: CatalogEntry): string[] {
+  const values = [
+    ...Object.values(entry.env),
+    ...Object.values(entry.files).flatMap((f) => Object.values(f)),
+  ];
+  return [...new Set(values.map(accountRef).filter((c): c is string => c !== undefined))];
+}
+
 /** Vault ids an entry needs, with `{project}` filled in (or left as is without a project). */
 export function secretRefs(entry: CatalogEntry, project?: string): string[] {
   const values = [
@@ -199,7 +213,8 @@ export function integrationStatus(
   const vaultId = (ref: string) => ref.slice("vault:".length);
   return [...catalog.values()].map((entry) => {
     const refs = secretRefs(entry);
-    const perProject = refs.some((r) => r.includes("{project}"));
+    const accounts = accountRefs(entry);
+    const perProject = refs.some((r) => r.includes("{project}")) || accounts.length > 0;
     const missingSecrets = refs
       .filter((r) => !r.includes("{project}"))
       .map(vaultId)
@@ -207,6 +222,7 @@ export function integrationStatus(
     const projectsReady = perProject
       ? projectList
           .filter((p) => secretRefs(entry, p.slug).every((r) => hasSecret(vaultId(r))))
+          .filter((p) => accounts.every((c) => p.integrations[c]?.length))
           .map((p) => p.slug)
       : [];
     const projectsScoped = entry.scope

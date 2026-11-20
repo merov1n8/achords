@@ -57,6 +57,7 @@ import {
 import { t } from "@achords/i18n";
 import type { Embedder, Memory } from "@achords/memory";
 import {
+  accountRef,
   agentSummary,
   allowedIntegrationTools,
   allowRules,
@@ -83,6 +84,7 @@ import {
 import type { ModelProvider, RunRequest } from "@achords/providers";
 import { z } from "zod";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
+import { describeCall, describeResult } from "./publish-text.ts";
 
 const BOSS_ID = "boss";
 const WORKER_ID = "gateway";
@@ -450,6 +452,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const resolve = (fields: Record<string, string>) =>
       Object.fromEntries(
         Object.entries(fields).map(([key, value]) => {
+          // Plain project settings (e.g. a site address) come from the project's accounts.
+          const account = accountRef(value);
+          if (account) {
+            const v = project?.integrations[account]?.[0];
+            if (!v)
+              throw new Error(`integration ${entry.id} needs the project's ${account} account`);
+            return [key, v];
+          }
           if (!value.startsWith("vault:")) return [key, value];
           if (value.includes("{project}") && !project) {
             throw new Error(`integration ${entry.id} needs a project`);
@@ -484,12 +494,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     };
   };
   const publishKey = (id: string) => `publish_req:${id}`;
-  const showArgs = (args: unknown) => {
-    const text = JSON.stringify(args, null, 2);
-    return text.length > 3500
-      ? `${text.slice(0, 3500)}\n… (${text.length - 3500} more characters)`
-      : text;
-  };
+  // A task that handed something to the owner ends with a short line, not a repeat of it.
+  const awaitingKey = (taskId: string) => `publish_task:${taskId}`;
 
   const elevationKey = (rootId: string) => `elevation:${rootId}`;
   /** Until when the chain has full access, if it has it now. */
@@ -776,7 +782,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             redact(
               t(r.ok ? "thread.published" : "thread.publishFailed", {
                 ...vars,
-                result: r.text.slice(0, 1500),
+                result: r.ok ? describeResult(r.text) : r.text.slice(0, 500),
               }),
             ),
           );
@@ -1011,7 +1017,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             title: task.title,
             integration: request.integration,
             tool: request.tool,
-            content: showArgs(request.args),
+            content: describeCall(request.args),
           }),
         ),
         actions: [
@@ -1019,6 +1025,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           { label: t("action.reject"), data: `publish:reject:${id}` },
         ],
       });
+      setSetting(db, awaitingKey(task.id), "1");
       return {
         ok: true,
         text: `Sent to the owner for approval (request ${id}). It runs only if approved, exactly as sent; the result is posted in the conversation. Do not send it again; continue or finish your turn and mention it in your report.`,
@@ -1035,8 +1042,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             agent: task.assigneeAgentId ?? "?",
             integration: report.integration,
             tool: report.tool,
-            content: showArgs(report.args),
-            result: report.result.slice(0, 1500),
+            content: describeCall(report.args),
+            result: describeResult(report.result),
           }),
         ),
       );
@@ -1562,8 +1569,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         if (task.parentId) childFinished(db, task.id);
         else {
           finishCard(task);
-          if (task.threadId)
-            post(task.threadId, t("thread.done", { title: task.title, result: res.text }));
+          if (task.threadId) {
+            const awaiting = getSetting(db, awaitingKey(task.id));
+            if (awaiting) setSetting(db, awaitingKey(task.id), "");
+            post(
+              task.threadId,
+              awaiting
+                ? t("thread.doneAwaitingApproval", { title: task.title })
+                : t("thread.done", { title: task.title, result: res.text }),
+            );
+          }
         }
       } else {
         fail(db, task.id, WORKER_ID, res.error ?? res.stopReason);

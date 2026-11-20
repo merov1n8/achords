@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadCatalog, secretRefs } from "./catalog.ts";
+import { accountRefs, loadCatalog, secretRefs } from "./catalog.ts";
 
 const SEED = new URL("../../../seed/catalog/", import.meta.url).pathname;
 
@@ -36,10 +36,11 @@ describe("shipped integration catalog", () => {
       ).toEqual([]);
     }
     expect(secretRefs(catalog.get("wordpress") as never, "acme")).toEqual([
-      "vault:wordpress-url-acme",
       "vault:wordpress-user-acme",
       "vault:wordpress-password-acme",
     ]);
+    // The site address is not a secret: it comes from the project's accounts.
+    expect(accountRefs(catalog.get("wordpress") as never)).toEqual(["wordpress"]);
     // Local apps carry no credentials, so game-dev agents with a shell may use them.
     expect(secretRefs(catalog.get("blender") as never)).toEqual([]);
     expect(secretRefs(catalog.get("unity") as never)).toEqual([]);
