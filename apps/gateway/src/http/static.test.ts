@@ -56,6 +56,7 @@ describe("static web UI", () => {
           workflow: () => {
             throw new Error("n/a");
           },
+          syncAgents: () => [],
         },
         allowedHosts: [`127.0.0.1:${port}`],
         staticDir,

@@ -30,6 +30,7 @@ describe("HTTP API", () => {
   const workerCalls: { from: unknown; request: unknown }[] = [];
   const decisions: { id: string; approve: boolean }[] = [];
   const moves: unknown[] = [];
+  let synced = 0;
   const tokens = createRunTokens();
   const logs: string[] = [];
   let agentsDir: string;
@@ -86,6 +87,10 @@ describe("HTTP API", () => {
               ? { ok: false, reason: "the card was moved meanwhile" }
               : { ok: true, override: to === "deployed" },
           workflow: () => ({ workflow: { columns: ["a"] }, matrix: [] }) as never,
+          syncAgents: () => {
+            synced++;
+            return [];
+          },
           askOwner: (from, question) => {
             questions.push({ from, question });
             return { ok: true };
@@ -534,6 +539,46 @@ describe("HTTP API", () => {
       404,
     );
     expect((await call("/api/agents/nobody")).status).toBe(404);
+  });
+
+  it("agents: rename, create (deny-by-default, validated), and form options", async () => {
+    const { call } = await pair();
+    expect(
+      (await call("/api/agents/boss/name", { method: "PUT", body: '{"name":"Chief"}' })).status,
+    ).toBe(200);
+    expect(readFileSync(join(agentsDir, "boss", "agent.yaml"), "utf8")).toContain("name: Chief");
+    expect(synced).toBe(1); // the agent list (DB mirror) shows the new name right away
+
+    const options = (await (await call("/api/agent-options")).json()) as {
+      tools: string[];
+      models: string[];
+    };
+    expect(options.tools).toContain("Read");
+    expect(options.models).toContain("cli-claude/opus");
+
+    const form = {
+      id: "qa",
+      name: "Tester",
+      role: "qa",
+      workspace: "web-clients",
+      roles: ["qa"],
+      models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+      tools: ["Read"],
+      description: "Reviews web work.",
+    };
+    const created = await call("/api/agents", { method: "POST", body: JSON.stringify(form) });
+    expect(created.status).toBe(201);
+    expect(synced).toBeGreaterThan(0); // workflows seeded for a new workspace
+    expect(readFileSync(join(agentsDir, "qa", "AGENT.md"), "utf8")).toContain("Reviews web work.");
+    expect((await call("/api/agents", { method: "POST", body: JSON.stringify(form) })).status).toBe(
+      409,
+    );
+    const bad = await call("/api/agents", {
+      method: "POST",
+      body: JSON.stringify({ ...form, id: "qa2", tools: ["Read"], fs: { write: ["relative"] } }),
+    });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toMatch(/absolute/);
   });
 
   it("only the owner (paired session + CSRF) decides proposals; agents cannot", async () => {

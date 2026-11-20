@@ -3,7 +3,12 @@ export const PACKAGE_NAME = "@achords/policy";
 
 export { agentSummary } from "./agent-doc.ts";
 export * from "./check.ts";
-export { updateManifestModels } from "./edit.ts";
+export {
+  createAgentFiles,
+  type NewAgent,
+  updateManifestModels,
+  updateManifestName,
+} from "./edit.ts";
 export {
   loadAgents,
   loadManifest,
