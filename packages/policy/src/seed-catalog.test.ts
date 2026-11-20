@@ -51,5 +51,13 @@ describe("shipped integration catalog", () => {
     // Tools that list every client are not free.
     expect(catalog.get("ga4")?.scope?.free).not.toContain("get_account_summaries");
     expect(catalog.get("search-console")?.scope?.free).not.toContain("gsc_properties_list");
+    // Meta: page and Instagram ids from the project's facebook and instagram accounts.
+    const meta = catalog.get("meta");
+    expect(meta?.scope?.channels).toEqual(["facebook", "instagram"]);
+    expect(meta?.scope?.free).not.toContain("meta_list_pages");
+    expect(meta?.scope?.free).not.toContain("meta_list_instagram_accounts");
+    for (const t of meta?.scope?.free ?? []) {
+      expect([...(meta?.tools.read ?? []), ...(meta?.tools.write ?? [])], t).toContain(t);
+    }
   });
 });

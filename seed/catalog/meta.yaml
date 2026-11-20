@@ -40,3 +40,17 @@ tools:
     - meta_publish_instagram_reel
     - meta_reply_post_comment
     - meta_reply_instagram_comment
+# Per client (ADR-0036): page and Instagram account ids from the project's facebook and instagram
+# accounts. Listing every page or account is refused in a project run. Tools that only take a
+# post, media or comment id are free: those ids come from the scoped listings.
+scope:
+  args: [page_id, ig_account_id]
+  channels: [facebook, instagram]
+  free:
+    - meta_health_check
+    - meta_get_post
+    - meta_get_post_reactions
+    - meta_get_instagram_single_media
+    - meta_get_instagram_media_insights
+    - meta_get_instagram_comments
+    - meta_reply_instagram_comment

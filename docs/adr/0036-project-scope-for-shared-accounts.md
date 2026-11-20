@@ -11,4 +11,6 @@ Status: Accepted (2026-11-20)
   - **No targets, no integration.** A scoped integration is left out of a run without a project or whose project names no targets; the prompt says why. The run itself goes on.
   - The prompt names the project's targets so the agent uses them directly.
 
-- Consequences: Cross-client reads need an explicit project entry, the cheapest place for the owner to state which data belongs to whom. Owner-wide overviews across clients are not possible through agents for now. WordPress needs no scope (per-project credentials); Meta gets one when its token is set up and its tool arguments are checked.
+- Amendment (2026-11-20): `scope.channels` names the project account channels that hold the allowed values (default: the entry id). Meta uses `[facebook, instagram]` with `page_id` and `ig_account_id`; tools that only take a post, media or comment id are free, since those ids come from the scoped listings.
+
+- Consequences: Cross-client reads need an explicit project entry, the cheapest place for the owner to state which data belongs to whom. Owner-wide overviews across clients are not possible through agents for now. WordPress needs no scope (per-project credentials); Meta is scoped by page and Instagram account ids (amendment).
