@@ -131,6 +131,8 @@ export interface OrchestratorDeps {
     catalog: () => Catalog;
     tickets: McpTickets;
     launcherEntry: string;
+    /** Entry files of the MCP servers shipped with achords, by catalog `builtin` name. */
+    builtins: Record<string, string>;
     resolveSecret: (ref: string, actor: string) => string;
   };
 }
@@ -1016,20 +1018,35 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         if (!granted.ok) throw new Error(granted.reason);
         const { resolveSecret } = deps.integrations;
         const agentId = manifest.id;
+        const { builtins } = deps.integrations;
         launches = granted.entries.map((entry) => {
-          const env = Object.fromEntries(
-            Object.entries(entry.env).map(([key, value]) => {
-              if (!value.startsWith("vault:")) return [key, value];
-              if (value.includes("{project}") && !project) {
-                throw new Error(`integration ${entry.id} needs a project`);
-              }
-              const ref = project ? value.replaceAll("{project}", project.slug) : value;
-              return [key, resolveSecret(ref, `agent:${agentId}/mcp:${entry.id}`)];
-            }),
+          const resolve = (fields: Record<string, string>) =>
+            Object.fromEntries(
+              Object.entries(fields).map(([key, value]) => {
+                if (!value.startsWith("vault:")) return [key, value];
+                if (value.includes("{project}") && !project) {
+                  throw new Error(`integration ${entry.id} needs a project`);
+                }
+                const ref = project ? value.replaceAll("{project}", project.slug) : value;
+                return [key, resolveSecret(ref, `agent:${agentId}/mcp:${entry.id}`)];
+              }),
+            );
+          const files = Object.fromEntries(
+            Object.entries(entry.files).map(([key, fields]) => [key, resolve(fields)]),
           );
+          const builtin = entry.builtin ? builtins[entry.builtin] : undefined;
+          if (entry.builtin && !builtin) throw new Error(`no builtin server ${entry.builtin}`);
           return {
             id: entry.id,
-            launch: { command: entry.command, args: entry.args, env },
+            launch: {
+              // Builtin servers run on the gateway's own Node, like the hub server.
+              command: builtin ? process.execPath : (entry.command as string),
+              args: builtin
+                ? ["--disable-warning=ExperimentalWarning", builtin, ...entry.args]
+                : entry.args,
+              env: resolve(entry.env),
+              files,
+            },
             tools: allowedIntegrationTools(entry),
           };
         });

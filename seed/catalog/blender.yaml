@@ -1,0 +1,14 @@
+# ahujasid/blender-mcp (MIT), talks to the Blender add-on on this Mac (uvx mcp-for-blender
+# install-addon, then enable it in Blender). No credentials. Telemetry off.
+# Write tools run code inside Blender (full access to this Mac): not allowed yet.
+id: blender
+name: Blender
+description: Inspect the open Blender scene and viewport (read-only for now).
+command: uvx
+args: ["--from", "mcp-for-blender==2.2.7", "mcp-for-blender"]
+env:
+  DISABLE_TELEMETRY: "true"
+hosts: [127.0.0.1]
+tools:
+  read: [get_addon_status, get_scene_info, look, search_assets]
+  write: [execute_blender_code, generate_3d, import_asset]

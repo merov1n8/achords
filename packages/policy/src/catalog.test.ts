@@ -101,3 +101,30 @@ describe("integration catalog (ADR-0034)", () => {
     ]);
   });
 });
+
+describe("catalog entries with builtin servers and credential files", () => {
+  const write = (yaml: string) => {
+    const { seed, owner } = dirs();
+    writeFileSync(join(owner, "x.yaml"), yaml);
+    return () => loadCatalog(seed, owner);
+  };
+
+  it("needs exactly one of command and builtin", () => {
+    expect(() => write("id: x\nname: X\ntools:\n  read: [a]\n")()).toThrow(/command or builtin/);
+    expect(() => write("id: x\nname: X\ncommand: npx\nbuiltin: wordpress\n")()).toThrow(
+      /command or builtin/,
+    );
+    expect(write("id: x\nname: X\nbuiltin: wordpress\n")().get("x")?.builtin).toBe("wordpress");
+  });
+
+  it("counts vault references inside credential files as secrets", () => {
+    const entry = write(
+      'id: g\nname: G\ncommand: uvx\nfiles:\n  GOOGLE_APPLICATION_CREDENTIALS:\n    type: authorized_user\n    refresh_token: "vault:google-refresh-token"\n',
+    )().get("g");
+    if (!entry) throw new Error("missing");
+    expect(secretRefs(entry)).toEqual(["vault:google-refresh-token"]);
+    expect(() =>
+      write('id: g\nname: G\ncommand: uvx\nfiles:\n  F:\n    token: "vault:Bad"\n')(),
+    ).toThrow(/invalid vault reference/);
+  });
+});

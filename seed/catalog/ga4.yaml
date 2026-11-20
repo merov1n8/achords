@@ -1,0 +1,29 @@
+# Google's official Analytics MCP server (googleanalytics/google-analytics-mcp), read-only:
+# its write tools only exist with --allow-write, which is never passed.
+# Google account: connected once in achords (google-project-id, google-client-id,
+# google-client-secret, google-refresh-token in the vault; shared with Search Console).
+id: ga4
+name: Google Analytics 4
+description: Reports, realtime data, funnels and property settings (read-only).
+command: uvx
+args: ["--from", "analytics-mcp==1.1.0", "analytics-mcp"]
+files:
+  GOOGLE_APPLICATION_CREDENTIALS:
+    type: authorized_user
+    client_id: "vault:google-client-id"
+    client_secret: "vault:google-client-secret"
+    refresh_token: "vault:google-refresh-token"
+    quota_project_id: "vault:google-project-id"
+hosts: [analyticsdata.googleapis.com, analyticsadmin.googleapis.com, oauth2.googleapis.com]
+tools:
+  read:
+    - get_account_summaries
+    - get_property_details
+    - list_google_ads_links
+    - list_property_annotations
+    - list_key_events
+    - get_custom_dimensions_and_metrics
+    - run_report
+    - run_realtime_report
+    - run_funnel_report
+    - run_conversions_report

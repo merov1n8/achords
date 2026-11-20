@@ -1,0 +1,42 @@
+# oliverames/meta-mcp-server (MIT, community; Meta has no official server). ~200 tools; only
+# Page and Instagram reading is allowed. Private messages and conversations are deliberately
+# not listed. Error reporting is off (no SENTRY_DSN).
+# achords secret set meta-access-token   (long-lived Page/User token of the Meta app)
+id: meta
+name: Meta (Facebook Pages, Instagram)
+description: Page and Instagram posts, comments and insights (read-only for now).
+command: npx
+args: ["-y", "@oliverames/meta-mcp-server@3.0.1"]
+env:
+  META_ACCESS_TOKEN: "vault:meta-access-token"
+  SENTRY_DSN: ""
+hosts: [graph.facebook.com, graph.instagram.com]
+tools:
+  read:
+    - meta_health_check
+    - meta_list_pages
+    - meta_get_page
+    - meta_get_posts
+    - meta_get_post
+    - meta_get_published_posts
+    - meta_get_scheduled_posts
+    - meta_get_page_insights
+    - meta_get_post_insights
+    - meta_get_post_comments
+    - meta_get_post_reactions
+    - meta_list_instagram_accounts
+    - meta_get_instagram_media
+    - meta_get_instagram_single_media
+    - meta_get_instagram_account_insights
+    - meta_get_instagram_media_insights
+    - meta_get_instagram_comments
+    - meta_check_instagram_publishing_limit
+  write:
+    - meta_create_post
+    - meta_create_photo_post
+    - meta_cross_post
+    - meta_publish_instagram_photo
+    - meta_publish_instagram_carousel
+    - meta_publish_instagram_reel
+    - meta_reply_post_comment
+    - meta_reply_instagram_comment
