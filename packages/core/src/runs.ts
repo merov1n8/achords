@@ -90,13 +90,26 @@ export function finishRun(
 export function setRunProgress(
   db: Db,
   id: string,
-  p: { done: number; total: number; current?: string },
+  p: {
+    done: number;
+    total: number;
+    current?: string;
+    items?: { content: string; status: string }[];
+  },
   now = Date.now(),
 ): void {
   db.prepare(
-    `UPDATE runs SET progress_done = ?, progress_total = ?, progress_label = ?, progress_at = ?
-     WHERE id = ? AND status = 'running'`,
-  ).run(p.done, p.total, p.current ?? null, now, id);
+    `UPDATE runs SET progress_done = ?, progress_total = ?, progress_label = ?, progress_items = ?,
+       progress_at = ? WHERE id = ? AND status = 'running'`,
+  ).run(p.done, p.total, p.current ?? null, p.items ? JSON.stringify(p.items) : null, now, id);
+}
+
+/** The agent's checklist as last reported by a run (for a continuation note). */
+export function runProgressItems(db: Db, id: string): { content: string; status: string }[] {
+  const row = db.prepare("SELECT progress_items FROM runs WHERE id = ?").get(id);
+  return row?.progress_items
+    ? (JSON.parse(String(row.progress_items)) as { content: string; status: string }[])
+    : [];
 }
 
 export interface LiveProgress {

@@ -8,6 +8,7 @@ import {
   listThreads,
   openCoreDatabase,
   readLivePid,
+  setDraining,
   setSetting,
 } from "@achords/core";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
@@ -103,6 +104,8 @@ export function runGateway(home: string): Promise<number> {
       }
     },
   });
+  // A previous `achords stop` may have left the drain flag; a new gateway works normally.
+  setDraining(db, false);
   orchestrator.syncAgents();
   const seededSchedules = seedSchedules(SEED_SCHEDULES, db);
   if (seededSchedules.length)

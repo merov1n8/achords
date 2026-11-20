@@ -108,8 +108,18 @@ describe("cli-claude adapter", () => {
     const res = await provider("todo").run(req({ onProgress: (p) => seen.push(p) }));
     expect(res.ok).toBe(true);
     expect(seen).toEqual([
-      { done: 0, total: 4, current: "Doing step 1" },
-      { done: 2, total: 4, current: "Doing step 3" },
+      expect.objectContaining({ done: 0, total: 4, current: "Doing step 1" }),
+      {
+        done: 2,
+        total: 4,
+        current: "Doing step 3",
+        items: [
+          { content: "Step 1", status: "completed" },
+          { content: "Step 2", status: "completed" },
+          { content: "Step 3", status: "in_progress" },
+          { content: "Step 4", status: "pending" },
+        ],
+      },
     ]);
   });
 

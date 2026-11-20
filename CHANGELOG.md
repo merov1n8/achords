@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Planned stop: `achords stop` now waits for running agent work to finish (up to 10 minutes, `--wait 30m` to change, Ctrl+C cancels the stop) and starts nothing new meanwhile. Work still running at the limit, or with `--now`, is interrupted and continues after `achords start` from a note with the agent's checklist, without using up one of its attempts.
+
 - CLI output (help, status, doctor, init, pair, secret, export/import, start/stop/kill/resume) now comes from the shared text catalog too, so one `locales/<lang>.json` translates the web UI, Telegram and the CLI. A test fails if the CLI or the gateway uses a key the catalog lacks.
 
 - Edit projects (name, workspace, PROJECT.md text) and schedules (all fields) in the web UI. Project files stay Finder-only.

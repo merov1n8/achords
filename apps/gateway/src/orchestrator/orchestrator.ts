@@ -11,6 +11,7 @@ import {
   childFinished,
   claim,
   clearActions,
+  clearResumeNote,
   closeRoom,
   complete,
   openRoom as createRoom,
@@ -27,6 +28,7 @@ import {
   getSetting,
   getTask,
   getThread,
+  isDraining,
   isPaused,
   listChildren,
   listMessages,
@@ -39,7 +41,9 @@ import {
   recordTurn,
   recordUsageWindows,
   remainingBudget,
+  requeueInterrupted,
   roomsOf,
+  runProgressItems,
   type Sensitivity,
   setRunPid,
   setRunProgress,
@@ -453,6 +457,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     });
     if (check.ok) requestMove(cur, cur.column, wf.finish, "system", wf);
   };
+
+  /** The continuation note for a task interrupted by a planned stop. */
+  const resumeNote = (items: { content: string; status: string }[]) =>
+    [
+      "You were interrupted by a planned stop of the system and are now continuing this task.",
+      "Files you changed are still on disk: check them before you go on, do not redo finished steps.",
+      ...(items.length
+        ? [
+            "Your checklist at the stop:",
+            ...items.map(
+              (i) =>
+                `- [${i.status === "completed" ? "x" : " "}] ${i.content}${i.status === "in_progress" ? " (in progress)" : ""}`,
+            ),
+          ]
+        : ["You had not written a checklist yet."]),
+    ].join("\n");
 
   /** One discussion turn as a child of the opener's task (the opener waits for it). */
   const enqueueTurn = (opener: Task, room: Room, turn: { agentId: string; round: number }) =>
@@ -882,6 +902,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
 
     runDueSchedules(now = Date.now()) {
+      if (isDraining(db)) return 0;
       let started = 0;
       for (const s of dueSchedules(db, now)) {
         // Still running from last time: skip this occurrence rather than pile up work.
@@ -906,7 +927,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
 
     async workOnce(signal) {
-      if (isPaused(db)) return false;
+      // Paused, or `achords stop` is waiting for running work: start nothing new.
+      if (isPaused(db) || isDraining(db)) return false;
       const task = claim(db, { workerId: WORKER_ID, leaseMs: LEASE_MS });
       if (!task) return false;
       await runTask(task, signal);
@@ -1005,12 +1027,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         delegates.length && deps.hub
           ? `\n\nYou can delegate to:\n${delegates.map(teamLine).join("\n")}\nUse the delegate tool only for work outside your own role.`
           : "";
+      // Continuing after a planned stop (`achords stop`): files are on disk, the note says where it was.
+      const resume = task.resumeNote ? `\n\n${task.resumeNote}` : "";
       const room = task.roomId ? getRoom(db, task.roomId) : undefined;
       const turn = nextTurn(room);
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${discussions}${answer}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${discussions}${answer}${resume}`.trim();
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.
@@ -1096,7 +1120,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       );
       recordUsage(built.provider.id, res.windows);
       addSpend(db, rootId, res.usage.costUsd ?? 0);
-      if (res.stopReason === "unavailable") {
+      if (res.stopReason === "cancelled" && signal?.aborted) {
+        // Planned stop: not the task's fault. Back to the queue with where it was, no attempt lost.
+        requeueInterrupted(db, task.id, WORKER_ID, resumeNote(runProgressItems(db, run.id)));
+      } else if (res.stopReason === "unavailable") {
         // Fail-closed: wait for the backend (e.g. local model server), never fall back.
         defer(db, task.id, WORKER_ID, `waiting for the local model: ${res.error ?? ""}`, DEFER_MS);
       } else if (
@@ -1116,6 +1143,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         childFinished(db, task.id);
       } else if (res.ok) {
         complete(db, task.id, WORKER_ID, res.text);
+        if (task.resumeNote) clearResumeNote(db, task.id);
         // The opener's result is the decision of the discussions it opened.
         for (const r of openRoomsOf(db, task.id))
           closeRoom(db, r.id, redact(res.text).slice(0, MAX_POST));

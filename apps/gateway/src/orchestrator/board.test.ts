@@ -8,6 +8,7 @@ import {
   listMoves,
   liveProgress,
   openCoreDatabase,
+  setDraining,
   type Task,
 } from "@achords/core";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
@@ -160,6 +161,42 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
       }),
     ]);
     expect(liveProgress(db)).toEqual([]);
+  });
+
+  it("planned stop: a running task is interrupted and continues later from a note, no attempt lost", async () => {
+    setup([["dev", "roles: [dev]"]]);
+    const { id } = give();
+    const abort = new AbortController();
+    behave = (req) => {
+      if (calls.length === 1) {
+        req.onProgress?.({
+          done: 1,
+          total: 3,
+          current: "Hero section",
+          items: [
+            { content: "Layout", status: "completed" },
+            { content: "Hero section", status: "in_progress" },
+            { content: "Footer", status: "pending" },
+          ],
+        });
+        abort.abort(); // the gateway is shutting down for `achords stop`
+        return result({ ok: false, stopReason: "cancelled", text: "" });
+      }
+      return result();
+    };
+    await orch.workOnce(abort.signal);
+    expect(getTask(db, id)).toMatchObject({ status: "queued", attempts: 0 });
+    expect(getTask(db, id)?.resumeNote).toMatch(
+      /\[x\] Layout[\s\S]*\[ \] Hero section \(in progress\)[\s\S]*\[ \] Footer/,
+    );
+
+    // While draining nothing new starts; after the restart it continues with the note.
+    setDraining(db, true);
+    expect(await orch.workOnce()).toBe(false);
+    setDraining(db, false);
+    await drain();
+    expect(calls[1]?.req.prompt).toMatch(/planned stop[\s\S]*\[x\] Layout/);
+    expect(getTask(db, id)).toMatchObject({ status: "done", resumeNote: null });
   });
 
   it("agents get the move_task tool", async () => {

@@ -42,6 +42,8 @@ export interface Task {
   project: string | null;
   /** Set on a discussion turn (ADR-0032): the room this task speaks in. */
   roomId: string | null;
+  /** Left by a planned stop: where the agent was, for the run that continues. */
+  resumeNote: string | null;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
@@ -49,6 +51,7 @@ const toTask = (r: Record<string, unknown>): Task => ({
   column: (r.board_column as string | null) ?? null,
   project: (r.project as string | null) ?? null,
   roomId: (r.room_id as string | null) ?? null,
+  resumeNote: (r.resume_note as string | null) ?? null,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),
@@ -273,4 +276,40 @@ export function isPaused(db: Db): boolean {
 
 export function setPaused(db: Db, paused: boolean): void {
   setSetting(db, PAUSED_KEY, String(paused));
+}
+
+/**
+ * Planned stop: puts a claimed task back without using up an attempt (the stop was not its
+ * fault) and leaves a note for the run that continues it.
+ */
+export function requeueInterrupted(
+  db: Db,
+  id: string,
+  workerId: string,
+  note: string,
+  now = Date.now(),
+): boolean {
+  const r = db
+    .prepare(
+      `UPDATE tasks SET status = 'queued', attempts = MAX(attempts - 1, 0), resume_note = ?,
+         claimed_by = NULL, lease_until = NULL, updated_at = ?
+       WHERE id = ? AND status = 'claimed' AND claimed_by = ?`,
+    )
+    .run(note, now, id, workerId);
+  return Number(r.changes) === 1;
+}
+
+export function clearResumeNote(db: Db, id: string): void {
+  db.prepare("UPDATE tasks SET resume_note = NULL WHERE id = ?").run(id);
+}
+
+const DRAINING_KEY = "gateway.draining";
+
+/** `achords stop` in progress: no new work is started, running work may finish. */
+export function isDraining(db: Db): boolean {
+  return getSetting(db, DRAINING_KEY) === "true";
+}
+
+export function setDraining(db: Db, on: boolean): void {
+  setSetting(db, DRAINING_KEY, String(on));
 }
