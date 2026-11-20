@@ -24,6 +24,9 @@ export interface Task {
   status: "queued" | "claimed" | "done" | "failed" | "cancelled";
   assigneeAgentId: string | null;
   threadId: string | null;
+  parentId: string | null;
+  /** Kanban column (workflow); null = shown inside its root task's card. */
+  column: string | null;
   error: string | null;
   createdAt: number;
   updatedAt: number;

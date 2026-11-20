@@ -397,11 +397,17 @@ main {
 }
 
 /* Kanban */
+/* One row of workflow columns; scrolls sideways when they do not fit (also on phones). */
 .kanban {
   display: grid;
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(210px, 1fr);
+  overflow-x: auto;
+  padding-bottom: 8px;
   gap: 14px;
-  align-items: start;
+  /* Full-height columns: a card can be dropped anywhere below a column's header. */
+  align-items: stretch;
+  min-height: 60vh;
 }
 .column {
   background: var(--surface-2);
@@ -409,6 +415,7 @@ main {
   padding: 10px;
   display: grid;
   gap: 8px;
+  align-content: start;
 }
 .column h2 {
   display: flex;
@@ -511,7 +518,7 @@ main {
     max-width: 95%;
   }
   .kanban {
-    grid-template-columns: 1fr;
+    grid-auto-columns: 80%;
   }
 }
 
@@ -555,4 +562,44 @@ main {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Kanban drag & drop (Pointer Events) */
+.kcard {
+  cursor: grab;
+  user-select: none;
+}
+.kcard .t {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+.grip {
+  color: var(--muted);
+  touch-action: none; /* touch drags start here; the rest of the card scrolls the page */
+  cursor: grab;
+}
+.kcard.dragging {
+  cursor: grabbing;
+  position: relative;
+  z-index: 10;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+.kcard.picked {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+.column.drop-ok {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.column.drop-override {
+  box-shadow: inset 0 0 0 2px var(--warn-fg);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.small {
+  font-size: 12px;
 }
