@@ -30,3 +30,4 @@
 - [ADR-0028: Web UI with Vite + Preact + TypeScript](0028-web-ui-vite-preact-typescript.md)
 - [ADR-0029: Inter-agent delegation and ephemeral workers](0029-inter-agent-delegation-and-ephemeral-workers.md)
 - [ADR-0030: Kanban workflow as a permissioned state machine](0030-kanban-workflow-as-a-permissioned-state-machine.md)
+- [ADR-0031: Projects under workspaces (client preferences and working folders)](0031-projects-under-workspaces.md)

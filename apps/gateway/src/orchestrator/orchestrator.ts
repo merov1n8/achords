@@ -46,8 +46,10 @@ import {
   DEFAULT_WORKFLOW_YAML,
   isLocalModel,
   loadAgents,
+  loadProjects,
   loadWorkflow,
   type Manifest,
+  type Project,
   parseManifest,
   permissionMatrix,
   type Workflow,
@@ -309,6 +311,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const SAFE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
   const workflowFor = (workspace: string): Workflow =>
     loadWorkflow(SAFE_NAME.test(workspace) ? join(home, "workflows", `${workspace}.yaml`) : "");
+  // Projects (ADR-0031): re-read on use, like manifests.
+  const projects = () => loadProjects(join(home, "projects"));
+  /** The workflow for a card: the project's own workflow.yaml if it has one. */
+  const workflowForTask = (task: Task): Workflow => {
+    const project = task.project ? projects().get(task.project) : undefined;
+    if (project && existsSync(project.workflowPath)) return loadWorkflow(project.workflowPath);
+    return workflowFor(workspaceOf(task));
+  };
+  const projectSpace = (p: Project) => `${p.workspace}/${p.slug}`;
+  /**
+   * The only way a project widens a run: an agent of the project's workspace works in its
+   * files/ folder (cwd and write root). Agents of other workspaces get the text, not the folder.
+   */
+  const withProject = (m: Manifest, p: Project | undefined): Manifest =>
+    p && m.workspace === p.workspace
+      ? {
+          ...m,
+          fs: { ...m.fs, write: [p.filesDir, ...m.fs.write.filter((w) => w !== p.filesDir)] },
+        }
+      : m;
+  const projectBlock = (p: Project) =>
+    `Project: ${p.name} (${p.slug}, workspace ${p.workspace})\n${p.doc.trim()}\n\n`;
   const workspaceOf = (task: Task) =>
     (task.assigneeAgentId ? agents().get(task.assigneeAgentId)?.workspace : undefined) ?? "shared";
   const pendingKey = (taskId: string) => `pending_move:${taskId}`;
@@ -379,7 +403,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const finishCard = (task: Task) => {
     const cur = getTask(db, task.id);
     if (!cur?.column || !cur.assigneeAgentId) return;
-    const wf = workflowFor(workspaceOf(cur));
+    const wf = workflowForTask(cur);
     if (cur.column !== wf.start) return;
     const roles = agents().get(cur.assigneeAgentId)?.roles ?? [];
     const check = checkMove(wf, { assignee: cur.assigneeAgentId, column: cur.column }, wf.finish, {
@@ -417,7 +441,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const workspace = workspaceOf(target);
       if (workspace !== manifest.workspace)
         return { ok: false, reason: "card is in another workspace" };
-      const wf = workflowFor(workspace);
+      const wf = workflowForTask(target);
       const check = checkMove(
         wf,
         { assignee: target.assigneeAgentId, column: target.column },
@@ -436,7 +460,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const target = getTask(db, taskId);
       if (!target?.column) return { ok: false, reason: "no such card" };
       if (target.column !== from) return { ok: false, reason: "the card was moved meanwhile" };
-      const wf = workflowFor(workspaceOf(target));
+      const wf = workflowForTask(target);
       const check = checkMove(wf, { assignee: target.assigneeAgentId, column: from }, to, {
         kind: "owner",
       });
@@ -477,15 +501,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (!moveCard(db, { taskId, from: p.from, to: p.to, actor: p.actor })) {
         return { ok: false, message: "the card was moved meanwhile" };
       }
-      enterColumn(task, p.to, workflowFor(workspaceOf(task)));
+      enterColumn(task, p.to, workflowForTask(task));
       return { ok: true, message: t("action.moveApproved", vars) };
     },
 
     spawnWorker(from, request) {
       const parent = getTask(db, from.taskId);
-      const caller = parent?.assigneeAgentId ? agents().get(parent.assigneeAgentId) : undefined;
-      if (!parent || !caller) return { ok: false, reason: "unknown calling task" };
+      const found = parent?.assigneeAgentId ? agents().get(parent.assigneeAgentId) : undefined;
+      if (!parent || !found) return { ok: false, reason: "unknown calling task" };
       if (parent.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
+      // A project task's caller may hand its project folder to a worker.
+      const caller = withProject(
+        found,
+        parent.project ? projects().get(parent.project) : undefined,
+      );
       const extraTool = request.tools.find((t) => !caller.tools.includes(t));
       if (extraTool) {
         return { ok: false, reason: `tool ${extraTool} is not among ${caller.id}'s own tools` };
@@ -634,8 +663,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // Children of local-only work stay local-only (ADR-0007).
           sensitivity: getThread(db, from.threadId)?.sensitivity ?? "normal",
           ...(budget !== undefined ? { budgetUsd: budget } : {}),
+          ...(getThread(db, from.threadId)?.project
+            ? { project: getThread(db, from.threadId)?.project as string }
+            : {}),
         });
-        placeCard(db, t.id, workflowFor(target.workspace).start, "system");
+        placeCard(db, t.id, workflowForTask(t).start, "system");
         return { ok: true, taskId: t.id };
       }
       const parent = getTask(db, from.taskId);
@@ -673,8 +705,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           .join("\n");
         // The boss works for the owner across all business branches.
         const workspaces = [...new Set([...all.values()].map((m) => m.workspace))];
-        const memories = await recall(text, workspaces, isLocalModel(bossModel));
-        const prompt = `${memories}Agents you can delegate to:\n${team || "(none)"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
+        const threadProject = getThread(db, threadId)?.project;
+        const project = threadProject ? projects().get(threadProject) : undefined;
+        if (threadProject && !project) throw new Error(`unknown project ${threadProject}`);
+        const memories = await recall(
+          text,
+          [...workspaces, ...(project ? [projectSpace(project)] : [])],
+          isLocalModel(bossModel),
+        );
+        const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
 
         const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
         // Structured output is an internal tool call, so allow a few turns.
@@ -739,11 +778,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
     let built: ReturnType<typeof toRequest>;
     let manifest: Manifest | undefined;
+    let project: Project | undefined;
     let delegates: Manifest[] = [];
     try {
       const all = agents();
       manifest = task.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
       if (!manifest) throw new Error(`no agent ${task.assigneeAgentId ?? "(unassigned)"}`);
+      project = task.project ? projects().get(task.project) : undefined;
+      if (task.project && !project) throw new Error(`unknown project ${task.project}`);
+      manifest = withProject(manifest, project);
       if (task.workerSpec) {
         // Ephemeral worker: the caller's agent, cut down to the granted subset; no delegation.
         const { tools, paths } = task.workerSpec;
@@ -763,7 +806,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const local = isLocalModel(pickModel(manifest, task.sensitivity));
       const memories = await recall(
         `${task.title} ${task.description ?? ""}`,
-        [manifest.workspace, "shared"],
+        [manifest.workspace, "shared", ...(project ? [projectSpace(project)] : [])],
         local,
       );
       // Continuation after delegating: the children's results are part of the prompt.
@@ -785,7 +828,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           ? `\n\nYou can delegate to:\n${delegates.map(teamLine).join("\n")}\nUse the delegate tool only for work outside your own role.`
           : "";
       const prompt =
-        `${memories}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${answer}`.trim();
+        `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${answer}`.trim();
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.
       if (Number.isFinite(remaining)) {
@@ -874,7 +917,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         await deps.memory
           ?.add(
             {
-              workspace: manifest.workspace,
+              workspace: project ? projectSpace(project) : manifest.workspace,
               kind: "summary",
               content: redact(`Task "${task.title}" (${manifest.id}): ${res.text}`).slice(
                 0,

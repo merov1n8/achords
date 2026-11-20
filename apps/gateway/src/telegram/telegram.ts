@@ -13,9 +13,11 @@ import {
   makeThreadLocalOnly,
   redeemPairingCode,
   setSetting,
+  setThreadProject,
   writeStopMarker,
 } from "@achords/core";
 import { t } from "@achords/i18n";
+import { loadProjects } from "@achords/policy";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { Transcriber } from "../voice/transcribe.ts";
 
@@ -120,6 +122,27 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     });
     await send(chat.id, reply);
   }
+
+  /** /project: list (no argument), set (slug) or clear (none) the current thread's project. */
+  const projectCommand = (arg: string | undefined): string => {
+    const all = loadProjects(deps.paths.projectsDir);
+    const list = [...all.values()].map((p) => `${p.slug} (${p.name})`).join(", ") || "-";
+    const threadId = currentThread();
+    if (!arg) {
+      return t("telegram.projectList", {
+        list,
+        current: getThread(db, threadId)?.project ?? "none",
+      });
+    }
+    if (arg === "none") {
+      setThreadProject(db, threadId, null);
+      return t("telegram.projectCleared");
+    }
+    const p = all.get(arg);
+    if (!p) return t("telegram.projectUnknown", { slug: arg, list });
+    setThreadProject(db, threadId, p.slug);
+    return t("telegram.projectSet", { name: p.name, slug: p.slug });
+  };
 
   const ownerUser = () => Number(getSetting(db, OWNER_USER) ?? 0) || undefined;
 
@@ -228,6 +251,11 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     if (text === "/local") {
       makeThreadLocalOnly(db, currentThread());
       await send(m.chat.id, t("telegram.localOnly"));
+      return;
+    }
+    const project = /^\/project(?:\s+([\w-]{1,64}))?$/.exec(text);
+    if (project) {
+      await send(m.chat.id, projectCommand(project[1]));
       return;
     }
     if (text === "/new") {

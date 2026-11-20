@@ -9,6 +9,8 @@ export interface Thread {
   title: string | null;
   workspace: string | null;
   sensitivity: Sensitivity;
+  /** Project slug (ADR-0031); its PROJECT.md and folder apply to work started here. */
+  project: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -44,6 +46,7 @@ const toThread = (r: Row): Thread => ({
   title: r.title as string | null,
   workspace: r.workspace as string | null,
   sensitivity: r.sensitivity as Sensitivity,
+  project: (r.project as string | null) ?? null,
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at),
 });
@@ -63,23 +66,38 @@ const toMessage = (r: Row): Message => ({
 
 export function createThread(
   db: Db,
-  input: { title?: string; workspace?: string; sensitivity?: Sensitivity },
+  input: { title?: string; workspace?: string; sensitivity?: Sensitivity; project?: string },
   now = Date.now(),
 ): Thread {
   const row = db
     .prepare(
-      `INSERT INTO threads (id, title, workspace, sensitivity, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO threads (id, title, workspace, sensitivity, project, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
       input.title ?? null,
       input.workspace ?? null,
       input.sensitivity ?? "normal",
+      input.project ?? null,
       now,
       now,
     );
   return toThread(row as Row);
+}
+
+/** Sets or clears a thread's project; tasks already started keep theirs. */
+export function setThreadProject(
+  db: Db,
+  threadId: string,
+  project: string | null,
+  now = Date.now(),
+): void {
+  db.prepare("UPDATE threads SET project = ?, updated_at = ? WHERE id = ?").run(
+    project,
+    now,
+    threadId,
+  );
 }
 
 /**
