@@ -1,4 +1,4 @@
-import { Plus } from "lucide-preact";
+import { Plus, Trash2 } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
@@ -140,18 +140,114 @@ function NewProject(props: { workspaces: string[]; onClose: () => void; onCreate
   );
 }
 
-/** Name, workspace and PROJECT.md; the slug (folder) and files/ stay as they are. */
+// Suggested account channels; any lowercase id works. GA4 and Search Console values also limit
+// what agents may query for this client (ADR-0036).
+const CHANNELS = [
+  { id: "ga4", label: t("projects.channel.ga4") },
+  { id: "search-console", label: t("projects.channel.searchConsole") },
+  { id: "google-ads", label: t("projects.channel.googleAds") },
+  { id: "meta-ads", label: t("projects.channel.metaAds") },
+  { id: "facebook", label: "Facebook" },
+  { id: "instagram", label: "Instagram" },
+  { id: "tiktok", label: "TikTok" },
+  { id: "youtube", label: "YouTube" },
+  { id: "linkedin", label: "LinkedIn" },
+  { id: "x", label: "X" },
+  { id: "pinterest", label: "Pinterest" },
+  { id: "website", label: t("projects.channel.website") },
+];
+
+type Row = { channel: string; value: string };
+const toRows = (lists: Record<string, string[]>): Row[] =>
+  Object.entries(lists).flatMap(([channel, values]) => values.map((value) => ({ channel, value })));
+const toLists = (rows: Row[]): Record<string, string[]> => {
+  const out: Record<string, string[]> = {};
+  for (const r of rows) {
+    const channel = r.channel.trim().toLowerCase();
+    if (channel && r.value.trim()) out[channel] = [...(out[channel] ?? []), r.value.trim()];
+  }
+  return out;
+};
+
+/** One list per channel; a client can have several of each (two Instagram accounts, …). */
+function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }) {
+  const set = (i: number, patch: Partial<Row>) =>
+    props.onChange(props.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  return (
+    <div class="field">
+      {t("projects.accounts")}
+      {props.rows.map((r, i) => (
+        <div class="row" key={i}>
+          <input
+            class="input"
+            style={{ maxWidth: "12rem" }}
+            list="project-channels"
+            placeholder={t("projects.channel")}
+            aria-label={t("projects.channel")}
+            value={r.channel}
+            onInput={(e) => set(i, { channel: e.currentTarget.value })}
+          />
+          <input
+            class="input"
+            placeholder={t("projects.accountValue")}
+            aria-label={t("projects.accountValue")}
+            value={r.value}
+            onInput={(e) => set(i, { value: e.currentTarget.value })}
+          />
+          <button
+            type="button"
+            class="btn ghost"
+            aria-label={t("common.remove")}
+            onClick={() => props.onChange(props.rows.filter((_, j) => j !== i))}
+          >
+            <Trash2 class="icon" />
+          </button>
+        </div>
+      ))}
+      <datalist id="project-channels">
+        {CHANNELS.map((c) => (
+          <option key={c.id} value={c.id} label={c.label} />
+        ))}
+      </datalist>
+      <div>
+        <button
+          type="button"
+          class="btn ghost"
+          onClick={() => props.onChange([...props.rows, { channel: "", value: "" }])}
+        >
+          <Plus class="icon" />
+          {t("projects.addAccount")}
+        </button>
+      </div>
+      <span class="muted small">{t("projects.accountsHelp")}</span>
+    </div>
+  );
+}
+
+/** Name, workspace, accounts and PROJECT.md; the slug (folder) and files/ stay as they are. */
 function EditProject(props: {
   slug: string;
   workspaces: string[];
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [f, setF] = useState<{ name: string; workspace: string; doc: string }>();
+  const [f, setF] = useState<{ name: string; workspace: string; doc: string; rows: Row[] }>();
   const [status, setStatus] = useState<{ ok: boolean; text: string }>();
   useEffect(() => {
-    api<{ name: string; workspace: string; doc: string }>(`/api/projects/${props.slug}`)
-      .then((p) => setF({ name: p.name, workspace: p.workspace, doc: p.doc }))
+    api<{
+      name: string;
+      workspace: string;
+      doc: string;
+      integrations: Record<string, string[]>;
+    }>(`/api/projects/${props.slug}`)
+      .then((p) =>
+        setF({
+          name: p.name,
+          workspace: p.workspace,
+          doc: p.doc,
+          rows: toRows(p.integrations ?? {}),
+        }),
+      )
       .catch((err: Error) => setStatus({ ok: false, text: err.message }));
   }, [props.slug]);
   if (!f) return status ? <p class="error">{status.text}</p> : null;
@@ -159,7 +255,11 @@ function EditProject(props: {
     e.preventDefault();
     setStatus(undefined);
     try {
-      await api(`/api/projects/${props.slug}`, { method: "PUT", body: f });
+      const { rows, ...rest } = f;
+      await api(`/api/projects/${props.slug}`, {
+        method: "PUT",
+        body: { ...rest, integrations: toLists(rows) },
+      });
       setStatus({ ok: true, text: t("projects.saved") });
       props.onSaved();
     } catch (err) {
@@ -198,6 +298,7 @@ function EditProject(props: {
           ))}
         </datalist>
       </label>
+      <Accounts rows={f.rows} onChange={(rows) => setF({ ...f, rows })} />
       <label class="field">
         PROJECT.md
         <textarea

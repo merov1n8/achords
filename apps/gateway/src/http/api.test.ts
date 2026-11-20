@@ -762,6 +762,23 @@ describe("HTTP API", () => {
       (await call("/api/projects/acme", { method: "PUT", body: '{"workspace":"../x"}' })).status,
     ).toBe(400);
     expect((await call("/api/projects/nope")).status).toBe(404);
+    // Accounts: lists per channel, several of each.
+    const accounts = { instagram: ["@acme", "@acme.shop"], ga4: ["111"] };
+    expect(
+      (
+        await call("/api/projects/acme", {
+          method: "PUT",
+          body: JSON.stringify({ integrations: accounts }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(await (await call("/api/projects/acme")).json()).toMatchObject({
+      name: "Acme webshop",
+      integrations: accounts,
+    });
+    for (const bad of ['{"integrations":["x"]}', '{"integrations":{"ga4":"111"}}']) {
+      expect((await call("/api/projects/acme", { method: "PUT", body: bad })).status).toBe(400);
+    }
 
     const thread = createThread(db, {});
     const set = await call(`/api/threads/${thread.id}/project`, {

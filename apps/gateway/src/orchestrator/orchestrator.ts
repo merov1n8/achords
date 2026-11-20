@@ -406,8 +406,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           fs: { ...m.fs, write: [p.filesDir, ...m.fs.write.filter((w) => w !== p.filesDir)] },
         }
       : m;
-  const projectBlock = (p: Project) =>
-    `Project: ${p.name} (${p.slug}, workspace ${p.workspace})\n${p.doc.trim()}\n\n`;
+  const projectBlock = (p: Project) => {
+    const accounts = Object.entries(p.integrations)
+      .map(([channel, values]) => `- ${channel}: ${values.join(", ")}`)
+      .join("\n");
+    return `Project: ${p.name} (${p.slug}, workspace ${p.workspace})\n${accounts ? `Client accounts:\n${accounts}\n` : ""}${p.doc.trim()}\n\n`;
+  };
   const workspaceOf = (task: Task) =>
     (task.assigneeAgentId ? agents().get(task.assigneeAgentId)?.workspace : undefined) ?? "shared";
   const pendingKey = (taskId: string) => `pending_move:${taskId}`;

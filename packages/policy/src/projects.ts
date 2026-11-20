@@ -11,7 +11,12 @@ const projectSchema = z
     name: z.string().min(1),
     workspace: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
     // Catalog id → this client's own properties/sites/pages (ADR-0036).
-    integrations: z.record(z.string(), z.array(z.string().min(1)).min(1)).default({}),
+    integrations: z
+      .record(
+        z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, "lowercase letters, digits and dashes"),
+        z.array(z.string().min(1).max(200)).min(1).max(50),
+      )
+      .default({}),
   })
   .strict();
 
@@ -81,14 +86,19 @@ export function createProject(
 export function updateProject(
   projectsDir: string,
   slug: string,
-  patch: { name?: string; workspace?: string; doc?: string },
+  patch: {
+    name?: string;
+    workspace?: string;
+    doc?: string;
+    integrations?: Record<string, string[]>;
+  },
 ): Project {
   const cur = loadProjects(projectsDir).get(slug);
   if (!cur) throw new Error(`no project ${slug}`);
   const data = projectSchema.parse({
     name: (patch.name ?? cur.name).trim(),
     workspace: (patch.workspace ?? cur.workspace).trim(),
-    integrations: cur.integrations,
+    integrations: patch.integrations ? cleanLists(patch.integrations) : cur.integrations,
   });
   // Owner-edited fields the web form does not show (integration targets) are kept.
   const extra = Object.keys(data.integrations).length
@@ -100,4 +110,14 @@ export function updateProject(
   );
   if (patch.doc !== undefined) writeFileSync(join(cur.dir, "PROJECT.md"), patch.doc);
   return loadProjects(projectsDir).get(slug) as Project;
+}
+
+/** Trimmed values, empty ones and empty lists left out (the web form sends blank rows). */
+function cleanLists(lists: Record<string, string[]>): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [key, values] of Object.entries(lists)) {
+    const kept = values.map((v) => v.trim()).filter(Boolean);
+    if (kept.length) out[key.trim()] = kept;
+  }
+  return out;
 }
