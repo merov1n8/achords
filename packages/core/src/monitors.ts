@@ -4,7 +4,7 @@ import type { Db } from "./db/database.ts";
 // Heartbeat monitors (ADR-0039): a cheap check every N minutes; the owner hears about a change
 // of state (ok → alert, alert → ok), not about every check.
 
-export type MonitorKind = "site" | "stuck";
+export type MonitorKind = "site" | "stuck" | "integration";
 export type MonitorState = "unknown" | "ok" | "alert";
 
 export interface Monitor {
@@ -21,6 +21,8 @@ export interface Monitor {
   nextCheckAt: number;
   lastCheckAt: number | null;
   lastChangeAt: number | null;
+  /** Integration monitors: the previous result, to tell what is new. */
+  lastResult: string | null;
 }
 
 export interface MonitorInput {
@@ -44,14 +46,15 @@ const toMonitor = (r: Record<string, unknown>): Monitor => ({
   nextCheckAt: Number(r.next_check_at),
   lastCheckAt: r.last_check_at === null ? null : Number(r.last_check_at),
   lastChangeAt: r.last_change_at === null ? null : Number(r.last_change_at),
+  lastResult: (r.last_result as string | null) ?? null,
 });
 
 const MIN_EVERY = 5;
 
 function check(input: Partial<MonitorInput>): void {
   if (input.name !== undefined && !input.name.trim()) throw new Error("name is required");
-  if (input.kind !== undefined && !["site", "stuck"].includes(input.kind)) {
-    throw new Error("kind must be site or stuck");
+  if (input.kind !== undefined && !["site", "stuck", "integration"].includes(input.kind)) {
+    throw new Error("kind must be site, stuck or integration");
   }
   if (
     input.everyMinutes !== undefined &&
@@ -139,18 +142,32 @@ export function dueMonitors(db: Db, now = Date.now()): Monitor[] {
 export function recordCheck(
   db: Db,
   id: string,
-  result: { state: "ok" | "alert"; detail: string },
+  result: {
+    state: "ok" | "alert";
+    detail: string;
+    /** Integration monitors: the raw result to compare next time. */
+    result?: string;
+    /** Integration monitors tell news, not changes of state: set means "tell this". */
+    news?: boolean;
+  },
   now = Date.now(),
 ): { changed: boolean; from: MonitorState } {
   const cur = getMonitor(db, id);
   if (!cur) throw new Error("no such monitor");
-  const changed = cur.state === "unknown" ? result.state === "alert" : cur.state !== result.state;
+  const changed =
+    result.news !== undefined
+      ? result.news
+      : cur.state === "unknown"
+        ? result.state === "alert"
+        : cur.state !== result.state;
   // Back where it was before the owner heard of it (e.g. within quiet hours): nothing to tell.
-  const cancels = changed && !cur.notified;
+  // News never cancels: each piece is told.
+  const cancels = changed && !cur.notified && result.news === undefined;
   db.prepare(
     `UPDATE monitors SET state = ?, detail = ?, last_check_at = ?, next_check_at = ?,
        last_change_at = CASE WHEN ? THEN ? ELSE last_change_at END,
-       notified = CASE WHEN ? THEN ? ELSE notified END
+       notified = CASE WHEN ? THEN ? ELSE notified END,
+       last_result = COALESCE(?, last_result)
      WHERE id = ?`,
   ).run(
     result.state,
@@ -161,6 +178,7 @@ export function recordCheck(
     now,
     changed ? 1 : 0,
     cancels ? 1 : 0,
+    result.result ?? null,
     id,
   );
   return { changed: changed && !cancels, from: cur.state };

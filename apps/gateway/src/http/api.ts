@@ -806,13 +806,21 @@ export function createApiHandler(deps: ApiDeps) {
     if (b.enabled !== undefined) out.enabled = b.enabled === true;
     if (full || b.config !== undefined) {
       const c = b.config;
-      if (!c || typeof c !== "object" || Array.isArray(c) || JSON.stringify(c).length > 2000) {
+      if (!c || typeof c !== "object" || Array.isArray(c) || JSON.stringify(c).length > 4000) {
         throw new HttpError(400, "config must be a small object");
       }
       const cfg = c as Record<string, unknown>;
       // Site checks fetch http(s) addresses only.
       if (cfg.url !== undefined && !/^https?:\/\/[^/\s]+/i.test(String(cfg.url))) {
         throw new HttpError(400, "url must start with http:// or https://");
+      }
+      // Integration monitors: a catalog id and one of its read tools (checked at run time too).
+      if (out.kind === "integration" || cfg.integration !== undefined) {
+        str(cfg.integration, "config.integration", 64);
+        str(cfg.tool, "config.tool", 64);
+        if (cfg.args !== undefined && (typeof cfg.args !== "object" || Array.isArray(cfg.args))) {
+          throw new HttpError(400, "config.args must be an object");
+        }
       }
       out.config = cfg;
     }

@@ -11,4 +11,6 @@ Status: Accepted (2026-11-20)
   - **Quiet hours** (`22-7`, local time): nothing is sent; changes wait and are told when the quiet hours end. A problem that is gone again before it was told is not told at all.
   - Web: Monitors page (list with state, on/off, delete, new monitor, quiet hours) and `/api/monitors`.
 
+- Amendment (5b, 2026-11-20): kind `integration`: config `integration`, `tool` (a read tool only), optional `project` (its scope applies), `args`, `question`, optional local `model` (default qwen3:8b). The read call runs through the launcher like an agent's (credentials audited as `monitor:<name>/mcp:<id>`, results marked as third-party data). The first result is the baseline; an unchanged result costs nothing; a changed one goes to the local model (ADR-0006) with the question and the injection guard, which answers `{news, summary}`. Integration monitors tell news, each piece once, never "back to normal"; if the local model cannot judge, nothing is sent.
+
 - Consequences: Site-down and stale-card alerts cost nothing. Checks that need judgement (new reviews, ad spend against a budget) come next as an `integration` kind: a catalog read call plus a local-model triage step (ADR-0006), still notify-on-change.

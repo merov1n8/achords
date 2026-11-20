@@ -202,6 +202,14 @@ export interface Orchestrator {
     from: { from: "task"; taskId: string },
     request: { integration: string; tool: string; args: unknown },
   ): { ok: true; text: string } | { ok: false; reason: string };
+  /**
+   * One integration monitor check (ADR-0039, 5b): a read call through the launcher (project
+   * scope applies), then, if the result changed, a local model judges whether it is news.
+   */
+  checkIntegration(
+    monitor: { name: string; config: Record<string, unknown> },
+    previous: string | null,
+  ): Promise<{ state: "ok" | "alert"; detail: string; result?: string; news: boolean }>;
   /** A write call that ran in auto mode: reported in the task's thread. */
   logPublish(
     from: { from: "task"; taskId: string },
@@ -989,6 +997,64 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ).slice(0, MAX_POST),
       });
       return { ok: true };
+    },
+
+    async checkIntegration(monitor, previous) {
+      const c = monitor.config;
+      const id = String(c.integration ?? "");
+      const tool = String(c.tool ?? "");
+      const entry = deps.integrations?.catalog().get(id);
+      const fail = (detail: string) => ({ state: "alert" as const, detail, news: false });
+      if (!deps.integrations?.call || !entry) return fail(`integration ${id} is not available`);
+      // Monitors only read.
+      if (!entry.tools.read.includes(tool)) return fail(`${tool} is not a read tool of ${id}`);
+      const project = c.project ? projects().get(String(c.project)) : undefined;
+      if (c.project && !project) return fail(`unknown project ${String(c.project)}`);
+      let launch: McpLaunch;
+      try {
+        launch = buildLaunch(entry, "monitor", project, `monitor:${monitor.name}/mcp:${id}`);
+      } catch (err) {
+        return fail((err as Error).message);
+      }
+      if (secretRefs(entry).length) launch = { ...launch, untrusted: entry.name };
+      const r = await deps.integrations.call(launch, tool, c.args ?? {});
+      if (!r.ok) return fail(`check failed: ${r.text.slice(0, 300)}`);
+      const result = r.text.slice(0, 20_000);
+      if (previous === null)
+        return { state: "ok", detail: "first result stored", result, news: false };
+      if (result === previous) return { state: "ok", detail: "no change", result, news: false };
+      // Changed: the local model (no quota) decides whether the owner should hear about it.
+      const local = deps.providers.local;
+      const model = String(c.model ?? "qwen3:8b");
+      const question = String(c.question ?? "Is there anything new the owner should know about?");
+      const triage = local
+        ? await local.run({
+            model,
+            cwd: join(home, "run"),
+            tools: [],
+            allowedTools: [],
+            timeoutMs: 120_000,
+            jsonSchema: {
+              type: "object",
+              properties: { news: { type: "boolean" }, summary: { type: "string" } },
+              required: ["news", "summary"],
+            },
+            prompt: `You watch a data source for the owner. ${INJECTION_GUARD}\n\nQuestion: ${question}\n\nPrevious result:\n${previous.slice(0, 6000)}\n\nCurrent result:\n${result.slice(0, 6000)}\n\nCompare them. news = true only if the current result has something new that answers the question. summary: one or two short sentences for the owner about what is new (or why nothing matters).`,
+          })
+        : undefined;
+      const verdict = triage?.structured as { news?: boolean; summary?: string } | undefined;
+      if (!triage?.ok || typeof verdict?.news !== "boolean") {
+        return {
+          state: "ok",
+          detail: "changed; the local model could not judge it",
+          result,
+          news: false,
+        };
+      }
+      const summary = String(verdict.summary ?? "").slice(0, 500);
+      return verdict.news
+        ? { state: "alert", detail: summary, result, news: true }
+        : { state: "ok", detail: summary || "changed, nothing important", result, news: false };
     },
 
     requestPublish(from, request) {
