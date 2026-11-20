@@ -34,6 +34,12 @@ export const catalogEntrySchema = z
       })
       .strict()
       .default({ read: [], write: [] }),
+    // Connection test (web Integrations page): one cheap read call; "{target}" in an argument is
+    // the project's first own target (its property, site or page).
+    test: z
+      .object({ tool: z.string().regex(TOOL), args: z.record(z.string(), z.string()).default({}) })
+      .strict()
+      .optional(),
     // Per-client scope (ADR-0036): a shared account reaches every client, so in a project run
     // the launcher only passes calls whose `args` values are the project's own (project.yaml
     // `integrations.<id>`). Tools without such an argument are refused unless listed in `free`.
@@ -198,6 +204,8 @@ export interface IntegrationStatus {
   projectsScoped: string[];
   /** Usable in at least one run. */
   ready: boolean;
+  /** Has a connection test (one read call). */
+  testable: boolean;
 }
 
 /** What an integration still needs: program on the service PATH, vault secrets, project setup. */
@@ -240,6 +248,7 @@ export function integrationStatus(
       projectsReady,
       scoped: entry.scope !== undefined,
       projectsScoped,
+      testable: entry.test !== undefined,
       ready:
         commandFound &&
         missingSecrets.length === 0 &&
