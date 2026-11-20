@@ -39,6 +39,7 @@ import {
 import { t } from "@achords/i18n";
 import type { Embedder, Memory } from "@achords/memory";
 import {
+  agentSummary,
   checkFs,
   checkModel,
   checkMove,
@@ -199,9 +200,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return `Relevant memory (may be outdated):\n${hits.map((h) => `- [${h.workspace}/${h.kind}] ${h.content}`).join("\n")}\n\n`;
   };
 
+  // AGENT.md: the agent's scope and way of working (prompt.md on installs from before it).
   const agentPrompt = (m: Manifest) => {
-    const path = join(agentsDir, m.id, "prompt.md");
-    return existsSync(path) ? readFileSync(path, "utf8") : undefined;
+    for (const file of ["AGENT.md", "prompt.md"]) {
+      const path = join(agentsDir, m.id, file);
+      if (existsSync(path)) return readFileSync(path, "utf8");
+    }
+    return undefined;
+  };
+  /** "- id: name (role, workspace x): scope" lines for whoever routes work to these agents. */
+  const teamLine = (m: Manifest) => {
+    const scope = agentSummary(agentPrompt(m) ?? "");
+    return `- ${m.id}: ${m.name} (${m.role}, workspace ${m.workspace})${scope ? `: ${scope}` : ""}`;
   };
 
   /**
@@ -655,7 +665,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const bossModel = pickModel(boss, sensitivity);
         const team = [...all.values()]
           .filter((m) => m.id !== BOSS_ID)
-          .map((m) => `- ${m.id}: ${m.name} (${m.role}, workspace ${m.workspace})`)
+          .map(teamLine)
           .join("\n");
         const history = listMessages(db, threadId)
           .slice(-HISTORY)
@@ -772,7 +782,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           : "";
       const team =
         delegates.length && deps.hub
-          ? `\n\nYou can delegate to:\n${delegates.map((m) => `- ${m.id}: ${m.name} (${m.role})`).join("\n")}\nUse the delegate tool only for work outside your own role.`
+          ? `\n\nYou can delegate to:\n${delegates.map(teamLine).join("\n")}\nUse the delegate tool only for work outside your own role.`
           : "";
       const prompt =
         `${memories}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${answer}`.trim();

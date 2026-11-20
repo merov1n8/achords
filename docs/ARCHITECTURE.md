@@ -63,6 +63,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - User picks provider + exact model for the boss.
 - Decomposes tasks, assigns to sub-agents, tracks them on the kanban, asks the user only when blocked or when approval is required.
 - Sub-agents get a default model per role; orchestrator may choose within an allowed set (autonomy setting).
+- Each agent has an `AGENT.md` next to its `agent.yaml`: its scope (what it does, what it does not, what it hands to whom) and way of working. Its own runs get it as system prompt; whoever routes work (the boss, delegating agents) sees the first paragraph after each agent's name. Hard limits stay in `agent.yaml`: the boss has no tools, so it cannot do the work itself whatever model it runs on. Older installs' `prompt.md` is still read when there is no `AGENT.md`.
 
 ### 4.3.1 Inter-agent delegation (ADR-0029)
 
