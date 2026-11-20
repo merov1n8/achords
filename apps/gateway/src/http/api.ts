@@ -112,6 +112,8 @@ export interface ApiDeps {
   integrations?: () => IntegrationStatus[];
   /** Chat models pulled in the local model server (suggestions only). */
   localModels?: () => Promise<string[]>;
+  /** OpenAI models the codex CLI offers (ADR-0040), as `cli-codex/<slug>`. */
+  codexModels?: () => string[];
   /** Built web UI (apps/web/dist). Non-API GETs are served from here. */
   staticDir?: string;
   log?: (msg: string) => void;
@@ -654,7 +656,11 @@ export function createApiHandler(deps: ApiDeps) {
           workspace: m.workspace,
           models: m.models,
           // Aliases always run the newest model of a family; local models as pulled.
-          suggestions: [...CLAUDE_ALIASES, ...local.map((x) => `local/${x}`)],
+          suggestions: [
+            ...CLAUDE_ALIASES,
+            ...(deps.codexModels?.() ?? []),
+            ...local.map((x) => `local/${x}`),
+          ],
         };
       },
     ],
@@ -665,7 +671,11 @@ export function createApiHandler(deps: ApiDeps) {
         const local = (await deps.localModels?.().catch(() => [])) ?? [];
         return {
           tools: AGENT_TOOL_NAMES,
-          models: [...CLAUDE_ALIASES, ...local.map((x) => `local/${x}`)],
+          models: [
+            ...CLAUDE_ALIASES,
+            ...(deps.codexModels?.() ?? []),
+            ...local.map((x) => `local/${x}`),
+          ],
         };
       },
     ],

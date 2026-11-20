@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   appendMessage,
@@ -13,7 +14,7 @@ import {
 } from "@achords/core";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
 import { integrationStatus, loadAgents, loadCatalog, loadProjects } from "@achords/policy";
-import { cliClaude, localOpenAI } from "@achords/providers";
+import { cliClaude, cliCodex, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
@@ -128,6 +129,8 @@ export function runGateway(home: string): Promise<number> {
     providers: {
       "cli-claude": cliClaude(),
       // Manifest models "local/<name>" (ADR-0006); ACHORDS_LOCAL_URL points at mlx-lm etc.
+      // OpenAI models through the official codex CLI (ADR-0040).
+      "cli-codex": cliCodex(),
       local: localOpenAI(
         process.env.ACHORDS_LOCAL_URL ? { baseUrl: process.env.ACHORDS_LOCAL_URL } : {},
       ),
@@ -258,6 +261,19 @@ export function runGateway(home: string): Promise<number> {
           mcpTickets,
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
+          // The codex CLI's own model list (no login data in it); missing file: no suggestions.
+          codexModels: () => {
+            try {
+              const cache = JSON.parse(
+                readFileSync(join(homedir(), ".codex", "models_cache.json"), "utf8"),
+              ) as { models?: { slug?: string; visibility?: string }[] };
+              return (cache.models ?? [])
+                .filter((m) => m.slug && m.visibility === "list")
+                .map((m) => `cli-codex/${m.slug}`);
+            } catch {
+              return [];
+            }
+          },
           integrations: () => {
             const ids = new Set(
               existsSync(paths.vaultDb)
