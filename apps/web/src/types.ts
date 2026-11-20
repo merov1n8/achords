@@ -4,7 +4,16 @@ export interface Thread {
   id: string;
   title: string | null;
   sensitivity: "normal" | "local-only";
+  project: string | null;
   updatedAt: number;
+}
+
+export interface Project {
+  slug: string;
+  name: string;
+  workspace: string;
+  dir: string;
+  filesDir: string;
 }
 
 export interface Message {

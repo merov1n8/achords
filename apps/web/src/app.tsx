@@ -3,6 +3,7 @@ import {
   ChevronDown,
   CircleCheck,
   Columns3,
+  FolderKanban,
   Menu,
   MessageSquare,
   Plus,
@@ -20,9 +21,10 @@ import { Chat } from "./views/Chat.tsx";
 import { Devices } from "./views/Devices.tsx";
 import { Kanban } from "./views/Kanban.tsx";
 import { Pair } from "./views/Pair.tsx";
+import { Projects } from "./views/Projects.tsx";
 import { Vault } from "./views/Vault.tsx";
 
-/** Hash routes: #/chat/<threadId>, #/kanban, #/agents, #/settings/<section>. */
+/** Hash routes: #/chat/<threadId>, #/kanban, #/projects, #/agents, #/settings/<section>. */
 function parseRoute(): string[] {
   return location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
 }
@@ -90,6 +92,7 @@ export function App() {
         {section === "chat" && <Chat threadId={sub} onThread={(id) => go(`chat/${id}`)} />}
         {section === "kanban" && <Kanban />}
         {section === "agents" && <Agents />}
+        {section === "projects" && <Projects />}
         {section === "settings" && sub === "vault" && <Vault />}
         {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
         {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
@@ -159,6 +162,10 @@ function Sidebar(props: {
       <a class={`nav ${section === "kanban" ? "active" : ""}`} href="#/kanban">
         <Columns3 class="icon" />
         {t("nav.kanban")}
+      </a>
+      <a class={`nav ${section === "projects" ? "active" : ""}`} href="#/projects">
+        <FolderKanban class="icon" />
+        {t("nav.projects")}
       </a>
       <a class={`nav ${section === "agents" ? "active" : ""}`} href="#/agents">
         <Bot class="icon" />
