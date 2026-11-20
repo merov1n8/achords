@@ -15,10 +15,12 @@ import {
   listSessions,
   listTasks,
   listThreads,
+  listUsageWindows,
   liveProgress,
   redeemPairingCode,
   revokeSession,
   setThreadProject,
+  spendSince,
   validateSession,
 } from "@achords/core";
 import { t } from "@achords/i18n";
@@ -266,6 +268,16 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    // Usage meters (step 6): quota windows as the CLI reported them, and today's cost.
+    [
+      "GET",
+      /^\/api\/usage$/,
+      () => {
+        const midnight = new Date();
+        midnight.setHours(0, 0, 0, 0);
+        return { windows: listUsageWindows(db), spentTodayUsd: spendSince(db, midnight.getTime()) };
+      },
+    ],
     // Live run progress (step 5b), polled by the web's bottom bar.
     ["GET", /^\/api\/runs\/live$/, () => liveProgress(db)],
     // Agent rooms (ADR-0032): hidden from chats; the owner can read them here.

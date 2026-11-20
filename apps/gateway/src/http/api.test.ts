@@ -9,9 +9,11 @@ import {
   createThread,
   type Db,
   enqueue,
+  finishRun,
   getThread,
   listMessages,
   openCoreDatabase,
+  recordUsageWindows,
   setRunProgress,
   startRun,
   upsertAgent,
@@ -612,6 +614,21 @@ describe("HTTP API", () => {
     const { call } = await pair();
     expect(await (await call("/api/rooms")).json()).toEqual([]);
     expect((await call("/api/rooms/nope/messages")).status).toBe(404);
+  });
+
+  it("usage: latest quota windows and today's cost", async () => {
+    const { call } = await pair();
+    recordUsageWindows(db, "cli-claude", [
+      { kind: "five_hour", utilization: 0.42, resetsAt: 9e12, status: "allowed" },
+    ]);
+    const run = startRun(db, { provider: "cli-claude" });
+    finishRun(db, run.id, "succeeded", { costUsd: 0.3 });
+    expect(await (await call("/api/usage")).json()).toEqual({
+      windows: [
+        expect.objectContaining({ provider: "cli-claude", kind: "five_hour", utilization: 0.42 }),
+      ],
+      spentTodayUsd: 0.3,
+    });
   });
 
   it("live progress of running agents for the web bar", async () => {

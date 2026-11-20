@@ -84,6 +84,8 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 
 - Live progress (Phase 2 step 5b): task runs get Claude Code's `TodoWrite` tool (it only keeps the run's own checklist: no file, shell or network access) and a hint to use it; the adapter turns its stream-json calls into done/total/current, stored on the run (`runs.progress_*`) and polled by the web's bottom bar. The time left is extrapolated from elapsed time and is shown only after the first step is done. Discussion turns and the boss decision run without it.
 
+- Usage meters (Phase 2 step 6): every run (boss decisions included) stores its cost and the subscription windows the CLI reports (`usage_windows`, latest per provider and kind). The web Usage page shows them; the owner gets one note per window and level (80%, 95%) through `notify` (Telegram thread, visible on the web too).
+
 ### 4.5 Provider layer
 
 Single interface `ModelProvider { run(task, tools, limits) }` with adapters:
