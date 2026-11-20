@@ -34,6 +34,7 @@ import { t } from "@achords/i18n";
 import {
   createAgentFiles,
   createProject,
+  type IntegrationStatus,
   loadManifest,
   loadProjects,
   updateManifestModels,
@@ -95,6 +96,8 @@ export interface ApiDeps {
   projectsDir?: string;
   /** Agent manifests ($ACHORDS_HOME/agents) for the model settings. */
   agentsDir?: string;
+  /** Integration status for the web Integrations page (ADR-0034); never secret values. */
+  integrations?: () => IntegrationStatus[];
   /** Chat models pulled in the local model server (suggestions only). */
   localModels?: () => Promise<string[]>;
   /** Built web UI (apps/web/dist). Non-API GETs are served from here. */
@@ -529,6 +532,7 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
+    ["GET", /^\/api\/integrations$/, () => deps.integrations?.() ?? []],
     [
       "GET",
       /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})$/,

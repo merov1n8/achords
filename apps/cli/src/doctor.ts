@@ -5,6 +5,13 @@ import { join } from "node:path";
 import type { HomePaths } from "@achords/core";
 import { t } from "@achords/i18n";
 import { detectPlatform, recommendModels } from "@achords/platform";
+import {
+  type IntegrationStatus,
+  integrationStatus,
+  loadAgents,
+  loadCatalog,
+  loadProjects,
+} from "@achords/policy";
 import { installedLaunchdPath, protectedFolderOf } from "./launchd.ts";
 
 export interface Check {
@@ -33,6 +40,62 @@ export interface DoctorEnv {
   hasWhisperModel: boolean;
   /** Models pulled in the local Ollama, or undefined if it is not reachable. */
   ollamaModels: () => Promise<string[] | undefined>;
+  /** Integrations from the catalog (ADR-0034), checked against the service's PATH and vault. */
+  integrations?: () => IntegrationStatus[];
+}
+
+/** One check per integration an agent uses: program, credentials, project setup. */
+export function integrationChecks(list: IntegrationStatus[]): Check[] {
+  return list
+    .filter((s) => s.usedBy.length)
+    .map((s): Check => {
+      const name = t("cli.doctor.integration", { id: s.id });
+      const agents = s.usedBy.join(", ");
+      if (!s.commandFound) {
+        return {
+          name,
+          level: "fail",
+          detail: t("cli.doctor.integrationCommand", { command: s.command ?? "" }),
+          fix: t(s.command === "uvx" ? "cli.doctor.uvxFix" : "cli.doctor.npxFix"),
+        };
+      }
+      if (s.missingSecrets.length) {
+        const google = s.missingSecrets.some((id) => id.startsWith("google-"));
+        return {
+          name,
+          level: "fail",
+          detail: t("cli.doctor.integrationSecrets", { ids: s.missingSecrets.join(", ") }),
+          fix: google
+            ? t("cli.doctor.googleFix")
+            : s.missingSecrets.map((id) => `achords secret set ${id}`).join(" && "),
+        };
+      }
+      if (s.perProject && !s.projectsReady.length) {
+        return {
+          name,
+          level: "warn",
+          detail: t("cli.doctor.integrationNoProject"),
+          fix: t("cli.doctor.integrationProjectFix", { id: s.id }),
+        };
+      }
+      if (s.scoped && !s.projectsScoped.length) {
+        return {
+          name,
+          level: "warn",
+          detail: t("cli.doctor.integrationNoTargets"),
+          fix: t("cli.doctor.integrationTargetsFix"),
+        };
+      }
+      const projects = [...s.projectsReady, ...s.projectsScoped];
+      return {
+        name,
+        level: "ok",
+        detail: t("cli.doctor.integrationOk", {
+          agents,
+          projects: projects.length ? projects.join(", ") : "-",
+        }),
+      };
+    });
 }
 
 // node:sqlite with extension loading needs 22.13+ (ADR-0022).
@@ -211,6 +274,17 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
           },
     );
   }
+  if (env.integrations) {
+    try {
+      for (const c of integrationChecks(env.integrations())) add(c);
+    } catch (err) {
+      add({
+        name: t("cli.doctor.integrations"),
+        level: "fail",
+        detail: (err as Error).message,
+      });
+    }
+  }
   // Optional (ADR-0014): only voice notes need it.
   const whisper = env.which("whisper-cli");
   add(
@@ -235,6 +309,7 @@ export function systemDoctorEnv(
   gatewayEntry: string,
   serviceLoaded: () => boolean,
   vaultStatus: DoctorEnv["vaultStatus"],
+  secretIds: () => string[] = () => [],
 ): DoctorEnv {
   const run = (bin: string, args: string[]) => {
     try {
@@ -270,6 +345,24 @@ export function systemDoctorEnv(
     },
     vaultStatus,
     servicePath: process.platform === "darwin" ? installedLaunchdPath() : undefined,
+    integrations: () => {
+      // Agents run under the service, so look for npx/uvx on its PATH, not the shell's.
+      const path =
+        (process.platform === "darwin" ? installedLaunchdPath() : undefined) ??
+        process.env.PATH ??
+        "";
+      const ids = new Set(secretIds());
+      return integrationStatus(
+        loadCatalog(
+          new URL("../../../seed/catalog/", import.meta.url).pathname,
+          join(paths.home, "catalog"),
+        ),
+        loadAgents(join(paths.home, "agents")).values(),
+        loadProjects(join(paths.home, "projects")).values(),
+        (id) => ids.has(id),
+        (bin) => path.split(":").some((dir) => dir && existsSync(join(dir, bin))),
+      );
+    },
     ramGb: detectPlatform().ramGb,
     hasWhisperModel: existsSync(paths.whisperModel),
     ollamaModels: async () => {

@@ -21,6 +21,7 @@ import { Agents } from "./views/Agents.tsx";
 import { Appearance } from "./views/Appearance.tsx";
 import { Chat } from "./views/Chat.tsx";
 import { Devices } from "./views/Devices.tsx";
+import { Integrations } from "./views/Integrations.tsx";
 import { Kanban } from "./views/Kanban.tsx";
 import { LiveBar } from "./views/LiveBar.tsx";
 import { Pair } from "./views/Pair.tsx";
@@ -102,6 +103,7 @@ export function App() {
         {section === "usage" && <Usage />}
         {section === "schedules" && <Schedules />}
         {section === "settings" && sub === "vault" && <Vault />}
+        {section === "settings" && sub === "integrations" && <Integrations />}
         {section === "settings" && sub === "rooms" && <Rooms />}
         {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
         {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
@@ -199,6 +201,7 @@ function Sidebar(props: {
           t("nav.appearance"),
           section === "settings" && (sub === "appearance" || !sub),
         )}
+        {subLink("#/settings/integrations", t("nav.integrations"), sub === "integrations")}
         {subLink("#/settings/vault", t("nav.vault"), sub === "vault")}
         {subLink("#/settings/devices", t("nav.devices"), sub === "devices")}
         {subLink("#/settings/rooms", t("nav.rooms"), sub === "rooms")}

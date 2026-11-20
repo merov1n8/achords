@@ -63,3 +63,18 @@ export interface Device {
   lastSeenAt: number;
   current: boolean;
 }
+
+/** GET /api/integrations (ADR-0034): what each catalog integration still needs. */
+export interface IntegrationStatus {
+  id: string;
+  name: string;
+  usedBy: string[];
+  command?: string;
+  commandFound: boolean;
+  missingSecrets: string[];
+  perProject: boolean;
+  projectsReady: string[];
+  scoped: boolean;
+  projectsScoped: string[];
+  ready: boolean;
+}
