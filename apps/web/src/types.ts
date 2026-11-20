@@ -5,6 +5,10 @@ export interface Thread {
   title: string | null;
   sensitivity: "normal" | "local-only";
   project: string | null;
+  pinned: boolean;
+  archived: boolean;
+  /** A schedule reports here. */
+  scheduled: boolean;
   updatedAt: number;
 }
 

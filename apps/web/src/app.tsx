@@ -9,18 +9,18 @@ import {
   Gauge,
   Menu,
   MessageSquare,
-  Plus,
   Settings as SettingsIcon,
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { ApiError, api, loadSession, logout } from "./api.ts";
 import { t } from "./i18n.ts";
-import { usePoll } from "./poll.ts";
 import type { Thread } from "./types.ts";
 import { Agents } from "./views/Agents.tsx";
+import { AllChats } from "./views/AllChats.tsx";
 import { Appearance } from "./views/Appearance.tsx";
 import { Chat } from "./views/Chat.tsx";
+import { ChatList } from "./views/ChatList.tsx";
 import { Devices } from "./views/Devices.tsx";
 import { Integrations } from "./views/Integrations.tsx";
 import { Kanban } from "./views/Kanban.tsx";
@@ -107,6 +107,7 @@ export function App() {
           {section === "usage" && <Usage />}
           {section === "schedules" && <Schedules />}
           {section === "monitors" && <Monitors />}
+          {section === "chats" && <AllChats key={sub ?? ""} project={sub} />}
           {section === "settings" && sub === "vault" && <Vault />}
           {section === "settings" && sub === "integrations" && <Integrations />}
           {section === "settings" && sub === "rooms" && <Rooms />}
@@ -143,7 +144,6 @@ function Sidebar(props: {
   open: boolean;
   device?: string | undefined;
 }) {
-  const threads = usePoll(() => api<Thread[]>("/api/threads"), 5000);
   const newThread = async () => {
     const thread = await api<Thread>("/api/threads", { method: "POST", body: {} });
     go(`chat/${thread.id}`);
@@ -162,20 +162,9 @@ function Sidebar(props: {
       <Group
         icon={<MessageSquare class="icon" />}
         label={t("nav.chat")}
-        active={section === "chat"}
+        active={section === "chat" || section === "chats"}
       >
-        {threads.data
-          ?.slice(0, 12)
-          .map((th) =>
-            subLink(
-              `#/chat/${th.id}`,
-              th.title ?? t("chat.untitled"),
-              section === "chat" && sub === th.id,
-            ),
-          )}
-        <button type="button" class="sub as-link" onClick={newThread}>
-          <Plus class="icon" /> {t("chat.newThread")}
-        </button>
+        <ChatList activeId={section === "chat" ? sub : undefined} onNew={newThread} />
       </Group>
       <a class={`nav ${section === "kanban" ? "active" : ""}`} href="#/kanban">
         <Columns3 class="icon" />

@@ -11,6 +11,7 @@ import {
   type Db,
   deleteMonitor,
   deleteSchedule,
+  deleteThread,
   getMonitor,
   getRoom,
   getSchedule,
@@ -36,6 +37,7 @@ import {
   spendSince,
   updateMonitor,
   updateSchedule,
+  updateThread,
   validateSession,
 } from "@achords/core";
 import { t } from "@achords/i18n";
@@ -250,7 +252,49 @@ export function createApiHandler(deps: ApiDeps) {
         return { ok: true };
       },
     ],
-    ["GET", /^\/api\/threads$/, () => listThreads(db)],
+    [
+      "GET",
+      /^\/api\/threads$/,
+      ({ req }) => {
+        const q = new URL(req.url ?? "/", "http://x").searchParams;
+        return listThreads(db, {
+          archived: q.get("archived") === "1",
+          limit: Math.min(500, Math.max(1, Number(q.get("limit") ?? 100) || 100)),
+          ...(q.get("project") ? { project: (q.get("project") as string).slice(0, 64) } : {}),
+          ...(q.get("q") ? { q: (q.get("q") as string).slice(0, 200) } : {}),
+        });
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/threads\/([\w-]{1,64})$/,
+      async ({ params, body }) => {
+        const b = await body();
+        const patch = {
+          ...(b.title !== undefined ? { title: str(b.title, "title", 200) } : {}),
+          ...(b.pinned !== undefined ? { pinned: b.pinned === true } : {}),
+          ...(b.archived !== undefined ? { archived: b.archived === true } : {}),
+        };
+        if (!updateThread(db, params[0] as string, patch)) {
+          throw new HttpError(404, "no such chat");
+        }
+        return getThread(db, params[0] as string);
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/threads\/([\w-]{1,64})$/,
+      ({ params }) => {
+        const id = params[0] as string;
+        // Telegram writes into this one; it can be archived, not deleted.
+        if (getSetting(db, "telegram.thread_id") === id) {
+          throw new HttpError(409, "this is the Telegram chat; archive it instead");
+        }
+        if (!deleteThread(db, id)) throw new HttpError(404, "no such chat");
+        log(`chat deleted in the web UI: ${id}`);
+        return { ok: true };
+      },
+    ],
     [
       "POST",
       /^\/api\/threads$/,
