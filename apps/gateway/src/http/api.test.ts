@@ -112,6 +112,14 @@ describe("HTTP API", () => {
             questions.push({ from, question: `access: ${reason}` });
             return { ok: true };
           },
+          requestPublish: (from, request) => {
+            questions.push({ from, question: `publish: ${JSON.stringify(request)}` });
+            return { ok: true, text: "sent" };
+          },
+          logPublish: (from, report) => {
+            questions.push({ from, question: `log: ${report.tool}` });
+            return { ok: true, text: "logged" };
+          },
           delegate: (from, request) => {
             delegations.push({ from, request });
             return request.agent === "nope"
@@ -505,6 +513,26 @@ describe("HTTP API", () => {
       question: "access: Blender effect from a video",
     });
     expect((await post(tokens.issue("task-4", "artist", ["ask_owner"]).token)).status).toBe(403);
+  });
+
+  it("publish endpoints need a token granting that integration (ADR-0037)", async () => {
+    const post = (token: string, path: string, body: object) =>
+      fetch(`${base}/api/agent/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    const wp = tokens.issue("task-3", "marketer", ["publish:wordpress"]).token;
+    const call = { integration: "wordpress", tool: "create_draft", arguments: { title: "Hi" } };
+    expect(await (await post(wp, "publish", call)).json()).toEqual({ ok: true, text: "sent" });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-3" },
+      question: `publish: ${JSON.stringify({ integration: "wordpress", tool: "create_draft", args: { title: "Hi" } })}`,
+    });
+    expect((await post(wp, "publish_log", { ...call, result: "ok" })).status).toBe(200);
+    expect((await post(wp, "publish", { ...call, integration: "meta" })).status).toBe(403);
+    const hub = tokens.issue("task-3", "marketer", ["ask_owner"]).token;
+    expect((await post(hub, "publish", call)).status).toBe(403);
   });
 
   it("agent endpoint: spawn_worker passes only the declared fields", async () => {

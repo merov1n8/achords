@@ -61,6 +61,7 @@ import {
   allowedIntegrationTools,
   allowRules,
   type Catalog,
+  type CatalogEntry,
   checkFs,
   checkModel,
   checkMove,
@@ -74,6 +75,7 @@ import {
   type Project,
   parseManifest,
   permissionMatrix,
+  publishMode,
   secretRefs,
   type Workflow,
 } from "@achords/policy";
@@ -135,6 +137,12 @@ export interface OrchestratorDeps {
     /** Entry files of the MCP servers shipped with achords, by catalog `builtin` name. */
     builtins: Record<string, string>;
     resolveSecret: (ref: string, actor: string) => string;
+    /** Runs one tool call through the launcher (owner-approved publishing, ADR-0037). */
+    call?: (
+      launch: McpLaunch,
+      tool: string,
+      args: unknown,
+    ) => Promise<{ ok: boolean; text: string }>;
   };
 }
 
@@ -183,6 +191,19 @@ export interface Orchestrator {
     from: { from: "task"; taskId: string },
     reason: string,
   ): { ok: true } | { ok: false; reason: string };
+  /**
+   * A write call in review mode (ADR-0037), from the launcher: stored and posted with Approve /
+   * Reject; only an approved request runs, with exactly these arguments.
+   */
+  requestPublish(
+    from: { from: "task"; taskId: string },
+    request: { integration: string; tool: string; args: unknown },
+  ): { ok: true; text: string } | { ok: false; reason: string };
+  /** A write call that ran in auto mode: reported in the task's thread. */
+  logPublish(
+    from: { from: "task"; taskId: string },
+    report: { integration: string; tool: string; args: unknown; result: string },
+  ): { ok: true; text: string } | { ok: false; reason: string };
   /** Loads manifests and mirrors them into the DB; seeds missing workflows. Returns agent ids. */
   syncAgents(): string[];
   /** An agent moves a kanban card (hub tool move_task), checked against the workflow. */
@@ -196,7 +217,7 @@ export interface Orchestrator {
     from: string,
     to: string,
   ): { ok: true; override: boolean } | { ok: false; reason: string };
-  /** A message button (Telegram or web): proposal|move|access:<verb>:<id>. */
+  /** A message button (Telegram or web): proposal|move|access|publish:<verb>:<id>. */
   runAction(data: string): { ok: boolean; message: string };
   /** A workspace's workflow and its permission matrix (read-only web view). */
   workflow(workspace: string): { workflow: Workflow; matrix: ReturnType<typeof permissionMatrix> };
@@ -416,6 +437,52 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     (task.assigneeAgentId ? agents().get(task.assigneeAgentId)?.workspace : undefined) ?? "shared";
   const pendingKey = (taskId: string) => `pending_move:${taskId}`;
   const accessKey = (taskId: string) => `pending_access:${taskId}`;
+  /** Server command and resolved environment of one integration for one agent and project. */
+  const buildLaunch = (
+    entry: CatalogEntry,
+    agentId: string,
+    project: Project | undefined,
+    actor = `agent:${agentId}/mcp:${entry.id}`,
+  ): McpLaunch => {
+    if (!deps.integrations) throw new Error("integrations are not available");
+    const { resolveSecret, builtins } = deps.integrations;
+    const resolve = (fields: Record<string, string>) =>
+      Object.fromEntries(
+        Object.entries(fields).map(([key, value]) => {
+          if (!value.startsWith("vault:")) return [key, value];
+          if (value.includes("{project}") && !project) {
+            throw new Error(`integration ${entry.id} needs a project`);
+          }
+          const ref = project ? value.replaceAll("{project}", project.slug) : value;
+          return [key, resolveSecret(ref, actor)];
+        }),
+      );
+    const files = Object.fromEntries(
+      Object.entries(entry.files).map(([key, fields]) => [key, resolve(fields)]),
+    );
+    const builtin = entry.builtin ? builtins[entry.builtin] : undefined;
+    if (entry.builtin && !builtin) throw new Error(`no builtin server ${entry.builtin}`);
+    return {
+      // Builtin servers run on the gateway's own Node, like the hub server.
+      command: builtin ? process.execPath : (entry.command as string),
+      args: builtin
+        ? ["--disable-warning=ExperimentalWarning", builtin, ...entry.args]
+        : entry.args,
+      env: resolve(entry.env),
+      files,
+      ...(entry.scope
+        ? { scope: { ...entry.scope, allowed: project?.integrations[entry.id] ?? [] } }
+        : {}),
+    };
+  };
+  const publishKey = (id: string) => `publish_req:${id}`;
+  const showArgs = (args: unknown) => {
+    const text = JSON.stringify(args, null, 2);
+    return text.length > 3500
+      ? `${text.slice(0, 3500)}\n… (${text.length - 3500} more characters)`
+      : text;
+  };
+
   const elevationKey = (rootId: string) => `elevation:${rootId}`;
   /** Until when the chain has full access, if it has it now. */
   const elevatedUntil = (rootId: string): number | undefined => {
@@ -653,6 +720,61 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
 
     runAction(data) {
+      const pub = /^publish:(approve|reject):([\w-]{1,36})$/.exec(data);
+      if (pub) {
+        const id = pub[2] as string;
+        const raw = getSetting(db, publishKey(id));
+        if (!raw) return { ok: false, message: t("action.noPendingPublish") };
+        setSetting(db, publishKey(id), "");
+        clearActions(db, "publish:", id);
+        const req = JSON.parse(raw) as {
+          taskId: string;
+          agentId: string;
+          integration: string;
+          tool: string;
+          args: unknown;
+        };
+        const task = getTask(db, req.taskId);
+        const vars = { tool: req.tool, integration: req.integration };
+        if (pub[1] === "reject") return { ok: true, message: t("action.publishRejected", vars) };
+        const entry = deps.integrations?.catalog().get(req.integration);
+        const manifest = agents().get(req.agentId);
+        const project = task?.project ? projects().get(task.project) : undefined;
+        // Checked again at approval: the setup may have changed since the request.
+        if (
+          !deps.integrations?.call ||
+          !entry?.tools.write.includes(req.tool) ||
+          !manifest ||
+          publishMode(manifest, req.integration, project) === "off"
+        ) {
+          return { ok: false, message: t("action.publishNotAllowed", vars) };
+        }
+        let launch: McpLaunch;
+        try {
+          launch = buildLaunch(
+            entry,
+            req.agentId,
+            project,
+            `owner-approved:agent:${req.agentId}/mcp:${req.integration}`,
+          );
+        } catch (err) {
+          return { ok: false, message: (err as Error).message };
+        }
+        const threadId = task?.threadId;
+        void deps.integrations.call(launch, req.tool, req.args).then((r) => {
+          if (!threadId) return;
+          post(
+            threadId,
+            redact(
+              t(r.ok ? "thread.published" : "thread.publishFailed", {
+                ...vars,
+                result: r.text.slice(0, 1500),
+              }),
+            ),
+          );
+        });
+        return { ok: true, message: t("action.publishApproved", vars) };
+      }
       const access = /^access:(approve|reject):([\w-]{1,36})$/.exec(data);
       if (access) {
         const taskId = access[2] as string;
@@ -850,6 +972,67 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ).slice(0, MAX_POST),
       });
       return { ok: true };
+    },
+
+    requestPublish(from, request) {
+      const task = getTask(db, from.taskId);
+      const entry = deps.integrations?.catalog().get(request.integration);
+      if (!task?.threadId || !task.assigneeAgentId) {
+        return { ok: false, reason: "this task has no conversation with the owner" };
+      }
+      if (!entry?.tools.write.includes(request.tool)) {
+        return {
+          ok: false,
+          reason: `${request.tool} is not a write tool of ${request.integration}`,
+        };
+      }
+      const id = randomBytes(6).toString("hex");
+      setSetting(
+        db,
+        publishKey(id),
+        JSON.stringify({ taskId: task.id, agentId: task.assigneeAgentId, ...request }),
+      );
+      appendMessage(db, {
+        threadId: task.threadId,
+        role: "agent",
+        author: task.assigneeAgentId,
+        channel: "system",
+        content: redact(
+          t("thread.publishRequest", {
+            agent: task.assigneeAgentId,
+            title: task.title,
+            integration: request.integration,
+            tool: request.tool,
+            content: showArgs(request.args),
+          }),
+        ),
+        actions: [
+          { label: t("action.approve"), data: `publish:approve:${id}` },
+          { label: t("action.reject"), data: `publish:reject:${id}` },
+        ],
+      });
+      return {
+        ok: true,
+        text: `Sent to the owner for approval (request ${id}). It runs only if approved, exactly as sent; the result is posted in the conversation. Do not send it again; continue or finish your turn and mention it in your report.`,
+      };
+    },
+
+    logPublish(from, report) {
+      const task = getTask(db, from.taskId);
+      if (!task?.threadId) return { ok: false, reason: "no conversation" };
+      post(
+        task.threadId,
+        redact(
+          t("thread.publishedAuto", {
+            agent: task.assigneeAgentId ?? "?",
+            integration: report.integration,
+            tool: report.tool,
+            content: showArgs(report.args),
+            result: report.result.slice(0, 1500),
+          }),
+        ),
+      );
+      return { ok: true, text: "logged" };
     },
 
     requestAccess(from, reason) {
@@ -1058,7 +1241,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let project: Project | undefined;
     let delegates: Manifest[] = [];
     // Integration servers of this run, environments resolved (secrets included, in memory only).
-    let launches: { id: string; launch: McpLaunch; tools: string[] }[] = [];
+    let launches: {
+      id: string;
+      launch: McpLaunch;
+      tools: string[];
+      publish?: { mode: "review" | "auto"; tools: string[] };
+    }[] = [];
     // Owner-granted full access; never for discussion turns or workers.
     const until = task.roomId || task.workerSpec ? undefined : elevatedUntil(rootId);
     let dropped: string[] = [];
@@ -1114,9 +1302,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         if (!deps.integrations || !deps.hub) throw new Error("integrations are not available");
         const granted = grantedIntegrations(manifest, deps.integrations.catalog());
         if (!granted.ok) throw new Error(granted.reason);
-        const { resolveSecret } = deps.integrations;
         const agentId = manifest.id;
-        const { builtins } = deps.integrations;
+        const runProject = project;
         // Shared accounts reach every client (ADR-0036): a scoped integration runs only in a
         // project that names its own properties, and the launcher enforces them per call.
         const usable = granted.entries.filter((entry) => {
@@ -1124,43 +1311,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           unscoped.push(entry.id);
           return false;
         });
+        const runManifest = manifest;
         launches = usable.map((entry) => {
-          const resolve = (fields: Record<string, string>) =>
-            Object.fromEntries(
-              Object.entries(fields).map(([key, value]) => {
-                if (!value.startsWith("vault:")) return [key, value];
-                if (value.includes("{project}") && !project) {
-                  throw new Error(`integration ${entry.id} needs a project`);
-                }
-                const ref = project ? value.replaceAll("{project}", project.slug) : value;
-                return [key, resolveSecret(ref, `agent:${agentId}/mcp:${entry.id}`)];
-              }),
-            );
-          const files = Object.fromEntries(
-            Object.entries(entry.files).map(([key, fields]) => [key, resolve(fields)]),
-          );
-          const builtin = entry.builtin ? builtins[entry.builtin] : undefined;
-          if (entry.builtin && !builtin) throw new Error(`no builtin server ${entry.builtin}`);
+          // Publishing (ADR-0037): write tools of integrations with credentials go through the
+          // launcher, which asks the owner (review) or reports the call (auto).
+          const mode =
+            secretRefs(entry).length && entry.tools.write.length
+              ? publishMode(runManifest, entry.id, runProject)
+              : "off";
           return {
             id: entry.id,
-            launch: {
-              // Builtin servers run on the gateway's own Node, like the hub server.
-              command: builtin ? process.execPath : (entry.command as string),
-              args: builtin
-                ? ["--disable-warning=ExperimentalWarning", builtin, ...entry.args]
-                : entry.args,
-              env: resolve(entry.env),
-              files,
-              ...(entry.scope
-                ? {
-                    scope: {
-                      ...entry.scope,
-                      allowed: project?.integrations[entry.id] ?? [],
-                    },
-                  }
-                : {}),
-            },
-            tools: allowedIntegrationTools(entry, until !== undefined),
+            launch: buildLaunch(entry, agentId, runProject),
+            tools: [
+              ...allowedIntegrationTools(entry, until !== undefined),
+              ...(mode === "off" ? [] : entry.tools.write.map((t) => `mcp__${entry.id}__${t}`)),
+            ],
+            ...(mode === "off" ? {} : { publish: { mode, tools: entry.tools.write } }),
           };
         });
       }
@@ -1207,7 +1373,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const scopes = launches
         .filter((l) => l.launch.scope)
         .map((l) => `${l.id}: ${l.launch.scope?.allowed.join(", ")}`);
+      const publishing = launches
+        .filter((l) => l.publish)
+        .map((l) => `${l.id} (${l.publish?.mode})`);
       const scopeNote = [
+        publishing.length
+          ? `Write tools of ${publishing.join(", ")}: in review mode a call is sent to the owner for approval and runs only if approved; in auto mode it runs and is reported. Prepare the final content before calling.`
+          : "",
         scopes.length
           ? `This client's own integration targets (calls for anything else are refused): ${scopes.join("; ")}.`
           : "",
@@ -1269,8 +1441,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
     if (deps.hub && deps.integrations) {
       for (const l of launches) {
+        // The launcher reports write calls with a run token that only grants publish:<id>.
+        let launch = l.launch;
+        if (l.publish) {
+          const pub = deps.hub.tokens.issue(task.id, manifest.id, [`publish:${l.id}`]);
+          revokers.push(pub.revoke);
+          launch = { ...launch, publish: { integration: l.id, ...l.publish, token: pub.token } };
+        }
         // Only a ticket goes into the file; the launcher trades it for the environment once.
-        const { ticket, revoke } = deps.integrations.tickets.issue(l.launch);
+        const { ticket, revoke } = deps.integrations.tickets.issue(launch);
         revokers.push(revoke);
         servers[l.id] = {
           command: process.execPath,

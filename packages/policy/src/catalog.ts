@@ -229,3 +229,19 @@ export function integrationStatus(
     };
   });
 }
+
+export type PublishMode = "review" | "auto" | "off";
+
+/**
+ * How an agent's write calls to an integration are handled (ADR-0037): the manifest's channel
+ * setting (channel = integration id) or its default, tightened by the project, never loosened.
+ */
+export function publishMode(
+  manifest: Manifest,
+  integration: string,
+  project?: { publish?: "review" | "off" | undefined },
+): PublishMode {
+  if (project?.publish === "off") return "off";
+  const mode = manifest.publish_mode.channels[integration] ?? manifest.publish_mode.default;
+  return project?.publish === "review" ? "review" : mode;
+}

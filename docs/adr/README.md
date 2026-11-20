@@ -36,3 +36,4 @@
 - [ADR-0034: MCP catalog and integration credentials](0034-mcp-catalog-and-integration-credentials.md)
 - [ADR-0035: Owner-granted full access per task](0035-owner-granted-full-access.md)
 - [ADR-0036: Project scope for shared integration accounts](0036-project-scope-for-shared-accounts.md)
+- [ADR-0037: Publishing through the launcher: review and auto](0037-publishing-review-and-auto.md)
