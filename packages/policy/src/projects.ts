@@ -17,6 +17,8 @@ const projectSchema = z
         z.array(z.string().min(1).max(200)).min(1).max(50),
       )
       .default({}),
+    // ADR-0037: a client can forbid agents publishing (off) or force review; never loosen.
+    publish: z.enum(["review", "off"]).optional(),
   })
   .strict();
 
@@ -26,6 +28,7 @@ export interface Project {
   workspace: string;
   /** Catalog id → this client's own properties/sites/pages (ADR-0036). */
   integrations: Record<string, string[]>;
+  publish?: "review" | "off" | undefined;
   dir: string;
   filesDir: string;
   /** PROJECT.md: client preferences, stack, conventions, deploy rules. */
@@ -99,11 +102,14 @@ export function updateProject(
     name: (patch.name ?? cur.name).trim(),
     workspace: (patch.workspace ?? cur.workspace).trim(),
     integrations: patch.integrations ? cleanLists(patch.integrations) : cur.integrations,
+    ...(cur.publish ? { publish: cur.publish } : {}),
   });
   // Owner-edited fields the web form does not show (integration targets) are kept.
-  const extra = Object.keys(data.integrations).length
-    ? stringifyYaml({ integrations: data.integrations })
-    : "";
+  const extra =
+    (data.publish ? `publish: ${data.publish}\n` : "") +
+    (Object.keys(data.integrations).length
+      ? stringifyYaml({ integrations: data.integrations })
+      : "");
   writeFileSync(
     join(cur.dir, "project.yaml"),
     `name: ${JSON.stringify(data.name)}\nworkspace: ${data.workspace}\n${extra}`,

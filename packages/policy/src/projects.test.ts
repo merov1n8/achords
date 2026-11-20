@@ -80,6 +80,8 @@ describe("projects", () => {
     const want = { ga4: ["324490876"], "search-console": ["sc-domain:roca.com"] };
     expect(loadProjects(dir).get("roca")?.integrations).toEqual(want);
     expect(updateProject(dir, "roca", { name: "Roca Espais" }).integrations).toEqual(want);
+    appendFileSync(join(dir, "roca", "project.yaml"), "publish: off\n");
+    expect(updateProject(dir, "roca", { name: "Roca" }).publish).toBe("off");
   });
 
   it("sets the account lists from the web editor, dropping empty entries", () => {

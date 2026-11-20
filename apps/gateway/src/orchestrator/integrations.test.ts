@@ -47,6 +47,8 @@ describe("integrations in runs (ADR-0034)", () => {
   let seen: { req: RunRequest; config: string | undefined; task: Task }[];
   let resolved: [string, string][];
   let onRun: ((task: Task) => void) | undefined;
+  let called: { launch: McpLaunch; tool: string; args: unknown }[];
+  let runTokens: ReturnType<typeof createRunTokens>;
 
   const agent = (id: string, extra: string, tools = "[Read]") => {
     mkdirSync(join(home, "agents", id), { recursive: true });
@@ -73,6 +75,7 @@ describe("integrations in runs (ADR-0034)", () => {
       `id: ga\nname: GA4\ncommand: uvx\nargs: ["ga@1.0.0"]\nenv:\n  TOKEN: "vault:google-refresh-token"\ntools:\n  read: [run_report, get_account_summaries]\nscope:\n  args: [property_id]\n`,
     );
     agent("analyst", "mcp: [ga]");
+    agent("autopub", "mcp: [wp]\npublish_mode:\n  default: review\n  channels:\n    wp: auto");
     agent("boss", "");
     agent("marketer", "mcp: [wp]");
     agent("shelly", 'mcp: [wp]\nshell:\n  allow: ["ls"]');
@@ -84,6 +87,8 @@ describe("integrations in runs (ADR-0034)", () => {
     seen = [];
     resolved = [];
     onRun = undefined;
+    called = [];
+    runTokens = createRunTokens();
     tickets = createMcpTickets();
     const p: ModelProvider = {
       id: "cli-claude",
@@ -100,7 +105,7 @@ describe("integrations in runs (ADR-0034)", () => {
       db,
       home,
       providers: { "cli-claude": p },
-      hub: { url: "http://127.0.0.1:7420", tokens: createRunTokens(), serverEntry: "/x/server.ts" },
+      hub: { url: "http://127.0.0.1:7420", tokens: runTokens, serverEntry: "/x/server.ts" },
       integrations: {
         catalog: () => loadCatalog(join(home, "no-seed"), catalogDir),
         tickets,
@@ -109,6 +114,10 @@ describe("integrations in runs (ADR-0034)", () => {
         resolveSecret: (ref, actor) => {
           resolved.push([ref, actor]);
           return SECRET;
+        },
+        call: async (launch, tool, args) => {
+          called.push({ launch, tool, args });
+          return { ok: true, text: "draft 42 created" };
         },
       },
     });
@@ -139,9 +148,9 @@ describe("integrations in runs (ADR-0034)", () => {
     const wp = JSON.parse(run.config).mcpServers.wp;
     expect(wp.args).toContain("/x/launch.ts");
     expect(Object.keys(wp.env).sort()).toEqual(["ACHORDS_HUB_URL", "ACHORDS_MCP_TICKET"]);
-    // Read tools only; write tools wait for publishing review.
+    // Write tools are allowed only because the launcher routes them to the owner (ADR-0037).
     expect(run.req.allowedTools).toContain("mcp__wp__list_posts");
-    expect(run.req.allowedTools).not.toContain("mcp__wp__create_post");
+    expect(run.req.allowedTools).toContain("mcp__wp__create_post");
     // Per-client credentials, audited per agent and integration.
     expect(resolved).toEqual([["vault:wp-acme", "agent:marketer/mcp:wp"]]);
     // The run is over: ticket dead, file gone.
@@ -315,6 +324,73 @@ describe("integrations in runs (ADR-0034)", () => {
       }
       expect(seen[0]?.req.prompt).toMatch(/project.yaml of acme names no targets\): ga/);
       expect(seen[1]?.req.prompt).toMatch(/no client project\): ga/);
+    });
+  });
+
+  describe("publishing (ADR-0037)", () => {
+    const capture = () => {
+      const launches: McpLaunch[] = [];
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launches.push(launch);
+        return original(launch);
+      };
+      return launches;
+    };
+
+    it("review: write tools go through the launcher to the owner, who approves the exact call", async () => {
+      const launches = capture();
+      const task = await give("marketer", "acme");
+      expect(seen[0]?.req.allowedTools).toContain("mcp__wp__create_post");
+      const pub = launches[0]?.publish;
+      expect(pub).toMatchObject({ integration: "wp", mode: "review", tools: ["create_post"] });
+      expect(seen[0]?.req.prompt).toMatch(/Write tools of wp \(review\)/);
+      // The token only granted publishing to wp, and died with the run.
+      expect(runTokens.resolve(pub?.token ?? "")).toBeUndefined();
+
+      const sent = orch.requestPublish(
+        { from: "task", taskId: task.id },
+        { integration: "wp", tool: "create_post", args: { title: "Spring sale" } },
+      );
+      expect(sent).toMatchObject({ ok: true, text: expect.stringMatching(/Sent to the owner/) });
+      const msg = listMessages(db, task.threadId as string).at(-1);
+      expect(msg?.content).toMatch(/marketer wants to publish[\s\S]*"title": "Spring sale"/);
+      const approve = msg?.actions?.[0]?.data ?? "";
+      expect(approve).toMatch(/^publish:approve:/);
+      expect(called).toEqual([]);
+
+      expect(orch.runAction(approve).ok).toBe(true);
+      expect(orch.runAction(approve).ok).toBe(false); // once only
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called).toHaveLength(1);
+      expect(called[0]).toMatchObject({ tool: "create_post", args: { title: "Spring sale" } });
+      expect(called[0]?.launch.env.WP_PASSWORD).toBe(SECRET);
+      expect(resolved.at(-1)).toEqual(["vault:wp-acme", "owner-approved:agent:marketer/mcp:wp"]);
+      expect(listMessages(db, task.threadId as string).at(-1)?.content).toMatch(
+        /Done: wp create_post\.\ndraft 42 created/,
+      );
+    });
+
+    it("refuses tools that are not write tools, and runs nothing on reject", async () => {
+      const task = await give("marketer", "acme");
+      const from = { from: "task" as const, taskId: task.id };
+      expect(
+        orch.requestPublish(from, { integration: "wp", tool: "list_posts", args: {} }).ok,
+      ).toBe(false);
+      orch.requestPublish(from, { integration: "wp", tool: "create_post", args: {} });
+      const reject = listMessages(db, task.threadId as string).at(-1)?.actions?.[1]?.data ?? "";
+      expect(orch.runAction(reject).message).toMatch(/Rejected/);
+      expect(called).toEqual([]);
+    });
+
+    it("auto mode reports; a project with publish: off gets no write tools", async () => {
+      const launches = capture();
+      await give("autopub", "acme");
+      expect(launches[0]?.publish?.mode).toBe("auto");
+      appendFileSync(join(home, "projects", "acme", "project.yaml"), "publish: off\n");
+      await give("marketer", "acme");
+      expect(launches[1]?.publish).toBeUndefined();
+      expect(seen[1]?.req.allowedTools).not.toContain("mcp__wp__create_post");
     });
   });
 });

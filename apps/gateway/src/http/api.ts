@@ -80,6 +80,8 @@ export interface ApiDeps {
     | "syncAgents"
     | "openRoom"
     | "requestAccess"
+    | "requestPublish"
+    | "logPublish"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -170,11 +172,14 @@ async function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(
+  req: IncomingMessage,
+  limit = BODY_LIMIT,
+): Promise<Record<string, unknown>> {
   if (!(req.headers["content-type"] ?? "").startsWith("application/json")) {
     throw new HttpError(415, "expected application/json");
   }
-  const raw = await readBody(req, BODY_LIMIT);
+  const raw = await readBody(req, limit);
   try {
     const parsed = JSON.parse(raw.toString("utf8") || "{}");
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error();
@@ -503,7 +508,7 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/actions$/,
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
-        if (!/^(proposal|move|access):(approve|reject):[\w-]{1,36}$/.test(data)) {
+        if (!/^(proposal|move|access|publish):(approve|reject):[\w-]{1,36}$/.test(data)) {
           throw new HttpError(400, "unknown action");
         }
         const out = deps.orchestrator.runAction(data);
@@ -768,6 +773,35 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
         const tool = path.slice("/api/agent/".length);
+        // Publishing (ADR-0037): from the launcher, with a token granting publish:<integration>.
+        if (method === "POST" && (tool === "publish" || tool === "publish_log")) {
+          // A page or post can be long; the owner sees it before it runs.
+          const b = await readJson(req, 512 * 1024);
+          const integration = str(b.integration, "integration", 64);
+          if (!caller.tools.includes(`publish:${integration}`)) {
+            throw new HttpError(403, `publishing to ${integration} not granted to this run`);
+          }
+          const from = { from: "task" as const, taskId: caller.taskId };
+          const toolName = str(b.tool, "tool", 64);
+          if (JSON.stringify(b.arguments ?? {}).length > 300_000) {
+            throw new HttpError(413, "arguments too large");
+          }
+          const out =
+            tool === "publish"
+              ? deps.orchestrator.requestPublish(from, {
+                  integration,
+                  tool: toolName,
+                  args: b.arguments ?? {},
+                })
+              : deps.orchestrator.logPublish(from, {
+                  integration,
+                  tool: toolName,
+                  args: b.arguments ?? {},
+                  result: typeof b.result === "string" ? b.result.slice(0, 2000) : "",
+                });
+          send(res, out.ok ? 200 : 409, out);
+          return;
+        }
         const AGENT_TOOLS = [
           "delegate",
           "ask_owner",

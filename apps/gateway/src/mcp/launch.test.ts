@@ -11,11 +11,29 @@ describe("integration launcher (ADR-0034)", () => {
   let url: string;
   let auths: (string | undefined)[];
   let scoped: object | undefined;
+  let published: { path: string; auth: string | undefined; body: Record<string, unknown> }[];
 
   beforeEach(async () => {
     auths = [];
     scoped = undefined;
+    published = [];
     hub = createServer((req, res) => {
+      if (req.url?.startsWith("/api/agent/publish")) {
+        let body = "";
+        req.on("data", (c) => {
+          body += c;
+        });
+        req.on("end", () => {
+          published.push({
+            path: req.url ?? "",
+            auth: req.headers.authorization,
+            body: JSON.parse(body),
+          });
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true, text: "Sent to the owner as request p1." }));
+        });
+        return;
+      }
       auths.push(req.headers.authorization);
       if (req.headers.authorization !== "Bearer good") {
         res.statusCode = 401;
@@ -114,5 +132,59 @@ describe("integration launcher (ADR-0034)", () => {
     expect(refused.map((l) => l.id)).toEqual([3, 4]);
     expect(refused[0].result.content[0].text).toMatch(/222 is not part of this project/);
     expect(lines.some((l) => l.error?.message === "batches are not accepted")).toBe(true);
+  });
+
+  it("turns review-mode write calls into publish requests; auto ones run and are reported (ADR-0037)", async () => {
+    const echo =
+      "require('readline').createInterface({input: process.stdin}).on('line', (l) => console.log(JSON.stringify({ jsonrpc: '2.0', id: JSON.parse(l).id, result: { saw: JSON.parse(l).params?.name } })))";
+    const call = (id: number, name: string, args: object) =>
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name, arguments: args },
+      });
+    const run = async (mode: "review" | "auto") => {
+      scoped = {
+        command: process.execPath,
+        args: ["-e", echo],
+        env: {},
+        files: {},
+        publish: { integration: "wordpress", mode, tools: ["create_draft"], token: "pub" },
+      };
+      const r = await launch(
+        "good",
+        [call(1, "list_posts", {}), call(2, "create_draft", { title: "Hi" }), ""].join("\n"),
+      );
+      return r.out
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
+    };
+
+    const review = await run("review");
+    expect(review.filter((l) => l.result?.saw).map((l) => l.result.saw)).toEqual(["list_posts"]);
+    expect(review.find((l) => l.id === 2)?.result.content[0].text).toBe(
+      "Sent to the owner as request p1.",
+    );
+    expect(published).toEqual([
+      {
+        path: "/api/agent/publish",
+        auth: "Bearer pub",
+        body: { integration: "wordpress", tool: "create_draft", arguments: { title: "Hi" } },
+      },
+    ]);
+
+    published = [];
+    const auto = await run("auto");
+    expect(auto.filter((l) => l.result?.saw).map((l) => l.result.saw)).toEqual([
+      "list_posts",
+      "create_draft",
+    ]);
+    for (let i = 0; i < 50 && !published.length; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(published[0]).toMatchObject({
+      path: "/api/agent/publish_log",
+      body: { integration: "wordpress", tool: "create_draft", arguments: { title: "Hi" } },
+    });
   });
 });
