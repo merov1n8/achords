@@ -3,7 +3,7 @@ import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
-import type { Monitor } from "../types.ts";
+import type { IntegrationStatus, Monitor, Project } from "../types.ts";
 
 const STATE_CHIP = { ok: "done", alert: "failed", unknown: "todo" } as const;
 
@@ -24,7 +24,9 @@ export function Monitors() {
   const target = (m: Monitor) =>
     m.kind === "site"
       ? String(m.config.url ?? "")
-      : t("monitors.stuckTarget", { hours: Number(m.config.hours ?? 48) });
+      : m.kind === "integration"
+        ? [m.config.integration, m.config.tool, m.config.project].filter(Boolean).join(" · ")
+        : t("monitors.stuckTarget", { hours: Number(m.config.hours ?? 48) });
   return (
     <>
       <div class="page-head">
@@ -114,21 +116,35 @@ function NewMonitor(props: { onCreated: () => void }) {
     url: "https://",
     hours: "48",
     every: "10",
+    integration: "",
+    tool: "",
+    project: "",
+    question: "",
+    args: "{}",
   };
+  const integrations = usePoll(() => api<IntegrationStatus[]>("/api/integrations"), 60000);
+  const projects = usePoll(() => api<Project[]>("/api/projects"), 60000);
   const [f, setF] = useState(empty);
   const [error, setError] = useState<string>();
   const submit = async (e: Event) => {
     e.preventDefault();
     setError(undefined);
     try {
+      const config =
+        f.kind === "site"
+          ? { url: f.url.trim() }
+          : f.kind === "stuck"
+            ? { hours: Number(f.hours) }
+            : {
+                integration: f.integration,
+                tool: f.tool.trim(),
+                ...(f.project ? { project: f.project } : {}),
+                question: f.question.trim(),
+                args: JSON.parse(f.args || "{}") as object,
+              };
       await api("/api/monitors", {
         method: "POST",
-        body: {
-          name: f.name,
-          kind: f.kind,
-          every_minutes: Number(f.every),
-          config: f.kind === "site" ? { url: f.url.trim() } : { hours: Number(f.hours) },
-        },
+        body: { name: f.name, kind: f.kind, every_minutes: Number(f.every), config },
       });
       setF(empty);
       props.onCreated();
@@ -156,9 +172,69 @@ function NewMonitor(props: { onCreated: () => void }) {
         >
           <option value="site">{t("monitors.kind.site")}</option>
           <option value="stuck">{t("monitors.kind.stuck")}</option>
+          <option value="integration">{t("monitors.kind.integration")}</option>
         </select>
       </label>
-      {f.kind === "site" ? (
+      {f.kind === "integration" ? (
+        <>
+          <label class="field">
+            {t("monitors.integration")}
+            <select
+              class="input"
+              value={f.integration}
+              onChange={(e) => setF({ ...f, integration: e.currentTarget.value })}
+            >
+              <option value="" />
+              {(integrations.data ?? []).map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            {t("monitors.tool")}
+            <input
+              class="input"
+              value={f.tool}
+              onInput={(e) => setF({ ...f, tool: e.currentTarget.value })}
+            />
+            <span class="muted small">{t("monitors.toolHelp")}</span>
+          </label>
+          <label class="field">
+            {t("chats.project")}
+            <select
+              class="input"
+              value={f.project}
+              onChange={(e) => setF({ ...f, project: e.currentTarget.value })}
+            >
+              <option value="" />
+              {(projects.data ?? []).map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            {t("monitors.question")}
+            <textarea
+              class="input"
+              rows={2}
+              value={f.question}
+              onInput={(e) => setF({ ...f, question: e.currentTarget.value })}
+            />
+          </label>
+          <label class="field">
+            {t("monitors.args")}
+            <input
+              class="input mono"
+              value={f.args}
+              onInput={(e) => setF({ ...f, args: e.currentTarget.value })}
+            />
+          </label>
+        </>
+      ) : f.kind === "site" ? (
         <label class="field">
           {t("monitors.url")}
           <input

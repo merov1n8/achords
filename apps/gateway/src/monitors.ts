@@ -18,6 +18,10 @@ export interface MonitorDeps {
   notify: (text: string) => void;
   fetch?: typeof fetch;
   now?: () => Date;
+  /** Integration checks (5b), run by the orchestrator: launcher + local-model triage. */
+  checkIntegration?: (
+    m: Monitor,
+  ) => Promise<{ state: "ok" | "alert"; detail: string; result?: string; news: boolean }>;
 }
 
 type Result = { state: "ok" | "alert"; detail: string };
@@ -68,6 +72,12 @@ export async function runMonitors(deps: MonitorDeps): Promise<void> {
   const now = deps.now?.() ?? new Date();
   const f = deps.fetch ?? fetch;
   for (const m of dueMonitors(deps.db, now.getTime())) {
+    if (m.kind === "integration") {
+      if (!deps.checkIntegration) continue;
+      const r = await deps.checkIntegration(m);
+      recordCheck(deps.db, m.id, r, now.getTime());
+      continue;
+    }
     const result =
       m.kind === "site" ? await checkSite(m, f) : checkStuck(m, deps.db, now.getTime());
     recordCheck(deps.db, m.id, result, now.getTime());
@@ -75,10 +85,17 @@ export async function runMonitors(deps: MonitorDeps): Promise<void> {
   if (inQuietHours(getSetting(deps.db, QUIET_HOURS_KEY), now.getHours())) return;
   for (const m of unnotifiedMonitors(deps.db)) {
     deps.notify(
-      t(m.state === "alert" ? "monitor.alert" : "monitor.recovered", {
-        name: m.name,
-        detail: m.detail ?? "",
-      }),
+      t(
+        m.kind === "integration"
+          ? "monitor.news"
+          : m.state === "alert"
+            ? "monitor.alert"
+            : "monitor.recovered",
+        {
+          name: m.name,
+          detail: m.detail ?? "",
+        },
+      ),
     );
     markNotified(deps.db, m.id);
   }

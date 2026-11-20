@@ -224,7 +224,11 @@ export function runGateway(home: string): Promise<number> {
       // Heartbeat monitors (ADR-0039): cheap checks, one pass at a time.
       if (!monitoring) {
         monitoring = true;
-        runMonitors({ db, notify: notifyOwner })
+        runMonitors({
+          db,
+          notify: notifyOwner,
+          checkIntegration: (m) => orchestrator.checkIntegration(m, m.lastResult),
+        })
           .catch((err) => log(`monitor error: ${(err as Error).message}`))
           .finally(() => {
             monitoring = false;

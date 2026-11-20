@@ -87,7 +87,7 @@ export interface IntegrationStatus {
 export interface Monitor {
   id: string;
   name: string;
-  kind: "site" | "stuck";
+  kind: "site" | "stuck" | "integration";
   config: Record<string, unknown>;
   everyMinutes: number;
   enabled: boolean;
