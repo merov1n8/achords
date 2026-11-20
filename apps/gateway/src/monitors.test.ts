@@ -98,4 +98,34 @@ describe("heartbeat monitors (ADR-0039)", () => {
     expect(inQuietHours("13-14", 13)).toBe(true);
     expect(inQuietHours(undefined, 3)).toBe(false);
   });
+
+  it("integration monitors tell news from the orchestrator's check, nothing else", async () => {
+    createMonitor(
+      db,
+      { name: "Reviews", kind: "integration", config: {}, everyMinutes: 30 },
+      clock.getTime(),
+    );
+    const answers = [
+      { state: "ok" as const, detail: "first result stored", result: "A", news: false },
+      { state: "alert" as const, detail: "1 new review: 2 stars", result: "AB", news: true },
+      { state: "ok" as const, detail: "no change", result: "AB", news: false },
+    ];
+    const previous: (string | null)[] = [];
+    const check = () =>
+      runMonitors({
+        db,
+        notify: (t) => told.push(t),
+        now: () => clock,
+        checkIntegration: async (m) => {
+          previous.push(m.lastResult);
+          return answers.shift() as (typeof answers)[number];
+        },
+      });
+    for (let i = 0; i < 3; i++) {
+      await check();
+      later(30);
+    }
+    expect(previous).toEqual([null, "A", "AB"]);
+    expect(told).toEqual(["🔔 Reviews: 1 new review: 2 stars"]);
+  });
 });

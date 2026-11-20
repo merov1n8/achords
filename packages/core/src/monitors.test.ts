@@ -79,4 +79,32 @@ describe("monitors (ADR-0039)", () => {
     expect(recordCheck(db, m.id, { state: "ok", detail: "200" }).changed).toBe(false);
     expect(unnotifiedMonitors(db)).toEqual([]);
   });
+
+  it("integration monitors tell each piece of news and keep the last result", () => {
+    const m = createMonitor(db, {
+      name: "Reviews",
+      kind: "integration",
+      config: { integration: "meta" },
+      everyMinutes: 30,
+    });
+    expect(
+      recordCheck(db, m.id, { state: "ok", detail: "baseline", result: "A", news: false }).changed,
+    ).toBe(false);
+    expect(getMonitor(db, m.id)?.lastResult).toBe("A");
+    expect(
+      recordCheck(db, m.id, { state: "alert", detail: "1 new review", result: "AB", news: true })
+        .changed,
+    ).toBe(true);
+    markNotified(db, m.id);
+    expect(
+      recordCheck(db, m.id, { state: "alert", detail: "another", result: "ABC", news: true })
+        .changed,
+    ).toBe(true);
+    // The next quiet check does not announce "back to normal".
+    markNotified(db, m.id);
+    expect(recordCheck(db, m.id, { state: "ok", detail: "no change", news: false }).changed).toBe(
+      false,
+    );
+    expect(getMonitor(db, m.id)?.lastResult).toBe("ABC");
+  });
 });

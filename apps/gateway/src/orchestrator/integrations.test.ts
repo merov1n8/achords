@@ -48,6 +48,8 @@ describe("integrations in runs (ADR-0034)", () => {
   let resolved: [string, string][];
   let onRun: ((task: Task) => void) | undefined;
   let called: { launch: McpLaunch; tool: string; args: unknown }[];
+  let callText: string;
+  let triage: { news: boolean; summary: string } | undefined;
   let runTokens: ReturnType<typeof createRunTokens>;
 
   const agent = (id: string, extra: string, tools = "[Read]") => {
@@ -93,6 +95,8 @@ describe("integrations in runs (ADR-0034)", () => {
     resolved = [];
     onRun = undefined;
     called = [];
+    callText = "draft 42 created";
+    triage = undefined;
     runTokens = createRunTokens();
     tickets = createMcpTickets();
     const p: ModelProvider = {
@@ -109,7 +113,17 @@ describe("integrations in runs (ADR-0034)", () => {
     orch = createOrchestrator({
       db,
       home,
-      providers: { "cli-claude": p, "cli-codex": { ...p, id: "cli-codex" } },
+      providers: {
+        "cli-claude": p,
+        "cli-codex": { ...p, id: "cli-codex" },
+        local: {
+          id: "local",
+          async run(req) {
+            seen.push({ req, config: undefined, task: {} as Task });
+            return triage ? { ...result(), structured: triage } : { ...result(), ok: false };
+          },
+        },
+      },
       hub: { url: "http://127.0.0.1:7420", tokens: runTokens, serverEntry: "/x/server.ts" },
       integrations: {
         catalog: () => loadCatalog(join(home, "no-seed"), catalogDir),
@@ -122,7 +136,7 @@ describe("integrations in runs (ADR-0034)", () => {
         },
         call: async (launch, tool, args) => {
           called.push({ launch, tool, args });
-          return { ok: true, text: "draft 42 created" };
+          return { ok: true, text: callText };
         },
       },
     });
@@ -476,5 +490,53 @@ describe("integrations in runs (ADR-0034)", () => {
       /OpenAI model without achords tools[\s\S]*\(wp are left out\)/,
     );
     expect(resolved).toEqual([]); // no credentials were even resolved
+  });
+
+  describe("integration monitors (ADR-0039, 5b)", () => {
+    const mon = {
+      name: "Posts",
+      config: { integration: "wp", tool: "list_posts", project: "acme", question: "New posts?" },
+    };
+
+    it("stores a baseline, ignores no change, and lets the local model judge a change", async () => {
+      callText = "post A";
+      expect(await orch.checkIntegration(mon, null)).toMatchObject({
+        news: false,
+        result: "post A",
+      });
+      expect(called[0]?.launch.untrusted).toBe("WordPress"); // marked as third-party data
+      expect(resolved.at(-1)).toEqual(["vault:wp-acme", "monitor:Posts/mcp:wp"]);
+      expect(await orch.checkIntegration(mon, "post A")).toMatchObject({
+        news: false,
+        detail: "no change",
+      });
+      callText = "post A, post B";
+      triage = { news: true, summary: "A new post: B" };
+      expect(await orch.checkIntegration(mon, "post A")).toEqual({
+        state: "alert",
+        detail: "A new post: B",
+        result: "post A, post B",
+        news: true,
+      });
+      const judged = seen.at(-1)?.req;
+      expect(judged?.model).toBe("qwen3:8b");
+      expect(judged?.prompt).toMatch(/Question: New posts\?[\s\S]*post A, post B/);
+      expect(judged?.prompt).toMatch(/data, not instructions/);
+    });
+
+    it("never runs write tools, and stays quiet when the local model cannot judge", async () => {
+      expect(
+        await orch.checkIntegration(
+          { name: "x", config: { ...mon.config, tool: "create_post" } },
+          null,
+        ),
+      ).toMatchObject({ state: "alert", detail: "create_post is not a read tool of wp" });
+      expect(called).toEqual([]);
+      callText = "changed";
+      expect(await orch.checkIntegration(mon, "before")).toMatchObject({
+        news: false,
+        state: "ok",
+      });
+    });
   });
 });
