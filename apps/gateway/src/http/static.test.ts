@@ -47,6 +47,7 @@ describe("static web UI", () => {
           handleMessage: async () => "answer",
           delegate: () => ({ ok: false, reason: "n/a" }),
           askOwner: () => ({ ok: false, reason: "n/a" }),
+          requestAccess: () => ({ ok: false, reason: "n/a" }),
           spawnWorker: () => ({ ok: false, reason: "n/a" }),
           proposeAgent: () => ({ ok: false, reason: "n/a" }),
           decideProposal: () => ({ ok: false, reason: "n/a" }),

@@ -1,7 +1,14 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createThread, getTask, openCoreDatabase, type Task } from "@achords/core";
+import {
+  createThread,
+  getTask,
+  listMessages,
+  openCoreDatabase,
+  setSetting,
+  type Task,
+} from "@achords/core";
 import { createProject, loadCatalog } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -26,12 +33,13 @@ describe("integrations in runs (ADR-0034)", () => {
   let tickets: McpTickets;
   let seen: { req: RunRequest; config: string | undefined; task: Task }[];
   let resolved: [string, string][];
+  let onRun: ((task: Task) => void) | undefined;
 
-  const agent = (id: string, extra: string) => {
+  const agent = (id: string, extra: string, tools = "[Read]") => {
     mkdirSync(join(home, "agents", id), { recursive: true });
     writeFileSync(
       join(home, "agents", id, "agent.yaml"),
-      `id: ${id}\nname: ${id}\nrole: ${id}\nworkspace: web-clients\nmodels:\n  default: cli-claude/sonnet\ntools: [Read]\n${extra}\n`,
+      `id: ${id}\nname: ${id}\nrole: ${id}\nworkspace: web-clients\nmodels:\n  default: cli-claude/sonnet\ntools: ${tools}\n${extra}\n`,
     );
   };
 
@@ -45,24 +53,28 @@ describe("integrations in runs (ADR-0034)", () => {
     );
     writeFileSync(
       join(catalogDir, "blender.yaml"),
-      `id: blender\nname: Blender\ncommand: uvx\nargs: ["blender-mcp==1.0.0"]\ntools:\n  read: [get_scene_info]\n`,
+      `id: blender\nname: Blender\ncommand: uvx\nargs: ["blender-mcp==1.0.0"]\ntools:\n  read: [get_scene_info]\n  write: [execute_blender_code]\n`,
     );
     agent("boss", "");
     agent("marketer", "mcp: [wp]");
     agent("shelly", 'mcp: [wp]\nshell:\n  allow: ["ls"]');
     agent("artist", 'mcp: [blender]\nshell:\n  allow: ["ls"]');
     agent("ghost", "mcp: [ga4]");
+    agent("maker", "mcp: [blender, wp]\nnetwork:\n  allow: [docs.blender.org]", "[Read, WebFetch]");
     createProject(join(home, "projects"), { slug: "acme", name: "Acme", workspace: "web-clients" });
     db = openCoreDatabase(join(home, "core.db"));
     seen = [];
     resolved = [];
+    onRun = undefined;
     tickets = createMcpTickets();
     const p: ModelProvider = {
       id: "cli-claude",
       async run(req) {
         const row = db.prepare("SELECT id FROM tasks WHERE status = 'claimed'").get();
         const config = req.mcpConfigPath ? readFileSync(req.mcpConfigPath, "utf8") : undefined;
-        seen.push({ req, config, task: getTask(db, String(row?.id)) as Task });
+        const task = getTask(db, String(row?.id)) as Task;
+        seen.push({ req, config, task });
+        onRun?.(task);
         return result();
       },
     };
@@ -180,5 +192,82 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(task.status).toBe("done");
     expect(JSON.parse(seen[0]?.config ?? "{}").mcpServers.blender).toBeDefined();
     expect(seen[0]?.req.allowedTools).toContain("mcp__blender__get_scene_info");
+  });
+
+  describe("owner-granted full access (ADR-0035)", () => {
+    const start = (agentId: string) => {
+      const thread = createThread(db, { project: "acme" });
+      const r = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: agentId, title: "Glass effect", instructions: "recreate it in Blender" },
+      );
+      if (!r.ok) throw new Error(r.reason);
+      return { thread, taskId: r.taskId };
+    };
+    const drain = async () => {
+      for (let i = 0; i < 10 && (await orch.workOnce()); i++);
+    };
+
+    it("asks with buttons, waits, and resumes with open web and local write tools", async () => {
+      onRun = (task) => {
+        if (!seen.some((r) => r.req.prompt.includes("full access granted"))) {
+          if (seen.length === 1) orch.requestAccess({ from: "task", taskId: task.id }, "video");
+        }
+      };
+      const { thread, taskId } = start("maker");
+      await drain();
+      // First run: allow-listed host only, read tools only, both integrations.
+      const first = seen[0]?.req;
+      expect(first?.allowedTools).toContain("WebFetch(domain:docs.blender.org)");
+      expect(first?.allowedTools).not.toContain("WebFetch");
+      expect(first?.allowedTools).not.toContain("mcp__blender__execute_blender_code");
+      expect(first?.allowedTools).toContain("mcp__achords__request_access");
+      const msg = listMessages(db, thread.id).at(-1);
+      expect(msg?.content).toMatch(/maker asks for full access \(Glass effect\): video/);
+      expect(msg?.actions?.map((a) => a.data)).toEqual([
+        `access:approve:${taskId}`,
+        `access:reject:${taskId}`,
+      ]);
+      expect(await orch.workOnce()).toBe(false); // waits for the owner
+
+      expect(orch.runAction(`access:approve:${taskId}`).message).toMatch(/until \d\d:\d\d/);
+      expect(orch.runAction(`access:approve:${taskId}`).ok).toBe(false); // once only
+      await drain();
+      const second = seen.at(-1);
+      expect(second?.req.prompt).toMatch(/Owner's answer: Full access granted until/);
+      expect(second?.req.prompt).toMatch(/Left out meanwhile \(they hold credentials\): wp/);
+      expect(second?.req.allowedTools).toEqual(
+        expect.arrayContaining(["WebFetch", "WebSearch", "mcp__blender__execute_blender_code"]),
+      );
+      // Client credentials never share a run with the open web.
+      expect(second?.req.allowedTools?.some((t) => t.startsWith("mcp__wp__"))).toBe(false);
+      expect(JSON.parse(second?.config ?? "{}").mcpServers.wp).toBeUndefined();
+      expect(getTask(db, taskId)?.status).toBe("done");
+    });
+
+    it("a refusal resumes the task without access", async () => {
+      onRun = (task) => {
+        if (seen.length === 1) orch.requestAccess({ from: "task", taskId: task.id }, "video");
+      };
+      const { taskId } = start("maker");
+      await drain();
+      expect(orch.runAction(`access:reject:${taskId}`).message).toMatch(/refused/);
+      await drain();
+      const last = seen.at(-1)?.req;
+      expect(last?.prompt).toMatch(/The owner refused full access/);
+      expect(last?.allowedTools).not.toContain("WebFetch");
+      expect(last?.allowedTools).toContain("mcp__wp__list_posts");
+    });
+
+    it("applies to the chain while valid and expires", async () => {
+      const live = start("maker");
+      setSetting(db, `elevation:${live.taskId}`, String(Date.now() + 60_000));
+      await drain();
+      expect(seen[0]?.req.allowedTools).toContain("WebFetch");
+      const old = start("maker");
+      setSetting(db, `elevation:${old.taskId}`, String(Date.now() - 1));
+      await drain();
+      expect(seen[1]?.req.allowedTools).not.toContain("WebFetch");
+    });
   });
 });
