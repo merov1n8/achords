@@ -18,7 +18,12 @@ import {
   validateSession,
 } from "@achords/core";
 import { t } from "@achords/i18n";
-import { loadManifest, updateManifestModels } from "@achords/policy";
+import {
+  createAgentFiles,
+  loadManifest,
+  updateManifestModels,
+  updateManifestName,
+} from "@achords/policy";
 import type { Vault } from "@achords/secrets";
 import type { RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
@@ -32,6 +37,8 @@ const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
 const BODY_LIMIT = 64 * 1024;
 // About 10 minutes of Opus audio, like the Telegram voice limit.
 const AUDIO_LIMIT = 10 * 1024 * 1024;
+// Tools the claude CLI knows; an agent gets none unless the owner ticks it.
+const AGENT_TOOL_NAMES = ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebFetch", "WebSearch"];
 const CLAUDE_ALIASES = [
   "cli-claude/opus",
   "cli-claude/sonnet",
@@ -53,6 +60,7 @@ export interface ApiDeps {
     | "ownerMove"
     | "runAction"
     | "workflow"
+    | "syncAgents"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -345,6 +353,81 @@ export function createApiHandler(deps: ApiDeps) {
           // Aliases always run the newest model of a family; local models as pulled.
           suggestions: [...CLAUDE_ALIASES, ...local.map((x) => `local/${x}`)],
         };
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/agent-options$/,
+      async () => {
+        const local = (await deps.localModels?.().catch(() => [])) ?? [];
+        return {
+          tools: AGENT_TOOL_NAMES,
+          models: [...CLAUDE_ALIASES, ...local.map((x) => `local/${x}`)],
+        };
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/agents$/,
+      async ({ res, body }) => {
+        if (!deps.agentsDir) throw new HttpError(404, "no agents folder");
+        const b = await body();
+        const list = (v: unknown, field: string) => (v === undefined ? [] : strList(v, field));
+        const obj = (v: unknown) =>
+          v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+        const models = obj(b.models);
+        const fs = obj(b.fs);
+        const perRun = Number(obj(b.budget).per_run_usd ?? 0);
+        try {
+          const made = createAgentFiles(deps.agentsDir, {
+            id: str(b.id, "id", 64),
+            name: str(b.name, "name", 100),
+            role: str(b.role, "role", 100),
+            workspace: str(b.workspace, "workspace", 64),
+            roles: list(b.roles, "roles"),
+            models: {
+              default: str(models.default, "models.default", 200),
+              allowed: list(models.allowed, "models.allowed"),
+            },
+            tools: list(b.tools, "tools"),
+            fs: { read: list(fs.read, "fs.read"), write: list(fs.write, "fs.write") },
+            ...(b.shell !== undefined
+              ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
+              : {}),
+            network: { allow: list(obj(b.network).allow, "network.allow") },
+            delegation: {
+              can_delegate_to: list(
+                obj(b.delegation).can_delegate_to,
+                "delegation.can_delegate_to",
+              ),
+              accepts_from: list(obj(b.delegation).accepts_from, "delegation.accepts_from"),
+            },
+            ...(perRun > 0 ? { budget: { per_run_usd: perRun } } : {}),
+            description: str(b.description, "description", 5000),
+          });
+          deps.orchestrator.syncAgents(); // mirror into the DB, seed a new workspace's workflow
+          log(`agent created in the web UI: ${made.id}`);
+          send(res, 201, made);
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          const msg = (err as Error).message;
+          throw new HttpError(/already exists/.test(msg) ? 409 : 400, msg);
+        }
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})\/name$/,
+      async ({ params, body }) => {
+        const path = manifestPath(params[0] as string);
+        try {
+          updateManifestName(path, str((await body()).name, "name", 100));
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(400, (err as Error).message);
+        }
+        deps.orchestrator.syncAgents(); // the agent list is read from the DB mirror
+        return { ok: true, name: loadManifest(path).name };
       },
     ],
     [
