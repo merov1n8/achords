@@ -2,6 +2,7 @@ import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
 import type { IntegrationStatus } from "../types.ts";
+import { SecretInput } from "./SecretInput.tsx";
 
 /** What each integration still needs; secrets are set in the vault, accounts per project. */
 function needs(s: IntegrationStatus): string[] {
@@ -56,6 +57,18 @@ export function Integrations() {
                     {missing.map((m) => (
                       <div key={m}>{m}</div>
                     ))}
+                    {/* Google comes from the sign-in (achords connect google), not typed values. */}
+                    {s.missingSecrets
+                      .filter((id) => !id.startsWith("google-"))
+                      .map((id) => (
+                        <SecretInput
+                          key={id}
+                          id={id}
+                          label={t("integrations.setSecret")}
+                          set={false}
+                          onSaved={list.refresh}
+                        />
+                      ))}
                     {projects.length > 0 && (
                       <div class="muted">
                         {t("integrations.projects", { projects: projects.join(", ") })}

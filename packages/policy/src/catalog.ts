@@ -43,6 +43,9 @@ export const catalogEntrySchema = z
         free: z.array(z.string().regex(TOOL)).default([]),
         // Prefix ignored when comparing, e.g. "properties/" for GA4 property ids.
         strip: z.string().optional(),
+        // Project account channels holding the allowed values (default: the entry's id), e.g.
+        // [facebook, instagram] for Meta page and Instagram account ids.
+        channels: z.array(z.string().regex(ID)).optional(),
       })
       .strict()
       .optional(),
@@ -207,7 +210,7 @@ export function integrationStatus(
           .map((p) => p.slug)
       : [];
     const projectsScoped = entry.scope
-      ? projectList.filter((p) => p.integrations[entry.id]?.length).map((p) => p.slug)
+      ? projectList.filter((p) => scopeTargets(entry, p.integrations).length).map((p) => p.slug)
       : [];
     const commandFound = entry.command ? onPath(entry.command) : true;
     return {
@@ -244,4 +247,12 @@ export function publishMode(
   if (project?.publish === "off") return "off";
   const mode = manifest.publish_mode.channels[integration] ?? manifest.publish_mode.default;
   return project?.publish === "review" ? "review" : mode;
+}
+
+/** The project's own values for a scoped entry (ADR-0036), from its account channels. */
+export function scopeTargets(
+  entry: CatalogEntry,
+  accounts: Record<string, string[]> | undefined,
+): string[] {
+  return (entry.scope?.channels ?? [entry.id]).flatMap((c) => accounts?.[c] ?? []);
 }

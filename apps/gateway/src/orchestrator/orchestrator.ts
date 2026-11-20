@@ -76,6 +76,7 @@ import {
   parseManifest,
   permissionMatrix,
   publishMode,
+  scopeTargets,
   secretRefs,
   type Workflow,
 } from "@achords/policy";
@@ -471,7 +472,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       env: resolve(entry.env),
       files,
       ...(entry.scope
-        ? { scope: { ...entry.scope, allowed: project?.integrations[entry.id] ?? [] } }
+        ? {
+            scope: {
+              args: entry.scope.args,
+              free: entry.scope.free,
+              strip: entry.scope.strip,
+              allowed: scopeTargets(entry, project?.integrations),
+            },
+          }
         : {}),
     };
   };
@@ -1307,7 +1315,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         // Shared accounts reach every client (ADR-0036): a scoped integration runs only in a
         // project that names its own properties, and the launcher enforces them per call.
         const usable = granted.entries.filter((entry) => {
-          if (!entry.scope || project?.integrations[entry.id]) return true;
+          if (!entry.scope || scopeTargets(entry, project?.integrations).length) return true;
           unscoped.push(entry.id);
           return false;
         });
