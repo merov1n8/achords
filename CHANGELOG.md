@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Scheduler (ADR-0033): recurring tasks with cron rules (e.g. `0 9 * * 1-5` = weekdays at 9:00, local time). The gateway starts them on time through the normal agent flow; each schedule reports into its own chat thread. Missed runs are caught up once; a run still going skips the next occurrence. Schedules page: list with on/off and delete, today's runs and a week view.
+
 - Usage meters: a Usage page shows the Claude subscription windows (5-hour, 7-day) as reported after every run, with reset times, plus the API-equivalent cost of today's runs. At 80% and 95% of a window you get one note in your thread (Telegram and web). Boss decisions are now recorded as runs too (cost, quota, `achords kill`, live bar).
 
 - Live run progress: a bar at the bottom of every page shows each running agent's task, the step it is on, % done (from its own TodoWrite checklist), elapsed time and an estimate of the time left (only after the first step is done). Task runs get Claude Code's TodoWrite tool for this; it only keeps the run's own checklist.
