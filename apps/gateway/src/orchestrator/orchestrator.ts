@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -59,6 +59,7 @@ import type { Embedder, Memory } from "@achords/memory";
 import {
   agentSummary,
   allowedIntegrationTools,
+  allowRules,
   type Catalog,
   checkFs,
   checkModel,
@@ -304,12 +305,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const roots = [...m.fs.write, ...m.fs.read].map(expandHome);
     const cwd = roots[0] ?? join(agentsDir, m.id, "work");
     mkdirSync(cwd, { recursive: true, mode: 0o700 });
-    // Bash is available only through allow-listed command prefixes; anything else is denied
-    // in print mode (interactive approvals come with the channels).
-    const allowedTools = [
-      ...m.tools.filter((t) => t !== "Bash"),
-      ...(m.tools.includes("Bash") ? (m.shell?.allow ?? []).map((c) => `Bash(${c}:*)`) : []),
-    ];
+    // Only what the manifest grants, scoped: files in its own folders, fetches to its allowed
+    // hosts, allow-listed shell commands. Everything else is denied in print mode.
+    const real = (p: string) => (existsSync(p) ? realpathSync(p) : p);
+    const allowedTools = allowRules({
+      tools: m.tools,
+      read: [cwd, ...m.fs.read.map(expandHome)].map(real),
+      write: (m.fs.write.length ? m.fs.write.map(expandHome) : [cwd]).map(real),
+      network: m.network.allow,
+      shell: m.tools.includes("Bash") ? (m.shell?.allow ?? []) : [],
+    });
     const system = agentPrompt(m);
     const req: RunRequest = {
       prompt,

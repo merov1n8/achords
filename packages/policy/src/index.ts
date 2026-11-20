@@ -25,6 +25,7 @@ export {
   manifestSchema,
   parseManifest,
 } from "./manifest.ts";
+export { allowRules } from "./permissions.ts";
 export { createProject, loadProjects, type Project, updateProject } from "./projects.ts";
 export {
   checkMove,
