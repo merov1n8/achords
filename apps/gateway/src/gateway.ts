@@ -18,6 +18,7 @@ import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
 import { createMcpTickets, createRunTokens } from "./mcp/tokens.ts";
+import { runMonitors } from "./monitors.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents, seedSchedules } from "./orchestrator/seed.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
@@ -80,6 +81,23 @@ export function runGateway(home: string): Promise<number> {
   const hub = { url: "", tokens: runTokens, serverEntry: HUB_MCP_SERVER };
   const mcpTickets = createMcpTickets();
 
+  // Quota warnings, monitors etc.: the owner's Telegram thread (web shows it too), else the
+  // latest chat. `telegram` is assigned below, before the first tick.
+  const notifyOwner = (text: string) => {
+    log(`notify: ${text}`);
+    if (telegram) return telegram.notify(text);
+    const latest = listThreads(db, 1)[0];
+    if (latest) {
+      appendMessage(db, {
+        threadId: latest.id,
+        role: "agent",
+        author: "system",
+        channel: "system",
+        content: text,
+      });
+    }
+  };
+
   const orchestrator = createOrchestrator({
     db,
     home,
@@ -115,21 +133,7 @@ export function runGateway(home: string): Promise<number> {
       ),
     },
     redact,
-    // Quota warnings etc.: the owner's Telegram thread (web shows it too), else the latest chat.
-    notify: (text) => {
-      log(`notify: ${text}`);
-      if (telegram) return telegram.notify(text);
-      const latest = listThreads(db, 1)[0];
-      if (latest) {
-        appendMessage(db, {
-          threadId: latest.id,
-          role: "agent",
-          author: "system",
-          channel: "system",
-          content: text,
-        });
-      }
-    },
+    notify: (text) => notifyOwner(text),
   });
   // A previous `achords stop` may have left the drain flag; a new gateway works normally.
   setDraining(db, false);
@@ -167,6 +171,7 @@ export function runGateway(home: string): Promise<number> {
     let timer: NodeJS.Timeout | undefined;
     let working: Promise<unknown> | undefined;
     let delivering = false;
+    let monitoring = false;
     let ticks = 0;
     const cancel = new AbortController();
     const shutdown = async (reason: string) => {
@@ -212,6 +217,15 @@ export function runGateway(home: string): Promise<number> {
         } catch (err) {
           log(`scheduler error: ${(err as Error).message}`);
         }
+      }
+      // Heartbeat monitors (ADR-0039): cheap checks, one pass at a time.
+      if (!monitoring) {
+        monitoring = true;
+        runMonitors({ db, notify: notifyOwner })
+          .catch((err) => log(`monitor error: ${(err as Error).message}`))
+          .finally(() => {
+            monitoring = false;
+          });
       }
       if (!working) {
         working = orchestrator

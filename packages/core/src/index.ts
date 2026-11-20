@@ -10,6 +10,7 @@ export { type Migration, migrate, migrationsFromDir } from "./db/migrate.ts";
 export * from "./delegation.ts";
 export * from "./emergency.ts";
 export { type HomePaths, homePaths, resolveHome } from "./home.ts";
+export * from "./monitors.ts";
 export * from "./proc.ts";
 export * from "./queue.ts";
 export * from "./rooms.ts";

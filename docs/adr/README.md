@@ -38,3 +38,4 @@
 - [ADR-0036: Project scope for shared integration accounts](0036-project-scope-for-shared-accounts.md)
 - [ADR-0037: Publishing through the launcher: review and auto](0037-publishing-review-and-auto.md)
 - [ADR-0038: Prompt-injection guard without containers (isolation C)](0038-prompt-injection-guard.md)
+- [ADR-0039: Heartbeat monitors](0039-heartbeat-monitors.md)
