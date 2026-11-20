@@ -32,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Integration checks: `achords doctor` and the new web page Settings → Integrations show, for every integration an agent uses, whether its program is on the service's PATH, which vault secrets are missing, and which client projects are set up, each with the fix.
 - Client accounts in the web project editor: social pages, ad accounts, Analytics properties, Search Console sites and websites, several per channel. Agents of the project see them; Google Analytics and Search Console entries also set what agents may query (ADR-0036).
 - Client separation for shared accounts: in `project.yaml`, `integrations: { ga4: ["<property id>"], search-console: ["sc-domain:<site>"] }` names the client's own data. Agents working on that project can only query those; requests for other clients are refused before they reach Google. Without these entries Analytics and Search Console are not offered in the run.
 - Full access on request: an agent can ask for it in the conversation (Approve / Reject). For 4 hours that task can read any website, search the web and use the write tools of Blender and Unity. Client integrations with credentials (Google, Meta, WordPress) are left out while it is on.

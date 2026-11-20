@@ -84,7 +84,21 @@ async function run(
 ): Promise<number> {
   const ctx = context();
   const doctorEnv = () =>
-    systemDoctorEnv(ctx.paths, gatewayEntry, () => ctx.service.isLoaded(), vaultStatus(ctx.paths));
+    systemDoctorEnv(
+      ctx.paths,
+      gatewayEntry,
+      () => ctx.service.isLoaded(),
+      vaultStatus(ctx.paths),
+      () => {
+        if (!existsSync(ctx.paths.vaultDb)) return [];
+        const v = openHomeVault(ctx.paths.home);
+        try {
+          return v.list().map((s) => s.id);
+        } finally {
+          v.close();
+        }
+      },
+    );
   switch (command) {
     case "export": {
       const file = args[0];

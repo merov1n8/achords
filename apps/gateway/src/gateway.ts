@@ -12,7 +12,7 @@ import {
   setSetting,
 } from "@achords/core";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
-import { loadCatalog } from "@achords/policy";
+import { integrationStatus, loadAgents, loadCatalog, loadProjects } from "@achords/policy";
 import { cliClaude, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
@@ -230,6 +230,24 @@ export function runGateway(home: string): Promise<number> {
           mcpTickets,
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
+          integrations: () => {
+            const ids = new Set(
+              existsSync(paths.vaultDb)
+                ? getVault()
+                    .list()
+                    .map((s) => s.id)
+                : [],
+            );
+            // The gateway's own PATH is the one agent runs and MCP servers get.
+            const path = (process.env.PATH ?? "").split(":");
+            return integrationStatus(
+              loadCatalog(SEED_CATALOG, join(home, "catalog")),
+              loadAgents(join(home, "agents")).values(),
+              loadProjects(paths.projectsDir).values(),
+              (id) => ids.has(id),
+              (bin) => path.some((dir) => dir && existsSync(join(dir, bin))),
+            );
+          },
           transcriber,
           runDir: paths.runDir,
           // Suggestions only: chat models pulled in Ollama (embedding models filtered out).

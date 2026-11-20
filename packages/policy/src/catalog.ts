@@ -162,3 +162,70 @@ export function scopeRefusal(
     ? undefined
     : `${String(foreign)} is not part of this project (allowed: ${scope.allowed.join(", ")})`;
 }
+
+export interface IntegrationStatus {
+  id: string;
+  name: string;
+  /** Agents whose manifest lists it. */
+  usedBy: string[];
+  /** Program that starts the server (undefined for builtin servers). */
+  command?: string;
+  commandFound: boolean;
+  /** Owner-wide vault ids that are not set. */
+  missingSecrets: string[];
+  /** Credentials per client project (`{project}`): the projects that have all of them. */
+  perProject: boolean;
+  projectsReady: string[];
+  /** Scoped shared account (ADR-0036): projects that name their own targets. */
+  scoped: boolean;
+  projectsScoped: string[];
+  /** Usable in at least one run. */
+  ready: boolean;
+}
+
+/** What an integration still needs: program on the service PATH, vault secrets, project setup. */
+export function integrationStatus(
+  catalog: Catalog,
+  agents: Iterable<Manifest>,
+  projects: Iterable<{ slug: string; integrations: Record<string, string[]> }>,
+  hasSecret: (id: string) => boolean,
+  onPath: (bin: string) => boolean,
+): IntegrationStatus[] {
+  const agentList = [...agents];
+  const projectList = [...projects];
+  const vaultId = (ref: string) => ref.slice("vault:".length);
+  return [...catalog.values()].map((entry) => {
+    const refs = secretRefs(entry);
+    const perProject = refs.some((r) => r.includes("{project}"));
+    const missingSecrets = refs
+      .filter((r) => !r.includes("{project}"))
+      .map(vaultId)
+      .filter((id) => !hasSecret(id));
+    const projectsReady = perProject
+      ? projectList
+          .filter((p) => secretRefs(entry, p.slug).every((r) => hasSecret(vaultId(r))))
+          .map((p) => p.slug)
+      : [];
+    const projectsScoped = entry.scope
+      ? projectList.filter((p) => p.integrations[entry.id]?.length).map((p) => p.slug)
+      : [];
+    const commandFound = entry.command ? onPath(entry.command) : true;
+    return {
+      id: entry.id,
+      name: entry.name,
+      usedBy: agentList.filter((m) => m.mcp.includes(entry.id)).map((m) => m.id),
+      ...(entry.command ? { command: entry.command } : {}),
+      commandFound,
+      missingSecrets,
+      perProject,
+      projectsReady,
+      scoped: entry.scope !== undefined,
+      projectsScoped,
+      ready:
+        commandFound &&
+        missingSecrets.length === 0 &&
+        (!perProject || projectsReady.length > 0) &&
+        (!entry.scope || projectsScoped.length > 0),
+    };
+  });
+}
