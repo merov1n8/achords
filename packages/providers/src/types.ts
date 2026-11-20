@@ -34,6 +34,8 @@ export interface RunProgress {
   done: number;
   total: number;
   current?: string;
+  /** The whole checklist, for a continuation note after a planned stop. */
+  items?: { content: string; status: string }[];
 }
 
 export interface Usage {

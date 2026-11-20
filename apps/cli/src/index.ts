@@ -3,7 +3,13 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createPairingCode, homePaths, openCoreDatabase, resolveHome } from "@achords/core";
+import {
+  createPairingCode,
+  homePaths,
+  openCoreDatabase,
+  resolveHome,
+  setDraining,
+} from "@achords/core";
 import { t } from "@achords/i18n";
 import { openHomeVault } from "@achords/secrets";
 import { type ControlContext, kill, resume, start, status, stop } from "./control.ts";
@@ -56,7 +62,24 @@ function vaultStatus(paths: ControlContext["paths"]) {
   };
 }
 
-async function run(command: string | undefined, args: string[]): Promise<number> {
+/** "30m", "90s", "1h" or minutes as a bare number. */
+function parseDuration(text: string): number {
+  const m = /^(\d+)(s|m|h)?$/.exec(text.trim());
+  if (!m) throw new Error(t("cli.stop.badWait", { value: text }));
+  return Number(m[1]) * { s: 1000, m: 60_000, h: 3_600_000 }[(m[2] ?? "m") as "s" | "m" | "h"];
+}
+
+function withDraining(ctx: ControlContext, on: boolean) {
+  const db = openCoreDatabase(ctx.paths.db);
+  setDraining(db, on);
+  db.close();
+}
+
+async function run(
+  command: string | undefined,
+  args: string[],
+  options: Record<string, string | boolean | undefined> = {},
+): Promise<number> {
   const ctx = context();
   const doctorEnv = () =>
     systemDoctorEnv(ctx.paths, gatewayEntry, () => ctx.service.isLoaded(), vaultStatus(ctx.paths));
@@ -156,9 +179,28 @@ async function run(command: string | undefined, args: string[]): Promise<number>
         throw err;
       }
     }
-    case "stop":
-      console.log(stop(ctx));
+    case "stop": {
+      const waitMs = options.wait === undefined ? undefined : parseDuration(String(options.wait));
+      // Ctrl+C while waiting: no stop after all, the gateway goes on working.
+      const onInt = () => {
+        withDraining(ctx, false);
+        console.log(t("cli.stop.cancelled"));
+        process.exit(130);
+      };
+      process.once("SIGINT", onInt);
+      try {
+        console.log(
+          await stop(ctx, {
+            now: options.now === true,
+            ...(waitMs !== undefined ? { waitMs } : {}),
+            print: (line) => console.log(line),
+          }),
+        );
+      } finally {
+        process.off("SIGINT", onInt);
+      }
       return 0;
+    }
     case "kill": {
       const report = kill(ctx);
       for (const s of report.steps) console.log(`  ${s}`);
@@ -202,9 +244,13 @@ async function run(command: string | undefined, args: string[]): Promise<number>
   }
 }
 
-const { positionals } = parseArgs({ allowPositionals: true, strict: false });
+const { positionals, values } = parseArgs({
+  allowPositionals: true,
+  strict: false,
+  options: { now: { type: "boolean" }, wait: { type: "string" } },
+});
 try {
-  process.exitCode = await run(positionals[0], positionals.slice(1));
+  process.exitCode = await run(positionals[0], positionals.slice(1), values);
 } catch (err) {
   console.error(`achords: ${(err as Error).message}`);
   process.exitCode = 1;

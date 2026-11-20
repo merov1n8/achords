@@ -3,8 +3,10 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  finishRun,
   homePaths,
   isAlive,
+  isDraining,
   isPaused,
   listActiveRuns,
   openCoreDatabase,
@@ -141,13 +143,65 @@ describe("control", () => {
     expect(calls).toEqual(["start", "stop"]);
   });
 
-  it("stop unloads the service without pausing the queue", () => {
+  it("stop unloads the service without pausing the queue", async () => {
     const paths = homePaths(home);
     const { svc } = fakeService(true);
-    expect(stop({ paths, service: svc })).toMatch(/stopped/);
-    expect(stop({ paths, service: svc })).toMatch(/not running/);
+    expect(await stop({ paths, service: svc })).toMatch(/stopped/);
+    expect(await stop({ paths, service: svc })).toMatch(/not running/);
     const db = openCoreDatabase(paths.db);
     expect(isPaused(db)).toBe(false);
+    db.close();
+  });
+
+  const foregroundGateway = async () => {
+    const paths = homePaths(home);
+    const main = new URL("../../gateway/src/main.ts", import.meta.url).pathname;
+    const gw = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", main], {
+      env: { ...process.env, ACHORDS_HOME: home, ACHORDS_PORT: "0", ACHORDS_KEYSTORE: "file" },
+      stdio: "ignore",
+    });
+    children.push(gw);
+    await waitFor(() => readLivePid(paths.pidFile) === gw.pid);
+    return { paths, gw };
+  };
+
+  it("planned stop: waits for running work (starting nothing new), then stops the gateway", async () => {
+    const { paths, gw } = await foregroundGateway();
+    const db = openCoreDatabase(paths.db);
+    const run = startRun(db, { provider: "cli-claude" });
+    const lines: string[] = [];
+    const gwExit = exited(gw);
+    const stopping = stop(
+      { paths, service: fakeService().svc },
+      { waitMs: 10_000, pollMs: 50, print: (l) => lines.push(l) },
+    );
+    await waitFor(() => isDraining(db));
+    expect(lines.join("\n")).toMatch(/waiting for 1 run/);
+    finishRun(db, run.id, "succeeded", {});
+    expect(await stopping).toMatch(/stopped/);
+    await gwExit; // the gateway handled SIGTERM and exited by itself (no kill signal)
+    expect(gw.exitCode).toBe(0);
+    db.close();
+  });
+
+  it("planned stop: after the wait limit it stops anyway; --now does not wait", async () => {
+    const { paths, gw } = await foregroundGateway();
+    const db = openCoreDatabase(paths.db);
+    startRun(db, { provider: "cli-claude" });
+    const started = Date.now();
+    const out = await stop(
+      { paths, service: fakeService().svc },
+      { waitMs: 300, pollMs: 50, print: () => {} },
+    );
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+    expect(out).toMatch(/stopped/);
+    await waitFor(() => gw.exitCode !== null || gw.signalCode !== null);
+
+    const second = await foregroundGateway();
+    expect(isDraining(db)).toBe(false); // a new gateway clears the flag
+    const quick = Date.now();
+    await stop({ paths: second.paths, service: fakeService().svc }, { now: true, print: () => {} });
+    expect(Date.now() - quick).toBeLessThan(3000);
     db.close();
   });
 

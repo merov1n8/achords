@@ -3,11 +3,14 @@ import { join } from "node:path";
 import {
   getSetting,
   type HomePaths,
+  isAlive,
   isPaused,
   killActiveRuns,
   listActiveRuns,
+  liveProgress,
   openCoreDatabase,
   readLivePid,
+  setDraining,
   setPaused,
   writeStopMarker,
 } from "@achords/core";
@@ -54,13 +57,76 @@ export function start({ paths, service }: ControlContext, waitMs = 5000): string
 }
 
 /** Graceful: unloads the service (SIGTERM to the gateway). The queue keeps its state. */
-export function stop({ paths, service }: ControlContext): string {
+export interface StopOptions {
+  /** Do not wait for running work (it is interrupted and continues after the next start). */
+  now?: boolean;
+  /** How long to wait for running work before interrupting it. */
+  waitMs?: number;
+  pollMs?: number;
+  print?: (line: string) => void;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Planned stop: the gateway starts nothing new, running work may finish (up to `waitMs`), then
+ * the gateway stops. Work still running at that point is interrupted and goes back to the queue
+ * with a note; it continues after the next `achords start` without losing an attempt.
+ */
+export async function stop(ctx: ControlContext, opts: StopOptions = {}): Promise<string> {
+  const { paths, service } = ctx;
+  const print = opts.print ?? (() => {});
+  const pid = readLivePid(paths.pidFile);
+  if (pid !== undefined && !opts.now) {
+    const waitMs = opts.waitMs ?? DEFAULT_STOP_WAIT_MS;
+    const until = Date.now() + waitMs;
+    let lastPrint = 0;
+    withDb(paths, (db) => setDraining(db, true));
+    for (;;) {
+      const live = withDb(paths, (db) => liveProgress(db));
+      if (live.length === 0) break;
+      if (Date.now() >= until) {
+        print(t("cli.stop.waitOver", { n: live.length }));
+        break;
+      }
+      if (Date.now() - lastPrint >= STOP_PRINT_EVERY_MS) {
+        lastPrint = Date.now();
+        print(
+          t("cli.stop.waiting", {
+            n: live.length,
+            minutes: Math.ceil((until - Date.now()) / 60_000),
+          }),
+        );
+        for (const r of live) {
+          const steps = r.total ? ` · ${r.done ?? 0}/${r.total}` : "";
+          print(`  ${r.agentId ?? "?"} · ${r.title ?? "-"}${steps}`);
+        }
+      }
+      await sleep(opts.pollMs ?? 1000);
+    }
+  }
   const unloaded = service.stop();
   // Foreground (dev) gateway without a service: same graceful signal.
-  const pid = readLivePid(paths.pidFile);
-  if (pid !== undefined) process.kill(pid, "SIGTERM");
+  if (pid !== undefined) {
+    process.kill(pid, "SIGTERM");
+    const until = Date.now() + 15_000;
+    while (isAlive(pid) && Date.now() < until) await sleep(100);
+    const resumed = withDb(paths, (db) => countResumable(db));
+    if (resumed > 0) print(t("cli.stop.willContinue", { n: resumed }));
+  }
   return unloaded || pid !== undefined ? t("cli.stop.done") : t("cli.stop.notRunning");
 }
+
+const DEFAULT_STOP_WAIT_MS = 10 * 60_000;
+const STOP_PRINT_EVERY_MS = 15_000;
+const countResumable = (db: ReturnType<typeof openCoreDatabase>) =>
+  Number(
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM tasks WHERE status = 'queued' AND resume_note IS NOT NULL",
+      )
+      .get()?.n ?? 0,
+  );
 
 export interface KillReport {
   steps: string[];

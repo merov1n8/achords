@@ -90,6 +90,10 @@ function parseTodos(event: Record<string, unknown>): RunProgress | undefined {
   return {
     done: todos.filter((t) => t.status === "completed").length,
     total: todos.length,
+    items: todos.map((t) => ({
+      content: String(t.content ?? "").slice(0, 200),
+      status: String(t.status ?? ""),
+    })),
     ...(active ? { current: String(active.activeForm ?? active.content ?? "").slice(0, 200) } : {}),
   };
 }
