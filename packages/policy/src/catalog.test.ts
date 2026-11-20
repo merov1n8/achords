@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   allowedIntegrationTools,
   grantedIntegrations,
+  integrationStatus,
   loadCatalog,
   scopeRefusal,
   secretRefs,
@@ -166,5 +167,45 @@ describe("project scope of shared accounts (ADR-0036)", () => {
       scopeRefusal(gsc, "gsc_multi_property_health", { site_urls: ["sc-domain:a.com", "b.com"] }),
     ).toMatch(/b.com/);
     expect(scopeRefusal(ga, "run_report", { property_id: { id: "111" } })).toBeDefined();
+  });
+});
+
+describe("integration status (doctor, web)", () => {
+  it("names what each integration still needs", () => {
+    const { seed, owner } = dirs();
+    writeFileSync(join(owner, "wordpress.yaml"), WORDPRESS);
+    writeFileSync(
+      join(owner, "ga.yaml"),
+      'id: ga\nname: GA\ncommand: uvx\nenv:\n  T: "vault:google-refresh-token"\nscope:\n  args: [property_id]\n',
+    );
+    const catalog = loadCatalog(seed, owner);
+    const agent = parseManifest(
+      "id: seo\nname: s\nrole: s\nworkspace: w\nmodels:\n  default: cli-claude/sonnet\nmcp: [ga]\n",
+      "t",
+    );
+    const projects = [
+      { slug: "acme", integrations: { ga: ["1"] } },
+      { slug: "beta", integrations: {} },
+    ];
+    const status = (secrets: string[], path: string[]) =>
+      integrationStatus(
+        catalog,
+        [agent],
+        projects,
+        (id) => secrets.includes(id),
+        (bin) => path.includes(bin),
+      );
+    const ga = status([], ["uvx"]).find((s) => s.id === "ga");
+    expect(ga).toMatchObject({
+      usedBy: ["seo"],
+      commandFound: true,
+      missingSecrets: ["google-refresh-token"],
+      projectsScoped: ["acme"],
+      ready: false,
+    });
+    expect(status(["google-refresh-token"], ["uvx"]).find((s) => s.id === "ga")?.ready).toBe(true);
+    expect(status(["google-refresh-token"], []).find((s) => s.id === "ga")?.ready).toBe(false);
+    const wp = status(["wordpress-acme"], ["npx"]).find((s) => s.id === "wordpress");
+    expect(wp).toMatchObject({ perProject: true, projectsReady: ["acme"], missingSecrets: [] });
   });
 });

@@ -124,6 +124,21 @@ describe("HTTP API", () => {
         agentsDir,
         projectsDir,
         runDir,
+        integrations: () => [
+          {
+            id: "ga4",
+            name: "GA4",
+            usedBy: ["advertiser"],
+            command: "uvx",
+            commandFound: true,
+            missingSecrets: ["google-refresh-token"],
+            perProject: false,
+            projectsReady: [],
+            scoped: true,
+            projectsScoped: [],
+            ready: false,
+          },
+        ],
         transcriber: {
           available: () => ({ ok: true }),
           transcribe: async (path) => {
@@ -220,6 +235,7 @@ describe("HTTP API", () => {
       "/api/tasks",
       "/api/vault",
       "/api/devices",
+      "/api/integrations",
     ]) {
       expect((await fetch(`${base}${path}`)).status).toBe(401);
     }
@@ -306,6 +322,8 @@ describe("HTTP API", () => {
     expect(tasks.map((t) => t.title)).toEqual(["card"]);
     const agents = (await (await call("/api/agents")).json()) as { id: string }[];
     expect(agents.map((a) => a.id)).toEqual(["web-dev"]);
+    const integrations = (await (await call("/api/integrations")).json()) as { id: string }[];
+    expect(integrations.map((i) => i.id)).toEqual(["ga4"]);
   });
 
   it("vault is write-only over HTTP", async () => {

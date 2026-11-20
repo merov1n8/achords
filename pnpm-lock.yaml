@@ -32,6 +32,9 @@ importers:
       '@achords/platform':
         specifier: workspace:*
         version: link:../../packages/platform
+      '@achords/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@achords/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets

@@ -9,6 +9,8 @@ export {
   type CatalogEntry,
   catalogEntrySchema,
   grantedIntegrations,
+  type IntegrationStatus,
+  integrationStatus,
   loadCatalog,
   scopeRefusal,
   secretRefs,

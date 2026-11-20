@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { homePaths } from "@achords/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type DoctorEnv, runDoctor } from "./doctor.ts";
+import { type DoctorEnv, integrationChecks, runDoctor } from "./doctor.ts";
 
 describe("doctor", () => {
   let root: string;
@@ -135,5 +135,34 @@ describe("doctor", () => {
   it("fails when the vault cannot be opened (e.g. Keychain denied)", async () => {
     const c = await byName({ ...env, vaultStatus: () => ({ ok: false, error: "denied" }) });
     expect(c.vault).toMatchObject({ level: "fail" });
+  });
+
+  it("checks the integrations agents use, with a fix for what is missing", () => {
+    const base = {
+      name: "x",
+      commandFound: true,
+      missingSecrets: [],
+      perProject: false,
+      projectsReady: [],
+      scoped: false,
+      projectsScoped: [],
+      ready: true,
+    };
+    const checks = integrationChecks([
+      { ...base, id: "unused", usedBy: [] },
+      { ...base, id: "unity", usedBy: ["game-dev"], command: "uvx", commandFound: false },
+      { ...base, id: "ga4", usedBy: ["advertiser"], missingSecrets: ["google-refresh-token"] },
+      { ...base, id: "search-console", usedBy: ["advertiser"], scoped: true },
+      { ...base, id: "blender", usedBy: ["3d-designer"] },
+    ]);
+    expect(checks.map((c) => [c.name, c.level])).toEqual([
+      ["integration unity", "fail"],
+      ["integration ga4", "fail"],
+      ["integration search-console", "warn"],
+      ["integration blender", "ok"],
+    ]);
+    expect(checks[0]?.fix).toMatch(/brew install uv/);
+    expect(checks[1]?.fix).toMatch(/achords connect google/);
+    expect(checks[2]?.fix).toMatch(/Accounts/);
   });
 });
