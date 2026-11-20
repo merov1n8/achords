@@ -5,7 +5,7 @@ import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
 import { useRecorder } from "../recorder.ts";
-import type { Message, Thread } from "../types.ts";
+import type { Message, Project, Thread } from "../types.ts";
 
 export function Chat(props: { threadId?: string | undefined; onThread: (id: string) => void }) {
   const threads = usePoll(() => api<Thread[]>("/api/threads"), 5000);
@@ -72,9 +72,12 @@ function Conversation({ threadId, thread }: { threadId: string; thread?: Thread 
     <section class="conversation">
       <div class="page-head">
         <h1>{thread?.title ?? t("chat.untitled")}</h1>
-        {thread?.sensitivity === "local-only" && (
-          <span class="chip local">{t("chat.localOnly")}</span>
-        )}
+        <div class="row">
+          {thread?.sensitivity === "local-only" && (
+            <span class="chip local">{t("chat.localOnly")}</span>
+          )}
+          <ProjectPicker threadId={threadId} current={thread?.project ?? null} onError={setError} />
+        </div>
       </div>
       <div class="messages">
         {list.map((m) => (
@@ -141,5 +144,39 @@ function Conversation({ threadId, thread }: { threadId: string; thread?: Thread 
       </form>
       {error && <p class="error">{error}</p>}
     </section>
+  );
+}
+
+/** The thread's project: its PROJECT.md and folder apply to work started from here on. */
+function ProjectPicker(props: {
+  threadId: string;
+  current: string | null;
+  onError: (m: string) => void;
+}) {
+  const projects = usePoll(() => api<Project[]>("/api/projects"), 30000);
+  const [value, setValue] = useState(props.current);
+  useEffect(() => setValue(props.current), [props.current]);
+  if (!projects.data?.length && !value) return null;
+  const pick = async (slug: string) => {
+    const project = slug || null;
+    try {
+      await api(`/api/threads/${props.threadId}/project`, { method: "PUT", body: { project } });
+      setValue(project);
+    } catch (err) {
+      props.onError((err as Error).message);
+    }
+  };
+  return (
+    <label class="row" title={t("chat.projectHelp")}>
+      <span class="muted">{t("chat.project")}</span>
+      <select class="input" value={value ?? ""} onChange={(e) => pick(e.currentTarget.value)}>
+        <option value="">{t("chat.noProject")}</option>
+        {projects.data?.map((p) => (
+          <option key={p.slug} value={p.slug}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

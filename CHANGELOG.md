@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Projects in the web UI: a Projects page (list with working folder paths, create form) and a project picker in the chat header.
+
 - Projects (ADR-0031), backend: `projects/<slug>/` with `project.yaml`, `PROJECT.md`, `files/` and an optional own workflow. Pick a project for a Telegram thread with `/project <slug>` (`/project` lists, `/project none` clears); API for listing, creating and assigning. Project work gets `PROJECT.md` in every run, agents of the project's workspace work directly in `files/`, and project memory is kept apart from other clients'. Web screens follow.
 
 - Agents view: rename an agent (id and role stay), and create a new agent from a form (id, name, job role, workspace, scope → `AGENT.md`, workflow roles, model). Every permission starts off: tools, write/read paths, shell commands, network hosts, delegation and budget are switched on one by one; the manifest is validated with the strict schema before anything is written.

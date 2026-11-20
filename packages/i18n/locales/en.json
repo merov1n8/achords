@@ -139,5 +139,19 @@
   "telegram.projectList": "Projects: {list}\nCurrent: {current}\nUse /project <slug> to pick one, /project none to clear.",
   "telegram.projectSet": "Project for this thread: {name} ({slug}). Its PROJECT.md applies to new work here.",
   "telegram.projectCleared": "This thread has no project now.",
-  "telegram.projectUnknown": "No project {slug}. Projects: {list}"
+  "telegram.projectUnknown": "No project {slug}. Projects: {list}",
+  "nav.projects": "Projects",
+  "projects.new": "New project",
+  "projects.help": "A project holds one client's rules (PROJECT.md) and working folder (files/). Work started in a thread with a project follows its PROJECT.md; agents of the project's workspace work directly in its folder.",
+  "projects.empty": "No projects yet.",
+  "projects.name": "Name",
+  "projects.folder": "Working folder",
+  "projects.finderHint": "Open the folder in Finder (⌘⇧G, paste the path) to add files or edit PROJECT.md next to files/.",
+  "projects.slug": "Short name (slug)",
+  "projects.slugHelp": "Lowercase letters, digits and dashes, e.g. acme-shop; also the folder name and the Telegram /project argument.",
+  "projects.workspaceHelp": "Agents of this workspace get access to the project's folder.",
+  "projects.create": "Create project",
+  "chat.project": "Project",
+  "chat.noProject": "No project",
+  "chat.projectHelp": "New work in this thread follows the project's PROJECT.md."
 }
