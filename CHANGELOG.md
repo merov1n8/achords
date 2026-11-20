@@ -32,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Full access on request: an agent can ask for it in the conversation (Approve / Reject). For 4 hours that task can read any website, search the web and use the write tools of Blender and Unity. Client integrations with credentials (Google, Meta, WordPress) are left out while it is on.
 - `achords connect google <client.json>`: one Google sign-in in the browser (Desktop-app OAuth client, loopback redirect, PKCE) for Analytics and Search Console. The client credentials and the refresh token go straight into the vault; achords never sees the password. Clients grant your Google account access to their properties, so one sign-in covers all of them.
 - First integrations in the catalog: WordPress (no plugin needed: reads posts and pages, creates drafts, never publishes; per client project credentials), Google Analytics 4, Google Search Console, Meta (Facebook Pages and Instagram), Blender and Unity. Ecosystem servers are pinned to exact versions, telemetry is switched off, and agents get only reading tools for now.
 - Integration catalog (ADR-0034): an agent whose manifest lists `mcp: [id]` gets that MCP server from `seed/catalog/` or `~/.achords/catalog/`, with read tools only for now. Credentials come from the vault through a one-time ticket, so they never appear in the agent's config, prompt or environment; per-client credentials with `vault:<name>-{project}`. Agents with a shell are refused integrations that need credentials.

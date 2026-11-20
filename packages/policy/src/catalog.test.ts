@@ -100,6 +100,19 @@ describe("integration catalog (ADR-0034)", () => {
       "mcp__wordpress__get_post",
     ]);
   });
+
+  it("adds write tools under full access only when the integration has no credentials", () => {
+    const wp = loadCatalog(dirs().seed, "/nonexistent").get("wordpress");
+    if (!wp) throw new Error("missing");
+    expect(allowedIntegrationTools(wp, true)).toEqual(allowedIntegrationTools(wp));
+    const local = { ...wp, id: "blender", env: {}, files: {} };
+    expect(allowedIntegrationTools(local, true)).toEqual([
+      "mcp__blender__list_posts",
+      "mcp__blender__get_post",
+      ...local.tools.write.map((t) => `mcp__blender__${t}`),
+    ]);
+    expect(local.tools.write.length).toBeGreaterThan(0);
+  });
 });
 
 describe("catalog entries with builtin servers and credential files", () => {

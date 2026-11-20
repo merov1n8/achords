@@ -49,4 +49,15 @@ describe("CLI allow rules scoped to the manifest (ADR-0010)", () => {
       "Bash(git status:*)",
     ]);
   });
+
+  it("opens the web only for the full-access marker", () => {
+    const rules = allowRules({
+      tools: ["WebFetch"],
+      read: [],
+      write: [],
+      network: ["*"],
+      shell: [],
+    });
+    expect(rules).toEqual(["WebFetch"]);
+  });
 });

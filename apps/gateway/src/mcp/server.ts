@@ -73,6 +73,14 @@ const TOOLS = [
     done: "Discussion opened. End your turn now; you will be resumed with the transcript.",
   },
   {
+    name: "request_access",
+    description:
+      "Ask the owner for full access for this task (4 hours): open web (WebFetch any site, WebSearch) and the write tools of local integrations such as Blender or Unity. Integrations with credentials are left out while it is on. Only when the task needs it; your task resumes with the decision.",
+    input: z.object({ reason: text.describe("What you need it for, in one or two sentences") }),
+    endpoint: "/api/agent/request_access",
+    done: "Request sent to the owner. End your turn now; you will be resumed with the decision.",
+  },
+  {
     name: "move_task",
     description:
       "Move a kanban card to another column (e.g. your finished work to review, or reviewed work to done). Only moves the workspace workflow allows for your role are accepted; some need the owner's approval.",
