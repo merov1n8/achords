@@ -11,6 +11,7 @@ type Schedule = {
   cron: string;
   agentId: string;
   title: string;
+  instructions: string;
   enabled: boolean;
   nextRunAt: number;
   lastStatus: string | null;
@@ -33,6 +34,7 @@ const STATUS_CHIP: Record<string, string> = {
 export function Schedules() {
   const [view, setView] = useState<"list" | "today" | "week">("list");
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Schedule>();
   const schedules = usePoll(() => api<Schedule[]>("/api/schedules"), 10000);
   return (
     <>
@@ -56,11 +58,24 @@ export function Schedules() {
           </button>
         </div>
       </div>
-      {view === "list" && <List schedules={schedules.data ?? []} onChange={schedules.refresh} />}
+      {view === "list" && (
+        <List schedules={schedules.data ?? []} onChange={schedules.refresh} onEdit={setEditing} />
+      )}
       {view === "today" && <Timeline days={1} />}
       {view === "week" && <Timeline days={7} />}
+      {editing && (
+        <ScheduleForm
+          key={editing.id}
+          editing={editing}
+          onClose={() => setEditing(undefined)}
+          onCreated={() => {
+            setEditing(undefined);
+            schedules.refresh();
+          }}
+        />
+      )}
       {creating && (
-        <NewSchedule
+        <ScheduleForm
           onClose={() => setCreating(false)}
           onCreated={() => {
             setCreating(false);
@@ -73,7 +88,15 @@ export function Schedules() {
   );
 }
 
-function List({ schedules, onChange }: { schedules: Schedule[]; onChange: () => void }) {
+function List({
+  schedules,
+  onChange,
+  onEdit,
+}: {
+  schedules: Schedule[];
+  onChange: () => void;
+  onEdit: (s: Schedule) => void;
+}) {
   const [confirm, setConfirm] = useState<string>();
   const [error, setError] = useState<string>();
   const act = async (fn: () => Promise<unknown>) => {
@@ -138,7 +161,10 @@ function List({ schedules, onChange }: { schedules: Schedule[]; onChange: () => 
                   }
                 />
               </td>
-              <td>
+              <td class="row">
+                <button type="button" class="btn ghost" onClick={() => onEdit(s)}>
+                  {t("common.edit")}
+                </button>
                 {confirm === s.id ? (
                   <button
                     type="button"
@@ -198,17 +224,19 @@ function Timeline({ days }: { days: number }) {
   );
 }
 
-function NewSchedule(props: { onClose: () => void; onCreated: () => void }) {
+/** New schedule, or edit an existing one (`editing`): same form, PUT instead of POST. */
+function ScheduleForm(props: { editing?: Schedule; onClose: () => void; onCreated: () => void }) {
   const agents = usePoll(() => api<Agent[]>("/api/agents"), 60000);
   const projects = usePoll(() => api<Project[]>("/api/projects"), 60000);
+  const e0 = props.editing;
   const [f, setF] = useState({
-    name: "",
-    cron: "0 9 * * 1-5",
-    agentId: "",
-    title: "",
-    instructions: "",
-    project: "",
-    enabled: true,
+    name: e0?.name ?? "",
+    cron: e0?.cron ?? "0 9 * * 1-5",
+    agentId: e0?.agentId ?? "",
+    title: e0?.title ?? "",
+    instructions: e0?.instructions ?? "",
+    project: e0?.project ?? "",
+    enabled: e0?.enabled ?? true,
   });
   const [error, setError] = useState<string>();
   const workers = (agents.data ?? []).filter((a) => a.id !== "boss");
@@ -216,10 +244,9 @@ function NewSchedule(props: { onClose: () => void; onCreated: () => void }) {
     e.preventDefault();
     setError(undefined);
     try {
-      await api("/api/schedules", {
-        method: "POST",
-        body: { ...f, agentId: f.agentId || workers[0]?.id, project: f.project || null },
-      });
+      const body = { ...f, agentId: f.agentId || workers[0]?.id, project: f.project || null };
+      if (e0) await api(`/api/schedules/${e0.id}`, { method: "PUT", body });
+      else await api("/api/schedules", { method: "POST", body });
       props.onCreated();
     } catch (err) {
       setError((err as Error).message);
@@ -239,7 +266,7 @@ function NewSchedule(props: { onClose: () => void; onCreated: () => void }) {
   return (
     <form class="panel gap-top narrow" onSubmit={submit}>
       <div class="page-head">
-        <h2>{t("schedules.new")}</h2>
+        <h2>{t(e0 ? "schedules.edit" : "schedules.new")}</h2>
         <button type="button" class="btn ghost" onClick={props.onClose}>
           {t("common.close")}
         </button>
@@ -289,7 +316,7 @@ function NewSchedule(props: { onClose: () => void; onCreated: () => void }) {
         </label>
       )}
       <button type="submit" class="btn primary">
-        {t("schedules.create")}
+        {e0 ? t("common.save") : t("schedules.create")}
       </button>
       {error && <p class="error">{error}</p>}
     </form>

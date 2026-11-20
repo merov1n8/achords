@@ -198,5 +198,10 @@
   "schedules.taskTitle": "Task title",
   "schedules.instructions": "Instructions",
   "schedules.instructionsHelp": "Complete instructions for the agent; the result arrives in the schedule's own chat thread.",
-  "schedules.create": "Create schedule"
+  "schedules.create": "Create schedule",
+  "common.edit": "Edit",
+  "projects.edit": "Edit project",
+  "projects.saved": "Saved.",
+  "projects.docHelp": "Client preferences, stack, conventions, don'ts, deploy rules. Every run of this project gets this text. Files stay in Finder.",
+  "schedules.edit": "Edit schedule"
 }
