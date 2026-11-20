@@ -54,3 +54,7 @@ scope:
     - meta_get_instagram_media_insights
     - meta_get_instagram_comments
     - meta_reply_instagram_comment
+# Connection test (web Integrations page).
+test:
+  tool: meta_get_page
+  args: { page_id: "{target}" }

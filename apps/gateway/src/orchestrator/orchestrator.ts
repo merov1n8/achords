@@ -210,6 +210,8 @@ export interface Orchestrator {
     monitor: { name: string; config: Record<string, unknown> },
     previous: string | null,
   ): Promise<{ state: "ok" | "alert"; detail: string; result?: string; news: boolean }>;
+  /** Connection test from the web (one read call); project for per-client integrations. */
+  testIntegration(id: string, project?: string): Promise<{ ok: boolean; text: string }>;
   /** A write call that ran in auto mode: reported in the task's thread. */
   logPublish(
     from: { from: "task"; taskId: string },
@@ -997,6 +999,33 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ).slice(0, MAX_POST),
       });
       return { ok: true };
+    },
+
+    async testIntegration(id, slug) {
+      const entry = deps.integrations?.catalog().get(id);
+      if (!deps.integrations?.call || !entry)
+        return { ok: false, text: `integration ${id} is not available` };
+      if (!entry.test) return { ok: false, text: "this integration has no connection test" };
+      const project = slug ? projects().get(slug) : undefined;
+      if (slug && !project) return { ok: false, text: `unknown project ${slug}` };
+      const target = scopeTargets(entry, project?.integrations)[0];
+      const args = Object.fromEntries(
+        Object.entries(entry.test.args).map(([k, v]) => [
+          k,
+          v.replaceAll("{target}", target ?? ""),
+        ]),
+      );
+      if (Object.values(entry.test.args).some((v) => v.includes("{target}")) && !target) {
+        return { ok: false, text: "pick a project that lists its account for this integration" };
+      }
+      let launch: McpLaunch;
+      try {
+        launch = buildLaunch(entry, "owner", project, `owner:test/mcp:${id}`);
+      } catch (err) {
+        return { ok: false, text: (err as Error).message };
+      }
+      const r = await deps.integrations.call(launch, entry.test.tool, args);
+      return { ok: r.ok, text: redact(r.text).slice(0, 400) };
     },
 
     async checkIntegration(monitor, previous) {

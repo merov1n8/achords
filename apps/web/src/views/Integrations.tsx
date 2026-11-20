@@ -1,3 +1,4 @@
+import { useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
@@ -14,6 +15,67 @@ function needs(s: IntegrationStatus): string[] {
   if (s.perProject && !s.projectsReady.length) out.push(t("integrations.noProjectSecrets"));
   if (s.scoped && !s.projectsScoped.length) out.push(t("integrations.noAccounts"));
   return out;
+}
+
+/** One read call through the same path agents use; per-client ones run for a chosen project. */
+function TestButton(props: { s: IntegrationStatus }) {
+  const { s } = props;
+  const projects = [...new Set([...s.projectsReady, ...s.projectsScoped])];
+  const needsProject = s.perProject || s.scoped;
+  const [project, setProject] = useState(projects[0] ?? "");
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<{ ok: boolean; text: string }>();
+  if (!s.testable) return null;
+  const run = async () => {
+    setBusy(true);
+    setOut(undefined);
+    try {
+      setOut(
+        await api<{ ok: boolean; text: string }>(`/api/integrations/${s.id}/test`, {
+          method: "POST",
+          body: needsProject ? { project } : {},
+        }),
+      );
+    } catch (err) {
+      setOut({ ok: false, text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div class="field">
+      <div class="row">
+        {needsProject && (
+          <select
+            class="input small"
+            aria-label={t("chats.project")}
+            value={project}
+            onChange={(e) => setProject(e.currentTarget.value)}
+          >
+            {projects.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        )}
+        <button
+          type="button"
+          class="btn"
+          disabled={busy || (needsProject && !project)}
+          onClick={run}
+        >
+          {busy ? t("integrations.testing") : t("integrations.test")}
+        </button>
+      </div>
+      {out && (
+        <span class={out.ok ? "muted small" : "error small"}>
+          {out.ok ? "✓ " : "✗ "}
+          {out.text}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function Integrations() {
@@ -69,6 +131,7 @@ export function Integrations() {
                           onSaved={list.refresh}
                         />
                       ))}
+                    <TestButton s={s} />
                     {projects.length > 0 && (
                       <div class="muted">
                         {t("integrations.projects", { projects: projects.join(", ") })}
