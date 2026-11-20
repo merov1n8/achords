@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- CLI output (help, status, doctor, init, pair, secret, export/import, start/stop/kill/resume) now comes from the shared text catalog too, so one `locales/<lang>.json` translates the web UI, Telegram and the CLI. A test fails if the CLI or the gateway uses a key the catalog lacks.
+
 - Edit projects (name, workspace, PROJECT.md text) and schedules (all fields) in the web UI. Project files stay Finder-only.
 
 - Scheduler (ADR-0033): recurring tasks with cron rules (e.g. `0 9 * * 1-5` = weekdays at 9:00, local time). The gateway starts them on time through the normal agent flow; each schedule reports into its own chat thread. Missed runs are caught up once; a run still going skips the next occurrence. Schedules page: list with on/off and delete, today's runs and a week view.

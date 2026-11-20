@@ -12,6 +12,7 @@ import {
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { homePaths, openCoreDatabase, readLivePid, setPaused } from "@achords/core";
+import { t } from "@achords/i18n";
 import { open, openHomeVault, seal } from "@achords/secrets";
 
 // Format (ADR-0021): MAGIC | u32 header length | header JSON | AES-256-GCM(gzip(payload JSON)).
@@ -61,13 +62,13 @@ export function buildArchive(payload: Payload, passphrase: string): Buffer {
 }
 
 export function readArchive(bytes: Buffer, passphrase: string): Payload {
-  if (!bytes.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error("not an achords export");
+  if (!bytes.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error(t("cli.transfer.notExport"));
   const len = bytes.readUInt32BE(MAGIC.length);
   const start = MAGIC.length + 4;
   const header = bytes.subarray(start, start + len);
   const { kdf, salt } = JSON.parse(header.toString("utf8")) as { kdf: typeof KDF; salt: string };
   if (kdf.name !== KDF.name || kdf.N !== KDF.N || kdf.r !== KDF.r || kdf.p !== KDF.p) {
-    throw new Error("unsupported export format");
+    throw new Error(t("cli.transfer.unsupported"));
   }
   let plain: Buffer;
   try {
@@ -77,7 +78,7 @@ export function readArchive(bytes: Buffer, passphrase: string): Payload {
       header.toString("utf8"),
     );
   } catch {
-    throw new Error("wrong passphrase or corrupt archive");
+    throw new Error(t("cli.transfer.wrongPassphrase"));
   }
   return JSON.parse(gunzipSync(plain).toString("utf8")) as Payload;
 }
@@ -99,12 +100,12 @@ export function exportHome(
   env: NodeJS.ProcessEnv = process.env,
 ): { files: number; secrets: number } {
   if (passphrase.length < MIN_PASSPHRASE) {
-    throw new Error(`passphrase must be at least ${MIN_PASSPHRASE} characters`);
+    throw new Error(t("cli.transfer.shortPassphrase", { min: MIN_PASSPHRASE }));
   }
   const paths = homePaths(home);
   // A consistent snapshot, and only one machine polling Telegram / running agents at a time.
   if (readLivePid(paths.pidFile) !== undefined) {
-    throw new Error("stop the gateway first: achords stop");
+    throw new Error(t("cli.transfer.stopFirst"));
   }
 
   const files: ArchiveFile[] = walk(home)
@@ -174,7 +175,7 @@ export function importHome(
   for (const f of payload.files) {
     const n = normalize(f.path);
     if (isAbsolute(f.path) || n.startsWith("..") || n.split(sep).includes("..")) {
-      throw new Error(`unsafe path in archive: ${f.path}`);
+      throw new Error(t("cli.transfer.unsafePath", { path: f.path }));
     }
   }
 

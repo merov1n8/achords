@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createPairingCode, homePaths, openCoreDatabase, resolveHome } from "@achords/core";
+import { t } from "@achords/i18n";
 import { openHomeVault } from "@achords/secrets";
 import { type ControlContext, kill, resume, start, status, stop } from "./control.ts";
 import { runDoctor, systemDoctorEnv } from "./doctor.ts";
@@ -13,25 +14,7 @@ import { createPrompter, readSecret } from "./secret-input.ts";
 import { systemdService } from "./systemd.ts";
 import { exportHome, importHome } from "./transfer.ts";
 
-const USAGE = `usage: achords <command>
-
-  init     first-time setup (checks, Telegram token, service, pairing codes); re-runnable
-  doctor   check prerequisites and the running system
-  start    start the gateway as a background service
-  stop     graceful stop (queue state is kept)
-  kill     EMERGENCY STOP: unload service, kill gateway and all agent runs, pause queue
-  resume   clear an emergency stop (then run: achords start)
-  status   show service, gateway, queue and run state
-
-  export <file>          encrypted backup / move to another machine (gateway must be stopped)
-  import <file>          restore an export into an empty data folder (starts paused)
-  pair web               print a one-time code to pair a browser (valid 10 minutes)
-  pair telegram          print a one-time code; send "/pair <code>" to your bot
-  secret set <id>        store a secret; the value is read from stdin (hidden when typing)
-  secret list            list stored secrets (never their values)
-  secret rm <id>         delete a secret
-
-Data root: $ACHORDS_HOME (default ~/.achords)`;
+const USAGE = () => t("cli.usage");
 
 // Dev install: the service runs the gateway straight from this checkout.
 const gatewayEntry = fileURLToPath(new URL("../../gateway/src/main.ts", import.meta.url));
@@ -80,36 +63,28 @@ async function run(command: string | undefined, args: string[]): Promise<number>
   switch (command) {
     case "export": {
       const file = args[0];
-      if (!file) throw new Error("usage: achords export <file>");
+      if (!file) throw new Error(t("cli.export.usage"));
       const ask = createPrompter();
-      const pass = await ask("Passphrase for the export (12+ characters, hidden):", {
+      const pass = await ask(t("cli.export.passphrase"), {
         secret: true,
       });
-      if ((await ask("Repeat the passphrase:", { secret: true })) !== pass) {
-        throw new Error("passphrases do not match");
+      if ((await ask(t("cli.export.repeat"), { secret: true })) !== pass) {
+        throw new Error(t("cli.export.mismatch"));
       }
       const r = exportHome(ctx.paths.home, file, pass);
-      console.log(
-        `Exported ${r.files} files and ${r.secrets} secrets to ${file} (encrypted, 0600).`,
-      );
-      console.log(
-        "This machine's queue is now paused. Keep the passphrase: without it the export is unreadable.",
-      );
+      console.log(t("cli.export.done", { files: r.files, secrets: r.secrets, file }));
+      console.log(t("cli.export.paused"));
       return 0;
     }
     case "import": {
       const file = args[0];
-      if (!file) throw new Error("usage: achords import <file>");
-      const pass = await createPrompter()("Passphrase of the export (hidden):", { secret: true });
+      if (!file) throw new Error(t("cli.import.usage"));
+      const pass = await createPrompter()(t("cli.import.passphrase"), { secret: true });
       const r = importHome(ctx.paths.home, file, pass);
-      console.log(`Imported ${r.files} files and ${r.secrets} secrets into ${ctx.paths.home}.`);
-      console.log("Next steps on this machine:");
-      console.log("  1. log in to the claude CLI (`claude`), logins do not travel");
-      console.log("  2. achords doctor");
-      console.log("  3. achords resume && achords start   (the queue starts paused)");
       console.log(
-        "  4. achords pair web   (browser sessions do not travel; Telegram pairing does)",
+        t("cli.import.done", { files: r.files, secrets: r.secrets, home: ctx.paths.home }),
       );
+      console.log(t("cli.import.next"));
       return 0;
     }
     case "doctor": {
@@ -134,17 +109,13 @@ async function run(command: string | undefined, args: string[]): Promise<number>
     case "pair": {
       const purpose = args[0];
       if (purpose !== "web" && purpose !== "telegram") {
-        throw new Error("usage: achords pair web|telegram");
+        throw new Error(t("cli.pair.usage"));
       }
       const db = openCoreDatabase(ctx.paths.db);
       const code = createPairingCode(db, purpose);
       db.close();
-      console.log(`Pairing code: ${code}  (single use, valid 10 minutes)`);
-      console.log(
-        purpose === "web"
-          ? "Enter it in the web UI on the device you want to pair."
-          : `Send this to your bot in a private chat:  /pair ${code}`,
-      );
+      console.log(t("cli.pair.code", { code }));
+      console.log(purpose === "web" ? t("cli.pair.web") : t("cli.pair.telegram", { code }));
       return 0;
     }
     case "secret": {
@@ -152,20 +123,20 @@ async function run(command: string | undefined, args: string[]): Promise<number>
       const vault = openHomeVault(ctx.paths.home);
       try {
         if (sub === "set" && id) {
-          const value = await readSecret(`Value for ${id} (hidden): `);
-          if (!value) throw new Error("empty value, nothing stored");
+          const value = await readSecret(t("cli.secret.prompt", { id }));
+          if (!value) throw new Error(t("cli.secret.empty"));
           vault.set(id, value, "cli");
-          console.log(`stored ${id}`);
+          console.log(t("cli.secret.stored", { id }));
         } else if (sub === "list") {
           for (const s of vault.list()) {
             const when = new Date(s.updatedAt ?? 0).toISOString().slice(0, 16).replace("T", " ");
             console.log(`${s.id.padEnd(32)} ${s.last4 ? `…${s.last4}` : "(set)"}  ${when}`);
           }
         } else if (sub === "rm" && id) {
-          if (!vault.delete(id, "cli")) throw new Error(`${id} is not set`);
-          console.log(`deleted ${id}`);
+          if (!vault.delete(id, "cli")) throw new Error(t("cli.secret.notSet", { id }));
+          console.log(t("cli.secret.deleted", { id }));
         } else {
-          throw new Error("usage: achords secret set <id> | list | rm <id>");
+          throw new Error(t("cli.secret.usage"));
         }
       } finally {
         vault.close();
@@ -180,11 +151,7 @@ async function run(command: string | undefined, args: string[]): Promise<number>
         // Access may have been granted, so only mention privacy folders when the start failed.
         const folder = process.platform === "darwin" ? protectedFolderOf(gatewayEntry) : undefined;
         if (folder) {
-          console.error(
-            `hint: the code is in ~/${folder}, which macOS blocks for background services.\n` +
-              "  Move the checkout (e.g. ~/Code/achords) or grant node access under\n" +
-              "  System Settings > Privacy & Security > Files and Folders.",
-          );
+          console.error(t("cli.start.folderHint", { folder }));
         }
         throw err;
       }
@@ -195,10 +162,8 @@ async function run(command: string | undefined, args: string[]): Promise<number>
     case "kill": {
       const report = kill(ctx);
       for (const s of report.steps) console.log(`  ${s}`);
-      for (const e of report.errors) console.error(`  FAILED ${e}`);
-      console.log(
-        report.errors.length ? "emergency stop finished WITH ERRORS" : "emergency stop done",
-      );
+      for (const e of report.errors) console.error(t("cli.kill.failed", { error: e }));
+      console.log(report.errors.length ? t("cli.kill.withErrors") : t("cli.kill.done"));
       return report.errors.length ? 1 : 0;
     }
     case "resume":
@@ -206,21 +171,33 @@ async function run(command: string | undefined, args: string[]): Promise<number>
       return 0;
     case "status": {
       const s = status(ctx);
-      console.log(`home            ${ctx.paths.home}`);
-      console.log(`service         ${ctx.service.kind}: ${s.service}`);
-      console.log(
-        `gateway         ${s.gatewayPid ? `running (pid ${s.gatewayPid})` : "not running"}`,
+      const row = (key: string, value: string | number) =>
+        console.log(`${t(key).padEnd(16)}${value}`);
+      row("cli.status.home", ctx.paths.home);
+      row(
+        "cli.status.service",
+        `${ctx.service.kind}: ${t(s.service === "loaded" ? "cli.status.loaded" : "cli.status.notLoaded")}`,
       );
-      console.log(
-        `heartbeat       ${s.heartbeatAgeMs === null ? "never" : `${Math.round(s.heartbeatAgeMs / 1000)}s ago`}`,
+      row(
+        "cli.status.gateway",
+        s.gatewayPid ? t("cli.status.running", { pid: s.gatewayPid }) : t("cli.status.notRunning"),
       );
-      console.log(`queue           ${s.paused ? "PAUSED" : "active"}`);
-      console.log(`emergency stop  ${s.emergencyStop ? "ACTIVE" : "no"}`);
-      console.log(`active runs     ${s.activeRuns}`);
+      row(
+        "cli.status.heartbeat",
+        s.heartbeatAgeMs === null
+          ? t("cli.status.never")
+          : t("cli.status.secondsAgo", { s: Math.round(s.heartbeatAgeMs / 1000) }),
+      );
+      row("cli.status.queue", s.paused ? t("cli.status.paused") : t("cli.status.active"));
+      row(
+        "cli.status.emergency",
+        s.emergencyStop ? t("cli.status.emergencyActive") : t("cli.status.no"),
+      );
+      row("cli.status.runs", s.activeRuns);
       return 0;
     }
     default:
-      console.log(USAGE);
+      console.log(USAGE());
       return command === undefined || command === "help" ? 0 : 2;
   }
 }
