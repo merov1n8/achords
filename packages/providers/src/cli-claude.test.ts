@@ -103,6 +103,16 @@ describe("cli-claude adapter", () => {
     expect(argv).not.toContain("--allowedTools");
   });
 
+  it("reports progress from the agent's TodoWrite checklist", async () => {
+    const seen: unknown[] = [];
+    const res = await provider("todo").run(req({ onProgress: (p) => seen.push(p) }));
+    expect(res.ok).toBe(true);
+    expect(seen).toEqual([
+      { done: 0, total: 4, current: "Doing step 1" },
+      { done: 2, total: 4, current: "Doing step 3" },
+    ]);
+  });
+
   it("reports usage, cost, session and subscription windows", async () => {
     const res = await provider().run(req());
     expect(res.usage).toEqual({

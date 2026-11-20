@@ -6,6 +6,7 @@ import {
   getTask,
   listMessages,
   listMoves,
+  liveProgress,
   openCoreDatabase,
   type Task,
 } from "@achords/core";
@@ -134,6 +135,31 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
     // The review run is part of the card, not a card of its own.
     expect(calls[1]?.task.parentId).toBe(id);
     expect(getTask(db, calls[1]?.task.id ?? "")?.column).toBeNull();
+  });
+
+  it("live progress: the run keeps its checklist (TodoWrite) state for the web", async () => {
+    setup([["dev", "roles: [dev]\ntools: [Read]"]]);
+    give();
+    let during: unknown;
+    behave = (req) => {
+      req.onProgress?.({ done: 1, total: 4, current: "Writing tests" });
+      during = liveProgress(db);
+      return result();
+    };
+    await drain();
+    expect(calls[0]?.req.tools).toEqual(["Read", "TodoWrite"]);
+    expect(calls[0]?.req.allowedTools).toContain("TodoWrite");
+    expect(calls[0]?.req.appendSystemPrompt).toMatch(/TodoWrite/);
+    expect(during).toEqual([
+      expect.objectContaining({
+        agentId: "dev",
+        title: "Build page",
+        done: 1,
+        total: 4,
+        current: "Writing tests",
+      }),
+    ]);
+    expect(liveProgress(db)).toEqual([]);
   });
 
   it("agents get the move_task tool", async () => {

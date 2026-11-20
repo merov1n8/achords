@@ -101,8 +101,8 @@ describe("ephemeral workers and agent proposals (ADR-0029)", () => {
     await drain();
     expect(spawned).toMatchObject({ ok: true });
     const worker = calls.find((c) => c.task.parentId)?.req;
-    expect(worker?.tools).toEqual(["Read", "Bash"]);
-    expect(worker?.allowedTools).toEqual(["Read", "Bash(npm test:*)"]);
+    expect(worker?.tools).toEqual(["Read", "Bash", "TodoWrite"]);
+    expect(worker?.allowedTools).toEqual(["Read", "Bash(npm test:*)", "TodoWrite"]);
     expect(worker?.cwd).toBe(join(ws, "site"));
     // Depth 1: no hub at all (cannot delegate, spawn, propose or ask).
     expect(worker?.mcpConfigPath).toBeUndefined();

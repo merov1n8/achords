@@ -228,7 +228,8 @@ describe("orchestrator", () => {
     expect(req).toMatchObject({
       model: "sonnet",
       cwd: ws,
-      tools: ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
+      // TodoWrite only keeps the run's own checklist (live progress), no file/shell/network access.
+      tools: ["Read", "Edit", "Write", "Glob", "Grep", "Bash", "TodoWrite"],
       maxBudgetUsd: 2,
     });
     expect(existsSync(ws)).toBe(true);
