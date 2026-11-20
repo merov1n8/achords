@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,9 +25,10 @@ describe("integration launcher (ADR-0034)", () => {
           command: process.execPath,
           args: [
             "-e",
-            "process.stdout.write([process.env.WP_PASSWORD, process.env.ACHORDS_MCP_TICKET ?? 'no-ticket'].join('|')); process.exit(3)",
+            "const f = process.env.CREDS; process.stdout.write([process.env.WP_PASSWORD, process.env.ACHORDS_MCP_TICKET ?? 'no-ticket', require('fs').readFileSync(f, 'utf8'), (require('fs').statSync(f).mode & 0o777).toString(8), f].join('|')); process.exit(3)",
           ],
           env: { WP_PASSWORD: "s3cret" },
+          files: { CREDS: { refresh_token: "r3fresh" } },
         }),
       );
     });
@@ -50,7 +52,12 @@ describe("integration launcher (ADR-0034)", () => {
   it("runs the server with the fetched environment, without the ticket, and keeps its exit code", async () => {
     const r = await launch("good");
     expect(auths).toEqual(["Bearer good"]);
-    expect(r.out).toBe("s3cret|no-ticket");
+    const [password, ticket, file, mode, path] = r.out.split("|");
+    expect([password, ticket]).toEqual(["s3cret", "no-ticket"]);
+    // Credentials file: private, and gone once the server has exited.
+    expect(JSON.parse(file ?? "")).toEqual({ refresh_token: "r3fresh" });
+    expect(mode).toBe("600");
+    expect(existsSync(path ?? "")).toBe(false);
     expect(r.code).toBe(3);
   });
 

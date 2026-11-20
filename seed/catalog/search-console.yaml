@@ -1,0 +1,43 @@
+# infinitnet/google-search-console-gsc-mcp (MIT). Uses the same Google account as GA4.
+# The OAuth grant needs the "webmasters" scope (the server asks for it); the write tools
+# (sitemap submit, indexing notifications) are not allowed here.
+id: search-console
+name: Google Search Console
+description: Search performance, URL inspection, sitemaps and SEO analyses (read-only).
+command: npx
+args: ["-y", "@infinitnet/google-search-console-gsc-mcp-server@1.1.1"]
+env:
+  GSC_AUTH_MODE: oauth
+  GSC_OAUTH_CLIENT_ID: "vault:google-client-id"
+  GSC_OAUTH_CLIENT_SECRET: "vault:google-client-secret"
+files:
+  GSC_OAUTH_TOKEN_FILE:
+    refresh_token: "vault:google-refresh-token"
+    scope: https://www.googleapis.com/auth/webmasters
+hosts: [searchconsole.googleapis.com, www.googleapis.com, oauth2.googleapis.com]
+tools:
+  read:
+    - gsc_server_guide
+    - gsc_properties_list
+    - gsc_property_get
+    - gsc_search_query
+    - gsc_period_compare
+    - gsc_page_queries
+    - gsc_url_inspect
+    - gsc_url_inspect_batch
+    - gsc_indexing_issue_scan
+    - gsc_sitemaps_list
+    - gsc_sitemap_get
+    - gsc_site_health
+    - gsc_rank_lift_opportunities
+    - gsc_ctr_gap_pages
+    - gsc_uncovered_queries
+    - gsc_traffic_loss
+    - gsc_content_decay
+    - gsc_query_overlap
+    - gsc_section_performance
+    - gsc_alert_scan
+    - gsc_action_plan
+    - gsc_claim_check
+    - gsc_multi_property_health
+  write: [gsc_sitemap_submit, gsc_index_notify, gsc_index_notify_batch]

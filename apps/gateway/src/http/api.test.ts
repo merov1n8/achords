@@ -391,7 +391,12 @@ describe("HTTP API", () => {
   });
 
   it("integration launcher: a ticket yields the launch once; run tokens are not tickets", async () => {
-    const launch = { command: "npx", args: ["x@1"], env: { WP_PASSWORD: "s3cret-value" } };
+    const launch = {
+      command: "npx",
+      args: ["x@1"],
+      env: { WP_PASSWORD: "s3cret-value" },
+      files: {},
+    };
     const { ticket } = mcpTickets.issue(launch);
     const redeem = (auth: string) =>
       fetch(`${base}/api/agent/mcp-env`, { method: "POST", headers: { authorization: auth } });
