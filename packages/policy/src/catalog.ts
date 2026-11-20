@@ -8,6 +8,9 @@ const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const VAULT_REF = /^vault:[a-z0-9{][a-z0-9_.{}-]*$/;
 // MCP tool names as the CLI exposes them: mcp__<server>__<tool>.
 const TOOL = /^[A-Za-z0-9_-]{1,64}$/;
+const ENV = /^[A-Z_][A-Z0-9_]*$/;
+// Literal or `vault:<id>`; `{project}` in a vault id is the task's project.
+const value = z.string();
 
 /** One integration (ADR-0034): an MCP server, its credentials and the tools agents may use. */
 export const catalogEntrySchema = z
@@ -15,10 +18,14 @@ export const catalogEntrySchema = z
     id: z.string().regex(ID),
     name: z.string().min(1),
     description: z.string().default(""),
-    command: z.string().min(1),
+    // An ecosystem server (command + pinned package) or one shipped with achords (`builtin`).
+    command: z.string().min(1).optional(),
+    builtin: z.enum(["wordpress"]).optional(),
     args: z.array(z.string()).default([]),
-    // Literal values or vault references; `{project}` in a reference is the task's project.
-    env: z.record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/), z.string()).default({}),
+    env: z.record(z.string().regex(ENV), value).default({}),
+    // Servers that read credentials from a file: the env var gets the path of a private JSON
+    // file with these fields, written by the launcher and deleted when the server exits.
+    files: z.record(z.string().regex(ENV), z.record(z.string(), value)).default({}),
     hosts: z.array(z.string().min(1)).default([]),
     tools: z
       .object({
@@ -30,10 +37,17 @@ export const catalogEntrySchema = z
   })
   .strict()
   .superRefine((e, ctx) => {
-    for (const [key, value] of Object.entries(e.env)) {
-      if (value.startsWith("vault:") && !VAULT_REF.test(value)) {
-        ctx.addIssue({ code: "custom", path: ["env", key], message: "invalid vault reference" });
+    if (!e.command === !e.builtin) {
+      ctx.addIssue({ code: "custom", path: ["command"], message: "set either command or builtin" });
+    }
+    const check = (v: string, path: string[]) => {
+      if (v.startsWith("vault:") && !VAULT_REF.test(v)) {
+        ctx.addIssue({ code: "custom", path, message: "invalid vault reference" });
       }
+    };
+    for (const [key, v] of Object.entries(e.env)) check(v, ["env", key]);
+    for (const [key, fields] of Object.entries(e.files)) {
+      for (const [field, v] of Object.entries(fields)) check(v, ["files", key, field]);
     }
   });
 
@@ -60,7 +74,11 @@ export function loadCatalog(seedDir: string, ownerDir: string): Catalog {
 
 /** Vault ids an entry needs, with `{project}` filled in (or left as is without a project). */
 export function secretRefs(entry: CatalogEntry, project?: string): string[] {
-  return Object.values(entry.env)
+  const values = [
+    ...Object.values(entry.env),
+    ...Object.values(entry.files).flatMap((f) => Object.values(f)),
+  ];
+  return values
     .filter((v) => v.startsWith("vault:"))
     .map((v) => (project ? v.replaceAll("{project}", project) : v));
 }

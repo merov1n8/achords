@@ -75,6 +75,7 @@ describe("integrations in runs (ADR-0034)", () => {
         catalog: () => loadCatalog(join(home, "no-seed"), catalogDir),
         tickets,
         launcherEntry: "/x/launch.ts",
+        builtins: { wordpress: "/x/wordpress.ts" },
         resolveSecret: (ref, actor) => {
           resolved.push([ref, actor]);
           return SECRET;
@@ -136,6 +137,7 @@ describe("integrations in runs (ADR-0034)", () => {
       command: "npx",
       args: ["-y", "wp-mcp@1.0.0"],
       env: { WP_URL: "https://example.com", WP_PASSWORD: SECRET },
+      files: {},
     });
     expect(redeemed[1]).toBeUndefined();
   });
@@ -150,6 +152,27 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(noProject.error).toMatch(/integration wp needs a project/);
     expect(seen).toEqual([]);
     expect(resolved).toEqual([]);
+  });
+
+  it("runs builtin servers on the gateway's Node and resolves credential files", async () => {
+    writeFileSync(
+      join(home, "catalog", "wp.yaml"),
+      `id: wp\nname: WordPress\nbuiltin: wordpress\nenv:\n  WP_APP_PASSWORD: "vault:wp-{project}"\nfiles:\n  CREDS:\n    type: authorized_user\n    refresh_token: "vault:google"\ntools:\n  read: [list_posts]\n`,
+    );
+    let launch: unknown;
+    const original = tickets.issue.bind(tickets);
+    tickets.issue = (l) => {
+      launch = l;
+      return original(l);
+    };
+    expect((await give("marketer", "acme")).status).toBe("done");
+    expect(launch).toEqual({
+      command: process.execPath,
+      args: ["--disable-warning=ExperimentalWarning", "/x/wordpress.ts"],
+      env: { WP_APP_PASSWORD: SECRET },
+      files: { CREDS: { type: "authorized_user", refresh_token: SECRET } },
+    });
+    expect(resolved.map(([ref]) => ref).sort()).toEqual(["vault:google", "vault:wp-acme"]);
   });
 
   it("allows integrations without secrets next to a shell", async () => {

@@ -30,6 +30,7 @@ const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
 const SEED_SCHEDULES = new URL("../../../seed/schedules/", import.meta.url).pathname;
 const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
+const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
 const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
 const WEB_DIST = new URL("../../web/dist/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
@@ -87,6 +88,7 @@ export function runGateway(home: string): Promise<number> {
       catalog: () => loadCatalog(SEED_CATALOG, join(home, "catalog")),
       tickets: mcpTickets,
       launcherEntry: MCP_LAUNCHER,
+      builtins: BUILTIN_MCP,
       resolveSecret: (ref, actor) => getVault().resolveRef(ref, actor),
     },
     memory,

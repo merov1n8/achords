@@ -1,0 +1,32 @@
+# CoplayDev/unity-mcp (MIT), talks to the MCP for Unity package in the open Unity Editor
+# (Package Manager: com.coplaydev.unity-mcp). No credentials. Telemetry off.
+# Most tools both read and change the project: not allowed yet.
+id: unity
+name: Unity
+description: Inspect the open Unity project (read-only for now).
+command: uvx
+args: ["--from", "mcpforunityserver==10.3.0", "mcp-for-unity", "--transport", "stdio"]
+env:
+  DISABLE_TELEMETRY: "true"
+hosts: [127.0.0.1]
+tools:
+  read:
+    [
+      find_in_file,
+      validate_script,
+      manage_script_capabilities,
+      get_sha,
+      get_test_job,
+      unity_docs,
+      unity_reflect,
+    ]
+  write:
+    [
+      manage_scene,
+      manage_gameobject,
+      manage_script,
+      manage_asset,
+      execute_code,
+      run_tests,
+      read_console,
+    ]

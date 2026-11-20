@@ -36,6 +36,8 @@ export interface McpLaunch {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /** Env var → JSON fields of a private credentials file the launcher writes (path in the var). */
+  files: Record<string, Record<string, string>>;
 }
 
 export interface McpTickets {

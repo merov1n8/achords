@@ -23,7 +23,7 @@ describe("run tokens", () => {
 describe("integration tickets (ADR-0034)", () => {
   it("hand out the launch exactly once and never after revocation", () => {
     const tickets = createMcpTickets();
-    const launch = { command: "npx", args: ["x@1"], env: { TOKEN: "s3cret" } };
+    const launch = { command: "npx", args: ["x@1"], env: { TOKEN: "s3cret" }, files: {} };
     const a = tickets.issue(launch);
     expect(tickets.redeem(a.ticket)).toEqual(launch);
     expect(tickets.redeem(a.ticket)).toBeUndefined();
