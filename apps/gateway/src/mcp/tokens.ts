@@ -47,6 +47,8 @@ export interface McpLaunch {
    * is a run token granting `publish:<integration>`.
    */
   publish?: { integration: string; mode: "review" | "auto"; tools: string[]; token: string };
+  /** ADR-0038: results carry third-party content; the launcher marks them as data. */
+  untrusted?: string;
 }
 
 export interface McpTickets {
