@@ -81,6 +81,31 @@ const TOOLS = [
     done: "Proposal filed; the owner decides. Continue your task without the new agent.",
   },
   {
+    name: "open_room",
+    description:
+      "Open a short discussion with up to 3 agents you may delegate to (1-3 rounds, each speaks once per round, read-only). End your turn after opening; you resume with the transcript and write the decision.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: { type: "string", description: "Short topic" },
+        question: {
+          type: "string",
+          description: "What the participants should decide or advise on",
+        },
+        participants: {
+          type: "array",
+          items: { type: "string" },
+          description: "Agent ids, speaking order",
+        },
+        rounds: { type: "string", description: "Number of rounds, 1-3" },
+      },
+      required: ["topic", "question", "participants", "rounds"],
+      additionalProperties: false,
+    },
+    endpoint: "/api/agent/open_room",
+    done: "Discussion opened. End your turn now; you will be resumed with the transcript.",
+  },
+  {
     name: "move_task",
     description:
       "Move a kanban card to another column (e.g. your finished work to review, or reviewed work to done). Only moves the workspace workflow allows for your role are accepted; some need the owner's approval.",

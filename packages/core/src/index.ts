@@ -11,6 +11,7 @@ export * from "./emergency.ts";
 export { type HomePaths, homePaths, resolveHome } from "./home.ts";
 export * from "./proc.ts";
 export * from "./queue.ts";
+export * from "./rooms.ts";
 export * from "./runs.ts";
 export * from "./settings.ts";
 export * from "./threads.ts";

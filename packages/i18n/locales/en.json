@@ -153,5 +153,14 @@
   "projects.create": "Create project",
   "chat.project": "Project",
   "chat.noProject": "No project",
-  "chat.projectHelp": "New work in this thread follows the project's PROJECT.md."
+  "chat.projectHelp": "New work in this thread follows the project's PROJECT.md.",
+  "nav.rooms": "Agent rooms",
+  "rooms.help": "Discussions agents opened among themselves. They are kept out of your chats and Telegram; this read-only log is for cost control and checking what was said.",
+  "rooms.empty": "No discussions yet.",
+  "rooms.topic": "Topic",
+  "rooms.people": "Opener → participants",
+  "rooms.turns": "Turns",
+  "rooms.open": "open",
+  "rooms.closed": "closed",
+  "rooms.read": "Read"
 }
