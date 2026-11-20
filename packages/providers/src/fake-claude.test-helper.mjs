@@ -40,6 +40,31 @@ process.stdin.on("end", () => {
     setInterval(() => {}, 1000);
     return;
   }
+  if (mode === "todo") {
+    // The agent's own checklist, as Claude Code's TodoWrite tool call (recorded shape).
+    const todo = (statuses) => ({
+      type: "assistant",
+      session_id,
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_1",
+            name: "TodoWrite",
+            input: {
+              todos: statuses.map((status, i) => ({
+                content: `Step ${i + 1}`,
+                activeForm: `Doing step ${i + 1}`,
+                status,
+              })),
+            },
+          },
+        ],
+      },
+    });
+    out(todo(["in_progress", "pending", "pending", "pending"]));
+    out(todo(["completed", "completed", "in_progress", "pending"]));
+  }
   out({
     type: "assistant",
     session_id,

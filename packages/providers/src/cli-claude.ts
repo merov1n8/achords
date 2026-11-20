@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { ModelProvider, RunRequest, RunResult, Usage, UsageWindow } from "./types.ts";
+import type {
+  ModelProvider,
+  RunProgress,
+  RunRequest,
+  RunResult,
+  Usage,
+  UsageWindow,
+} from "./types.ts";
 
 export interface CliClaudeOptions {
   /** Executable and leading args. Default: the official `claude` binary on PATH. */
@@ -63,6 +70,27 @@ function emptyUsage(): Usage {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     costUsd: null,
+  };
+}
+
+/** Progress from Claude Code's TodoWrite tool call: the agent's own checklist. */
+function parseTodos(event: Record<string, unknown>): RunProgress | undefined {
+  const content = (event.message as { content?: unknown[] } | undefined)?.content ?? [];
+  const call = [...content]
+    .reverse()
+    .find(
+      (c): c is { name: string; input: { todos?: unknown } } =>
+        typeof c === "object" && c !== null && (c as { name?: unknown }).name === "TodoWrite",
+    );
+  const todos = Array.isArray(call?.input.todos)
+    ? (call.input.todos as { status?: string; content?: string; activeForm?: string }[])
+    : undefined;
+  if (!todos?.length) return undefined;
+  const active = todos.find((t) => t.status === "in_progress");
+  return {
+    done: todos.filter((t) => t.status === "completed").length,
+    total: todos.length,
+    ...(active ? { current: String(active.activeForm ?? active.content ?? "").slice(0, 200) } : {}),
   };
 }
 
@@ -154,6 +182,10 @@ function runOnce(
       if (typeof event !== "object" || event === null) return;
       opts.onEvent?.(event);
       if (event.type === "rate_limit_event") windows = parseWindows(event.rate_limit_info);
+      if (event.type === "assistant" && req.onProgress) {
+        const progress = parseTodos(event);
+        if (progress) req.onProgress(progress);
+      }
       if (event.type === "result") result = event;
     });
 

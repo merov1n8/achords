@@ -82,6 +82,8 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - Runs inside a per-agent working directory (git worktree for dev agents) and per-agent OS user where configured.
 - Exits after the task. No idle tmux sessions.
 
+- Live progress (Phase 2 step 5b): task runs get Claude Code's `TodoWrite` tool (it only keeps the run's own checklist: no file, shell or network access) and a hint to use it; the adapter turns its stream-json calls into done/total/current, stored on the run (`runs.progress_*`) and polled by the web's bottom bar. The time left is extrapolated from elapsed time and is shown only after the first step is done. Discussion turns and the boss decision run without it.
+
 ### 4.5 Provider layer
 
 Single interface `ModelProvider { run(task, tools, limits) }` with adapters:

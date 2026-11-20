@@ -12,6 +12,8 @@ import {
   getThread,
   listMessages,
   openCoreDatabase,
+  setRunProgress,
+  startRun,
   upsertAgent,
 } from "@achords/core";
 import { openVault, type Vault } from "@achords/secrets";
@@ -610,6 +612,18 @@ describe("HTTP API", () => {
     const { call } = await pair();
     expect(await (await call("/api/rooms")).json()).toEqual([]);
     expect((await call("/api/rooms/nope/messages")).status).toBe(404);
+  });
+
+  it("live progress of running agents for the web bar", async () => {
+    const { call } = await pair();
+    const task = enqueue(db, { title: "Landing" });
+    upsertAgent(db, { id: "tester", name: "Tester", role: "qa", workspace: "w" });
+    const run = startRun(db, { provider: "cli-claude", taskId: task.id, agentId: "tester" });
+    setRunProgress(db, run.id, { done: 1, total: 3, current: "Copy" });
+    expect(await (await call("/api/runs/live")).json()).toEqual([
+      expect.objectContaining({ title: "Landing", done: 1, total: 3, current: "Copy" }),
+    ]);
+    expect((await fetch(`${base}/api/runs/live`)).status).toBe(401);
   });
 
   it("projects: list, create, and pick one for a thread", async () => {

@@ -28,6 +28,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Live run progress: a bar at the bottom of every page shows each running agent's task, the step it is on, % done (from its own TodoWrite checklist), elapsed time and an estimate of the time left (only after the first step is done). Task runs get Claude Code's TodoWrite tool for this; it only keeps the run's own checklist.
+
 - Agent rooms (ADR-0032): an agent can open a short discussion (`open_room`) with up to 3 agents it may delegate to, 1–3 rounds, read-only turns; it resumes with the transcript and writes the decision. Rooms never show up in chats or Telegram; the owner can read them under Settings › Agent rooms.
 
 - Projects in the web UI: a Projects page (list with working folder paths, create form) and a project picker in the chat header.

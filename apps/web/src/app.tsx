@@ -20,6 +20,7 @@ import { Appearance } from "./views/Appearance.tsx";
 import { Chat } from "./views/Chat.tsx";
 import { Devices } from "./views/Devices.tsx";
 import { Kanban } from "./views/Kanban.tsx";
+import { LiveBar } from "./views/LiveBar.tsx";
 import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
 import { Rooms } from "./views/Rooms.tsx";
@@ -98,6 +99,7 @@ export function App() {
         {section === "settings" && sub === "rooms" && <Rooms />}
         {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
         {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
+        <LiveBar />
       </main>
     </div>
   );

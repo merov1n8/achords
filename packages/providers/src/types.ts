@@ -26,6 +26,14 @@ export interface RunRequest {
   env?: Record<string, string>;
   /** Called with the child PID (= its process group id) so it can be recorded for `achords kill`. */
   onSpawn?: (pid: number) => void;
+  /** The agent's own checklist changed (done of total, the step in progress). */
+  onProgress?: (p: RunProgress) => void;
+}
+
+export interface RunProgress {
+  done: number;
+  total: number;
+  current?: string;
 }
 
 export interface Usage {
