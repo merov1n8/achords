@@ -204,7 +204,7 @@
   "projects.saved": "Saved.",
   "projects.docHelp": "Client preferences, stack, conventions, don'ts, deploy rules. Every run of this project gets this text. Files stay in Finder.",
   "schedules.edit": "Edit schedule",
-  "cli.usage": "usage: achords <command>\n\n  init     first-time setup (checks, Telegram token, service, pairing codes); re-runnable\n  doctor   check prerequisites and the running system\n  start    start the gateway as a background service\n  stop     graceful stop (queue state is kept)\n  kill     EMERGENCY STOP: unload service, kill gateway and all agent runs, pause queue\n  resume   clear an emergency stop (then run: achords start)\n  status   show service, gateway, queue and run state\n\n  export <file>          encrypted backup / move to another machine (gateway must be stopped)\n  import <file>          restore an export into an empty data folder (starts paused)\n  pair web               print a one-time code to pair a browser (valid 10 minutes)\n  pair telegram          print a one-time code; send \"/pair <code>\" to your bot\n  secret set <id>        store a secret; the value is read from stdin (hidden when typing)\n  secret list            list stored secrets (never their values)\n  secret rm <id>         delete a secret\n\nData root: $ACHORDS_HOME (default ~/.achords)",
+  "cli.usage": "usage: achords <command>\n\n  init     first-time setup (checks, Telegram token, service, pairing codes); re-runnable\n  doctor   check prerequisites and the running system\n  start    start the gateway as a background service\n  stop     planned stop: waits for running work (max 10 min), nothing is lost;\n           --now: don't wait (interrupted work continues after start); --wait 30m\n  kill     EMERGENCY STOP: unload service, kill gateway and all agent runs, pause queue\n  resume   clear an emergency stop (then run: achords start)\n  status   show service, gateway, queue and run state\n\n  export <file>          encrypted backup / move to another machine (gateway must be stopped)\n  import <file>          restore an export into an empty data folder (starts paused)\n  pair web               print a one-time code to pair a browser (valid 10 minutes)\n  pair telegram          print a one-time code; send \"/pair <code>\" to your bot\n  secret set <id>        store a secret; the value is read from stdin (hidden when typing)\n  secret list            list stored secrets (never their values)\n  secret rm <id>         delete a secret\n\nData root: $ACHORDS_HOME (default ~/.achords)",
   "cli.export.usage": "usage: achords export <file>",
   "cli.export.passphrase": "Passphrase for the export (12+ characters, hidden):",
   "cli.export.repeat": "Repeat the passphrase:",
@@ -325,5 +325,10 @@
   "cli.transfer.unsafePath": "unsafe path in archive: {path}",
   "cli.doctor.macFolderName": "macOS folder access",
   "cli.secret.cancelled": "cancelled",
-  "cli.service.unsupported": "service install is not supported on {platform} yet; run the gateway in the foreground"
+  "cli.service.unsupported": "service install is not supported on {platform} yet; run the gateway in the foreground",
+  "cli.stop.waiting": "Planned stop: nothing new starts; waiting for {n} run(s) to finish (at most {minutes} more min):",
+  "cli.stop.waitOver": "Wait limit reached; interrupting {n} run(s). They continue after `achords start`.",
+  "cli.stop.willContinue": "{n} interrupted task(s) will continue after `achords start` (no attempt lost).",
+  "cli.stop.cancelled": "Stop cancelled; the gateway goes on working.",
+  "cli.stop.badWait": "--wait: use e.g. 30m, 90s or 1h (got \"{value}\")"
 }
