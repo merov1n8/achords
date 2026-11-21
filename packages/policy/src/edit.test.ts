@@ -157,6 +157,13 @@ network:
     ]);
   });
 
+  it('drops the container choice with the last "*" and reports a switched container', () => {
+    const open = patchManifestText(BASE, { add: { network: ["*"] } });
+    const off = `${open}container: false\n`;
+    expect(manifestChanges(off, open)).toEqual(["Apple container: off → on"]);
+    expect(patchManifestText(off, { remove: { network: ["*"] } })).not.toContain("container");
+  });
+
   it("creates missing lists, drops an emptied shell, and refuses invalid results", () => {
     const withShell = patchManifestText(BASE, { add: { shell: ["ls"], tools: ["Bash"] } });
     expect(withShell).toMatch(/shell:\n {2}allow: \[ls\]/);
@@ -289,6 +296,28 @@ describe("updateAgent (web: edit with the same form as create)", () => {
     });
     updateAgent(dir, "social", { ...fields, budget: { per_run_usd: 0 } });
     expect(loadManifest(join(dir, "social", "agent.yaml")).budget?.per_run_usd).toBeUndefined();
+  });
+
+  it('writes the container choice only next to "*" (ADR-0051)', () => {
+    const path = join(dir, "social", "agent.yaml");
+    updateAgent(dir, "social", { ...fields, network: { allow: ["*"] } });
+    expect(readFileSync(path, "utf8")).toMatch(/container: true/);
+    updateAgent(dir, "social", { ...fields, network: { allow: ["*"] }, container: false });
+    expect(loadManifest(path).container).toBe(false);
+    // Without "*" the key goes, whatever the form sent.
+    updateAgent(dir, "social", { ...fields, container: false });
+    expect(readFileSync(path, "utf8")).not.toMatch(/container/);
+    createAgentFiles(dir, {
+      id: "web",
+      name: "Web",
+      role: "r",
+      workspace: "w",
+      models: fields.models,
+      network: { allow: ["*"] },
+      container: false,
+      description: "x",
+    });
+    expect(loadManifest(join(dir, "web", "agent.yaml")).container).toBe(false);
   });
 
   it("refuses invalid values and leaves both files untouched", () => {

@@ -6,6 +6,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -68,6 +69,7 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import type { Embedder, Memory } from "@achords/memory";
+import { runContainerPrefix } from "@achords/platform";
 import {
   AGENT_LIST_FIELDS,
   type AgentListField,
@@ -103,6 +105,7 @@ import {
 } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/providers";
 import { z } from "zod";
+import type { Prepared } from "../container.ts";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
 import { describeCall, describeResult } from "./publish-text.ts";
 import { createSkillFlow, type SkillRequest } from "./skills.ts";
@@ -189,6 +192,15 @@ export interface OrchestratorDeps {
   price?: (model: string, usage: Usage) => number | null;
   /** Phase 4: why API work on this provider must wait (budget used up), or undefined. */
   budget?: (provider: string) => string | undefined;
+  /** ADR-0051: runs of agents with "*" inside an Apple container (Linux VM). */
+  container?: {
+    /** Image and network ready, or why the run must wait; throws when it cannot run at all. */
+    prepare: () => Promise<Prepared>;
+    /** Code the hub server and the launcher need inside the VM, shared read-only. */
+    codeDirs: string[];
+    /** CLAUDE_CODE_OAUTH_TOKEN for subscription runs; throws a plain reason when not set. */
+    claudeLogin: () => Record<string, string>;
+  };
   /** Applied to everything posted to threads (ADR-0012). */
   redact?: (text: string) => string;
   /** Long-term memory (ADR-0008); optional so the hub works without it. */
@@ -374,8 +386,39 @@ const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
 // Owner-granted full access (ADR-0035) lasts this long for the whole task chain.
 export const ELEVATION_MS = 4 * 60 * 60_000;
 const WORKER_REFUSAL = "workers cannot spawn workers or delegate (depth 1)";
+// ADR-0051: what the agent finds inside its container.
+const CONTAINER_NOTE =
+  "This run executes in an isolated Linux container: only your own folders exist there, at the same paths. Apps, files and services elsewhere on the owner's Mac are not reachable.";
 
 const expandHome = (p: string) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
+
+/**
+ * Folders a container run shares, each at its own path (and at its real path when that differs,
+ * so resolved paths in allow rules still match): the run's write roots read-write, its read roots
+ * and `extra` read-only. Nothing else of the host exists inside.
+ */
+function containerMounts(
+  m: Manifest,
+  cwd: string,
+  extra: string[],
+): { path: string; readonly: boolean }[] {
+  const out = new Map<string, boolean>();
+  const add = (p: string, readonly: boolean) => {
+    if (!existsSync(p)) {
+      if (readonly) return; // nothing to read there; a host run would find nothing either
+      mkdirSync(p, { recursive: true, mode: 0o700 });
+    }
+    if (!statSync(p).isDirectory()) {
+      throw new Error(`container runs can only share folders, and ${p} is a file`);
+    }
+    for (const path of new Set([p, realpathSync(p)])) {
+      out.set(path, (out.get(path) ?? true) && readonly);
+    }
+  };
+  for (const p of [cwd, ...m.fs.write.map(expandHome)]) add(p, false);
+  for (const p of [...m.fs.read.map(expandHome), ...extra]) add(p, true);
+  return [...out].map(([path, readonly]) => ({ path, readonly }));
+}
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const { db, home } = deps;
@@ -1157,7 +1200,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           `tools: ${m.tools.join(", ") || "none"}`,
           `fs write: ${m.fs.write.join(", ") || "none"}; read: ${m.fs.read.join(", ") || "none"}`,
           `shell: ${m.shell?.allow.join(", ") ?? "none"}`,
-          `network: ${m.network.allow.join(", ") || "none"}`,
+          `network: ${m.network.allow.join(", ") || "none"}${m.network.allow.includes("*") ? (m.container ? " (in an Apple container)" : " (NOT in a container: runs directly on the Mac)") : ""}`,
           `delegation: to ${m.delegation.can_delegate_to.join(", ") || "none"}, from ${m.delegation.accepts_from.join(", ") || "none"}`,
           `budget: ${JSON.stringify(m.budget)}`,
         ].join("\n");
@@ -2071,6 +2114,37 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return;
     }
 
+    // ADR-0051: "*" agents run in an Apple container unless the owner switched it off. Local
+    // models get no tools, so there is nothing to contain.
+    let box: Extract<Prepared, { ready: true }> | undefined;
+    if (manifest.container && !isLocalModel(pickModel(manifest, task.sensitivity))) {
+      try {
+        if (built.provider.id !== "cli-claude") {
+          throw new Error(
+            `${manifest.id} runs in an Apple container, which works with Claude models only for now (the ${built.provider.id === "cli-codex" ? "OpenAI" : "Gemini"} CLI and its sign-in are not available there). Choose a Claude model for this agent, or switch its container off.`,
+          );
+        }
+        if (!deps.container) throw new Error("this install cannot run agents in a container");
+        const ready = await deps.container.prepare();
+        if (!ready.ready) {
+          defer(db, task.id, WORKER_ID, ready.reason, DEFER_MS);
+          return;
+        }
+        // The Mac's Keychain login is not reachable from Linux: a long-lived token instead.
+        if (built.req.billing !== "api") {
+          built.req.env = { ...built.req.env, ...deps.container.claudeLogin() };
+        }
+        box = ready;
+      } catch (err) {
+        failFinal((err as Error).message);
+        return;
+      }
+    }
+    // Inside the VM the MCP servers run on the image's Node and reach the hub on the container
+    // network; the code they need is shared read-only at the same paths.
+    const node = box ? "node" : process.execPath;
+    const hubUrl = box?.hubUrl ?? deps.hub?.url ?? "";
+
     // Hub tools and integrations: one private MCP config file for this run only.
     let hubRun: { file: string; revoke: () => void } | undefined;
     const servers: Record<string, unknown> = {};
@@ -2093,10 +2167,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id, hubTools);
       revokers.push(revoke);
       servers.achords = {
-        command: process.execPath,
+        command: node,
         args: ["--disable-warning=ExperimentalWarning", deps.hub.serverEntry],
         env: {
-          ACHORDS_HUB_URL: deps.hub.url,
+          ACHORDS_HUB_URL: hubUrl,
           ACHORDS_RUN_TOKEN: token,
           ACHORDS_TOOLS: hubTools.join(","),
         },
@@ -2107,6 +2181,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       for (const l of launches) {
         // The launcher reports write calls with a run token that only grants publish:<id>.
         let launch = l.launch;
+        // Builtin servers run on the gateway's Node on the host, on the image's in the VM.
+        if (box && launch.command === process.execPath) launch = { ...launch, command: "node" };
         if (l.publish) {
           const pub = deps.hub.tokens.issue(task.id, manifest.id, [`publish:${l.id}`]);
           revokers.push(pub.revoke);
@@ -2116,22 +2192,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const { ticket, revoke } = deps.integrations.tickets.issue(launch);
         revokers.push(revoke);
         servers[l.id] = {
-          command: process.execPath,
+          command: node,
           args: ["--disable-warning=ExperimentalWarning", deps.integrations.launcherEntry],
-          env: { ACHORDS_HUB_URL: deps.hub.url, ACHORDS_MCP_TICKET: ticket },
+          env: { ACHORDS_HUB_URL: hubUrl, ACHORDS_MCP_TICKET: ticket },
         };
         granted.push(...l.tools);
       }
     }
+    // A container run gets a folder of its own (only folders can be shared with the VM).
+    let shared: string | undefined;
     if (Object.keys(servers).length) {
       const runDir = join(home, "run");
       mkdirSync(runDir, { recursive: true, mode: 0o700 });
-      const file = join(runDir, `mcp-${randomUUID()}.json`);
+      if (box) {
+        shared = join(runDir, `c-${randomUUID()}`);
+        mkdirSync(shared, { mode: 0o700 });
+      }
+      const file = shared ? join(shared, "mcp.json") : join(runDir, `mcp-${randomUUID()}.json`);
       writeFileSync(file, JSON.stringify({ mcpServers: servers }), { mode: 0o600 });
       built.req.mcpConfigPath = file;
       built.req.allowedTools = [...built.req.allowedTools, ...granted];
       hubRun = {
-        file,
+        file: shared ?? file,
         revoke: () => {
           for (const r of revokers) r();
         },
@@ -2151,11 +2233,29 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       built.req.appendSystemPrompt =
         `${built.req.appendSystemPrompt ?? ""}\n\n${PROGRESS_HINT}`.trim();
     }
+    if (box && deps.container) {
+      try {
+        built.req.container = {
+          bin: box.bin,
+          name: `${runContainerPrefix(home)}${randomUUID()}`,
+          image: box.image,
+          mounts: containerMounts(manifest, built.req.cwd, [
+            ...(shared ? [shared, ...deps.container.codeDirs] : []),
+          ]),
+        };
+      } catch (err) {
+        hubRun?.revoke();
+        if (hubRun) rmSync(hubRun.file, { recursive: true, force: true });
+        failFinal((err as Error).message);
+        return;
+      }
+      built.req.appendSystemPrompt = `${built.req.appendSystemPrompt ?? ""}\n\n${CONTAINER_NOTE}`;
+    }
     // API budget used up (Phase 4): the work waits, it does not fail.
     const overBudget = built.req.billing === "api" ? deps.budget?.(built.provider.id) : undefined;
     if (overBudget) {
       hubRun?.revoke();
-      if (hubRun) rmSync(hubRun.file, { force: true });
+      if (hubRun) rmSync(hubRun.file, { recursive: true, force: true });
       defer(db, task.id, WORKER_ID, overBudget, BUDGET_DEFER_MS);
       return;
     }
@@ -2260,7 +2360,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     } finally {
       clearInterval(keepAlive);
       hubRun?.revoke();
-      if (hubRun) rmSync(hubRun.file, { force: true });
+      if (hubRun) rmSync(hubRun.file, { recursive: true, force: true });
     }
   }
 }

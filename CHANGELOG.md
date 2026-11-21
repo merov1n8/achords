@@ -73,6 +73,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Agents with `*` (any website) in their network list run in an Apple container: a small Linux
+  virtual machine that sees only the agent's own folders, not the rest of your Mac (ADR-0051).
+  On by default; the agent form has a "Run in an Apple container" checkbox under the network list
+  with a warning when switched off. Needs Apple's `container` tool (`brew install container`)
+  and, for Claude on the subscription, a token from `claude setup-token` in Settings → Model
+  access → Claude → "Token for container runs". Claude models only for now. The image builds by
+  itself on first use or with `achords container build`; `achords kill` stops running
+  containers too.
 - Run details next to each chat: how many of the chat's agents are working, the tokens and cost
   of its runs (with your daily API budget, if set) and every agent with running, waiting, queued or
   idle. On narrower screens they open from the info button. **Stop run** cancels the chat's queued

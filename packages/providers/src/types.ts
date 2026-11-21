@@ -34,6 +34,11 @@ export interface RunRequest {
    * default "subscription" runs on the CLI's login and never on a stray key.
    */
   billing?: "subscription" | "api";
+  /**
+   * ADR-0051: run the CLI inside an Apple container (Linux VM) instead of on the host. The CLI's
+   * arguments stay identical; only the listed folders exist inside, at the same paths.
+   */
+  container?: ContainerSpec;
   /** Called with the child PID (= its process group id) so it can be recorded for `achords kill`. */
   onSpawn?: (pid: number) => void;
   /** The agent's own checklist changed (done of total, the step in progress). */
@@ -80,4 +85,18 @@ export interface RunResult {
 export interface ModelProvider {
   readonly id: string;
   run(req: RunRequest): Promise<RunResult>;
+}
+
+/** One run's Apple container (ADR-0051). */
+export interface ContainerSpec {
+  /** The `container` binary. */
+  bin: string;
+  /** Unique per run; `container kill <name>` stops it. */
+  name: string;
+  image: string;
+  /** Host folders shared at the same path inside; nothing else of the host is visible. */
+  mounts: { path: string; readonly: boolean }[];
+  cpus?: number;
+  /** e.g. "4G". */
+  memory?: string;
 }

@@ -20,6 +20,8 @@ type AgentDetail = {
   fs: { read: string[]; write: string[] };
   shell?: { allow: string[] };
   network: { allow: string[] };
+  /** Only with "*" in network.allow (ADR-0051). */
+  container?: boolean;
   delegation: { can_delegate_to: string[]; accepts_from: string[] };
   budget?: { per_run_usd: number };
   doc: string;
@@ -131,6 +133,7 @@ function AgentForm({
     read: "",
     shell: "",
     network: "",
+    container: true,
     acceptsFrom: [] as string[],
     delegatesTo: [] as string[],
     budget: "",
@@ -160,6 +163,7 @@ function AgentForm({
           read: d.fs.read.join("\n"),
           shell: d.shell?.allow.join("\n") ?? "",
           network: d.network.allow.join("\n"),
+          container: d.container ?? true,
           acceptsFrom: d.delegation.accepts_from,
           delegatesTo: d.delegation.can_delegate_to,
           budget: d.budget ? String(d.budget.per_run_usd) : "",
@@ -211,6 +215,7 @@ function AgentForm({
         fs: { write: lines(f.write), read: lines(f.read) },
         ...(f.tools.includes("Bash") ? { shell: { allow: lines(f.shell) } } : {}),
         network: { allow: lines(f.network) },
+        ...(lines(f.network).includes("*") ? { container: f.container } : {}),
         delegation: { can_delegate_to: f.delegatesTo, accepts_from: f.acceptsFrom },
         ...(Number(f.budget) > 0 ? { budget: { per_run_usd: Number(f.budget) } } : {}),
       };
@@ -401,6 +406,20 @@ function AgentForm({
         {f.tools.includes("Bash") &&
           area("shell", t("agents.form.shell"), t("agents.form.shellHelp"))}
         {area("network", t("agents.form.network"), t("agents.form.networkHelp"))}
+        {lines(f.network).includes("*") && (
+          <div class="field">
+            <label class="row">
+              <input
+                type="checkbox"
+                checked={f.container}
+                onChange={() => set({ container: !f.container })}
+              />
+              {t("agents.form.container")}
+            </label>
+            <span class="muted small">{t("agents.form.containerHelp")}</span>
+            {!f.container && <p class="error">{t("agents.form.containerOff")}</p>}
+          </div>
+        )}
         <div class="field">
           {t("agents.form.acceptsFrom")}
           <div class="row wrap">

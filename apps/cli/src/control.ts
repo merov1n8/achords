@@ -23,6 +23,8 @@ const HEARTBEAT_KEY = "gateway.heartbeat";
 export interface ControlContext {
   paths: HomePaths;
   service: ServiceManager;
+  /** Kills this install's agent-run containers (ADR-0051); returns their names. */
+  killContainers?: () => string[];
 }
 
 function withDb<T>(paths: HomePaths, fn: (db: ReturnType<typeof openCoreDatabase>) => T): T {
@@ -137,7 +139,7 @@ export interface KillReport {
  * Emergency stop. Every step runs even if an earlier one fails, and nothing depends on a
  * responsive gateway: the marker blocks restarts, the service is unloaded, then processes die.
  */
-export function kill({ paths, service }: ControlContext): KillReport {
+export function kill({ paths, service, killContainers }: ControlContext): KillReport {
   const report: KillReport = { steps: [], errors: [] };
   const step = (name: string, fn: () => string | undefined) => {
     try {
@@ -167,6 +169,13 @@ export function kill({ paths, service }: ControlContext): KillReport {
       return undefined;
     }),
   );
+  // Killing a run's `container run` client leaves its VM running: stop those by name.
+  if (killContainers) {
+    step("containers", () => {
+      const names = killContainers();
+      return names.length ? t("cli.kill.containers", { names: names.join(", ") }) : undefined;
+    });
+  }
   return report;
 }
 
