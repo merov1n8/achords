@@ -9,6 +9,8 @@ export interface Thread {
   archived: boolean;
   /** A schedule reports here. */
   scheduled: boolean;
+  /** Name of the agent that wrote last; null before any reply. */
+  lastAgent: string | null;
   updatedAt: number;
 }
 

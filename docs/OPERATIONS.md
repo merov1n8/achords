@@ -76,6 +76,23 @@ Web: Settings → Integrations → **Add sign-in** → Meta, paste the long-live
 (stored as `meta-access-token`, never shown again). Terminal: `pnpm achords secret set
 meta-access-token`. **Revoke** on the row deletes the token.
 
+## Media services (ElevenLabs, Meshy, fal.ai)
+
+Web: Settings → Integrations → **Add sign-in** → the service, paste its API key (never shown
+again). Terminal: `pnpm achords secret set <id>`. Where to get the key:
+
+- ElevenLabs (`elevenlabs-api-key`): elevenlabs.io/app/settings/api-keys → Create API key.
+  Needs `uvx` (uv). Generated audio is saved in the agent's working folder.
+- Meshy (`meshy-api-key`): meshy.ai/settings/api → create an API key. Needs `npx` (Node.js).
+  Downloads go to `meshy_output/` in the agent's working folder.
+- fal.ai (`fal-api-key`): fal.ai/dashboard/keys → Add key; paste the whole `key_id:key_secret`.
+  Nothing to install (hosted server, reached over HTTPS).
+
+Every call that costs credits is a write tool: in review mode (default) it is sent to you in the
+chat with Approve / Reject and runs exactly as shown; with `publish_mode.channels.<id>: auto` in
+the agent's `agent.yaml` it runs right away and is reported in the chat. Use **Test** on the row
+to check the key (a free balance or catalog call). Agents with a shell never get these keys.
+
 ## Apps on this computer (Blender, Unity)
 
 Web: Settings → Integrations → Apps on this Mac → **Add app**: pick the app, check that its
