@@ -13,3 +13,4 @@ export {
   staleImages,
 } from "./container.ts";
 export { detectPlatform, type PlatformInfo, recommendModels } from "./platform.ts";
+export { findTailscaleHost, tailscaleHost } from "./tailscale.ts";

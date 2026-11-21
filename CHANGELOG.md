@@ -75,6 +75,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Web UI from a phone or another computer through Tailscale: the gateway accepts this Mac's
+  Tailscale name (after `tailscale serve --bg 7420`); see OPERATIONS.
 - Blender and the Unity Editor are opened by achords when a run needs them and they are not
   running, and closed again a few minutes after the last task that needs them has finished. Apps
   you opened yourself are never closed. Agents no longer need a shell command to open them, so
