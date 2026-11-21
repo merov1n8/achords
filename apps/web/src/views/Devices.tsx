@@ -1,5 +1,5 @@
 import { LogOut } from "lucide-preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { Confirm } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
@@ -52,6 +52,7 @@ export function Devices({ onLogout }: { onLogout: () => void }) {
         </table>
       </div>
       <p class="muted gap-top">{t("devices.pairHint")}</p>
+      <RemoteAccess />
       {revoking && (
         <Confirm
           title={t("devices.revokeTitle")}
@@ -66,5 +67,60 @@ export function Devices({ onLogout }: { onLogout: () => void }) {
         />
       )}
     </>
+  );
+}
+
+/** The address other devices use (Tailscale); editable because it changes with the machine. */
+function RemoteAccess() {
+  const [host, setHost] = useState("");
+  const [suggested, setSuggested] = useState("");
+  const [status, setStatus] = useState<{ ok: boolean; text: string }>();
+  useEffect(() => {
+    api<{ host: string; suggested: string }>("/api/remote-access")
+      .then((r) => {
+        setHost(r.host);
+        setSuggested(r.suggested);
+      })
+      .catch((err: Error) => setStatus({ ok: false, text: err.message }));
+  }, []);
+  const save = async (e: Event) => {
+    e.preventDefault();
+    try {
+      const r = await api<{ host: string }>("/api/remote-access", {
+        method: "PUT",
+        body: { host },
+      });
+      setHost(r.host);
+      setStatus({
+        ok: true,
+        text: r.host ? t("remote.saved", { url: `https://${r.host}` }) : t("remote.cleared"),
+      });
+    } catch (err) {
+      setStatus({ ok: false, text: (err as Error).message });
+    }
+  };
+  return (
+    <form class="panel gap-top" onSubmit={save}>
+      <h2>{t("remote.title")}</h2>
+      <p class="muted small">{t("remote.help")}</p>
+      <div class="row">
+        <input
+          class="input"
+          placeholder={suggested || "mini.tail1234.ts.net"}
+          value={host}
+          onInput={(e) => setHost(e.currentTarget.value)}
+          aria-label={t("remote.title")}
+        />
+        {suggested && suggested !== host && (
+          <button type="button" class="btn ghost" onClick={() => setHost(suggested)}>
+            {t("remote.useSuggested")}
+          </button>
+        )}
+        <button type="submit" class="btn primary">
+          {t("common.save")}
+        </button>
+      </div>
+      {status && <p class={status.ok ? "muted small" : "error small"}>{status.text}</p>}
+    </form>
   );
 }
