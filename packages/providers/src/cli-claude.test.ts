@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isAlive } from "@achords/core";
@@ -219,11 +219,15 @@ describe("cli-claude adapter", () => {
         },
       });
     const calls = () => join(dir, "container.jsonl");
+    // Nothing recorded yet (the fake has not started) reads as an empty list, so waitFor waits.
     const recorded = () =>
-      readFileSync(calls(), "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l).argv as string[]);
+      existsSync(calls())
+        ? readFileSync(calls(), "utf8")
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((l) => JSON.parse(l).argv as string[])
+        : [];
 
     it("wraps the unchanged CLI command; secrets go in by name, never on argv", async () => {
       const res = await boxed().run(
