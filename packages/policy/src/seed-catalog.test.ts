@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountRefs, loadCatalog, secretRefs } from "./catalog.ts";
+import { accountRefs, integrationStatus, loadCatalog, secretRefs } from "./catalog.ts";
 
 const SEED = new URL("../../../seed/catalog/", import.meta.url).pathname;
 
@@ -9,7 +9,10 @@ describe("shipped integration catalog", () => {
   it("parses and contains the first integrations", () => {
     expect([...catalog.keys()].sort()).toEqual([
       "blender",
+      "elevenlabs",
+      "fal",
       "ga4",
+      "meshy",
       "meta",
       "search-console",
       "unity",
@@ -19,7 +22,7 @@ describe("shipped integration catalog", () => {
 
   it("pins every ecosystem package to an exact version", () => {
     for (const e of catalog.values()) {
-      if (e.builtin) continue;
+      if (e.builtin || e.url) continue;
       const pkg = e.args.find((a) => /@\d|==\d/.test(a));
       expect(pkg, e.id).toMatch(/(@\d+\.\d+\.\d+|==\d+\.\d+\.\d+)$/);
     }
@@ -66,6 +69,44 @@ describe("shipped integration catalog", () => {
     for (const t of meta?.scope?.free ?? []) {
       expect([...(meta?.tools.read ?? []), ...(meta?.tools.write ?? [])], t).toContain(t);
     }
+  });
+
+  it("offers the media services as shared sign-ins with a key field (ADR-0048)", () => {
+    const status = integrationStatus(
+      catalog,
+      [],
+      [],
+      () => false,
+      () => true,
+    );
+    const media = status.filter((s) => ["elevenlabs", "meshy", "fal"].includes(s.id));
+    expect(media.map((s) => [s.id, s.kind, s.missingSecrets])).toEqual([
+      ["elevenlabs", "account", ["elevenlabs-api-key"]],
+      ["fal", "account", ["fal-api-key"]],
+      ["meshy", "account", ["meshy-api-key"]],
+    ]);
+    // fal is remote: nothing to install, its key goes into the Authorization header.
+    const fal = catalog.get("fal");
+    expect(fal?.url).toBe("https://mcp.fal.ai/mcp");
+    expect(fal?.authorization).toEqual({ scheme: "Key", secret: "vault:fal-api-key" });
+    expect(media.find((s) => s.id === "fal")?.command).toBeUndefined();
+    expect(catalog.get("elevenlabs")?.env.ELEVENLABS_MCP_BASE_PATH).toBe("{workdir}");
+  });
+
+  it("makes every paid media tool a write tool and leaves out calls and agents", () => {
+    const write = (id: string) => catalog.get(id)?.tools.write ?? [];
+    const all = (id: string) => [...(catalog.get(id)?.tools.read ?? []), ...write(id)];
+    expect(write("elevenlabs")).toEqual(
+      expect.arrayContaining(["text_to_speech", "voice_clone", "compose_music", "speech_to_text"]),
+    );
+    for (const t of ["make_outbound_call", "list_phone_numbers", "create_agent", "play_audio"]) {
+      expect(all("elevenlabs")).not.toContain(t);
+    }
+    expect(write("meshy")).toEqual(
+      expect.arrayContaining(["meshy_text_to_3d", "meshy_image_to_3d", "meshy_rig"]),
+    );
+    expect(all("meshy")).not.toContain("meshy_send_to_slicer");
+    expect(write("fal")).toEqual(expect.arrayContaining(["run_model", "submit_job"]));
   });
 
   it("connection tests only read", () => {

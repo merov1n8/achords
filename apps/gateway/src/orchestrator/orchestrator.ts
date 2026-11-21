@@ -381,6 +381,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const { db, home } = deps;
   const redact = deps.redact ?? ((s: string) => s);
   const agentsDir = join(home, "agents");
+  /** A run's working folder: its first own folder (writable whenever it has write folders). */
+  const workFolder = (m: Manifest) =>
+    [...m.fs.write, ...m.fs.read].map(expandHome)[0] ?? join(agentsDir, m.id, "work");
   const skills = createSkillFlow({ db, dir: join(home, "skills"), redact });
 
   // Re-read on every use so manifest edits apply without a restart; mirrored into the DB
@@ -459,7 +462,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const pay = deps.billing?.(model.slice(0, slash));
 
     const roots = [...m.fs.write, ...m.fs.read].map(expandHome);
-    const cwd = roots[0] ?? join(agentsDir, m.id, "work");
+    const cwd = workFolder(m);
     mkdirSync(cwd, { recursive: true, mode: 0o700 });
     // Only what the manifest grants, scoped: files in its own folders, fetches to its allowed
     // hosts, allow-listed shell commands. Everything else is denied in print mode.
@@ -587,7 +590,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     project: Project | undefined,
     actor = `agent:${agentId}/mcp:${entry.id}`,
     skipped: string[] = [],
+    // The run's working folder: the server's cwd and `{workdir}` (e.g. where generated files
+    // go); outside a run `{workdir}` is the owner's own work folder.
+    runFolder?: string,
   ): McpLaunch => {
+    const workdir = runFolder ?? join(home, "work");
     if (!deps.integrations) throw new Error("integrations are not available");
     const { resolveSecret, builtins } = deps.integrations;
     // Several sites, each with its own credentials: only those whose ids are all set.
@@ -635,7 +642,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               throw new Error(`integration ${entry.id} needs the project's ${account} account`);
             return [key, v];
           }
-          if (!value.startsWith("vault:")) return [key, value];
+          if (!value.startsWith("vault:")) return [key, value.replaceAll("{workdir}", workdir)];
           if (value.includes("{project}") && !project) {
             throw new Error(`integration ${entry.id} needs a project`);
           }
@@ -648,14 +655,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     );
     const builtin = entry.builtin ? builtins[entry.builtin] : undefined;
     if (entry.builtin && !builtin) throw new Error(`no builtin server ${entry.builtin}`);
+    const auth = entry.authorization;
     return {
       // Builtin servers run on the gateway's own Node, like the hub server.
-      command: builtin ? process.execPath : (entry.command as string),
+      command: builtin ? process.execPath : (entry.command ?? ""),
       args: builtin
         ? ["--disable-warning=ExperimentalWarning", builtin, ...entry.args]
         : entry.args,
       env: { ...resolve(entry.env), ...siteEnv },
       files,
+      // Owner-approved calls run where the agent's own calls would (e.g. Meshy downloads).
+      ...(runFolder ? { cwd: runFolder } : {}),
+      // Remote server (ADR-0050): the launcher talks to it over HTTPS instead of starting one.
+      ...(entry.url
+        ? {
+            remote: {
+              url: entry.url,
+              headers: auth
+                ? { authorization: `${auth.scheme} ${resolve({ k: auth.secret }).k}` }
+                : {},
+            },
+          }
+        : {}),
       ...(entry.scope
         ? {
             scope: {
@@ -985,6 +1006,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             req.agentId,
             project,
             `owner-approved:agent:${req.agentId}/mcp:${req.integration}`,
+            [],
+            // The same folder as the run that asked (own accounts are not a project folder).
+            workFolder(withProject(manifest, task?.project ? project : undefined)),
           );
         } catch (err) {
           return { ok: false, message: (err as Error).message };
@@ -1904,7 +1928,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             const skipped: string[] = [];
             ready.push({
               entry,
-              launch: buildLaunch(entry, agentId, accounts, undefined, skipped),
+              launch: buildLaunch(
+                entry,
+                agentId,
+                accounts,
+                undefined,
+                skipped,
+                workFolder(runManifest),
+              ),
             });
             if (skipped.length)
               unavailable.push(`${entry.id} on ${skipped.join(", ")} (no credentials yet)`);
