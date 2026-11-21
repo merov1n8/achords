@@ -62,13 +62,16 @@ import {
   loadOwnAccounts,
   loadProjects,
   OWN,
+  ownerSecrets,
   saveOwnAccounts,
+  secretRefs,
+  setIntegrationAgents,
   siteStatus,
   updateManifestModels,
   updateManifestName,
   updateProject,
 } from "@achords/policy";
-import type { Vault } from "@achords/secrets";
+import { createGoogleSignins, parseClientJson, type Vault } from "@achords/secrets";
 import type { McpTickets, RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { Transcriber } from "../voice/transcribe.ts";
@@ -152,6 +155,8 @@ export interface ApiDeps {
   localModels?: () => Promise<string[]>;
   /** OpenAI models the codex CLI offers (ADR-0040), as `cli-codex/<slug>`. */
   codexModels?: () => string[];
+  /** Google endpoints (tests point them at a fake). */
+  google?: { authUrl?: string; tokenUrl?: string };
   /** Built web UI (apps/web/dist). Non-API GETs are served from here. */
   staticDir?: string;
   log?: (msg: string) => void;
@@ -257,6 +262,8 @@ const strList = (v: unknown, field: string): string[] => {
   return v as string[];
 };
 
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 export function createApiHandler(deps: ApiDeps) {
   const { db } = deps;
   const log = deps.log ?? (() => {});
@@ -264,6 +271,12 @@ export function createApiHandler(deps: ApiDeps) {
     if (!deps.vault) throw new HttpError(503, "vault not available");
     return deps.vault();
   };
+  // Web Google sign-in (ADR-0048): same OAuth flow as `achords connect google`.
+  const google = createGoogleSignins({
+    store: (id, value) => vault().set(id, value, "web:google-signin"),
+    ...deps.google,
+  });
+  const GOOGLE_CALLBACK = "/api/oauth/google/callback";
 
   const routes: [string, RegExp, Handler][] = [
     [
@@ -809,6 +822,81 @@ export function createApiHandler(deps: ApiDeps) {
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
     ["GET", /^\/api\/integrations$/, () => deps.integrations?.() ?? []],
+    // Revoke a shared sign-in: its owner-wide vault ids (Google: shared by GA4 and Search Console).
+    [
+      "DELETE",
+      /^\/api\/integrations\/([a-z0-9][a-z0-9-]{0,63})\/secrets$/,
+      ({ params, session }) => {
+        const ids = ownerSecrets(catalogEntry(params[0] as string));
+        if (!ids.length) throw new HttpError(404, "this integration has no shared sign-in");
+        const deleted = ids.filter((id) => vault().delete(id, `web:${session.deviceName}`));
+        log(`integrations: owner revoked ${params[0]} (${deleted.length} secret(s) deleted)`);
+        return { deleted };
+      },
+    ],
+    // Apps on this computer: which agents may use one (their agent.yaml `mcp`).
+    [
+      "PUT",
+      /^\/api\/integrations\/([a-z0-9][a-z0-9-]{0,63})\/agents$/,
+      async ({ params, body }) => {
+        const entry = catalogEntry(params[0] as string);
+        // Only credential-free entries: those are safe next to a shell (ADR-0034).
+        if (secretRefs(entry).length) {
+          throw new HttpError(400, "only apps without credentials can be given to agents here");
+        }
+        if (!deps.agentsDir) throw new HttpError(404, "no agents folder");
+        const agents = strList((await body()).agents, "agents");
+        const changed = attempt(() =>
+          setIntegrationAgents(deps.agentsDir as string, entry.id, agents),
+        );
+        log(
+          `integrations: owner set the agents of ${entry.id} (changed: ${changed.join(", ") || "none"})`,
+        );
+        return { agents, changed };
+      },
+    ],
+    // Google sign-in from the web (ADR-0048). Google sends the browser back to the loopback
+    // callback below; from another device that address fails, so the page lets the owner paste
+    // it here instead.
+    [
+      "POST",
+      /^\/api\/oauth\/google\/start$/,
+      async ({ req, session, body }) => {
+        const text = str((await body()).client, "client", 20_000);
+        const client = attempt(() => parseClientJson(text));
+        const redirect = `http://127.0.0.1:${req.socket.localPort}${GOOGLE_CALLBACK}`;
+        return google.start(client, redirect, session.id);
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/oauth\/google\/status\/([\w-]{1,64})$/,
+      ({ params, session }) => {
+        const out = google.status(params[0] as string, session.id);
+        if (!out) throw new HttpError(404, "this sign-in is unknown or expired; start it again");
+        return out;
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/oauth\/google\/finish$/,
+      async ({ session, body }) => {
+        let u: URL;
+        try {
+          u = new URL(str((await body()).url, "url", 8000).trim());
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(400, "that is not an address; copy the whole address bar");
+        }
+        try {
+          await google.finish(u.searchParams, { owner: session.id });
+        } catch (err) {
+          throw new HttpError(400, (err as Error).message);
+        }
+        log("integrations: Google connected from the web (pasted address)");
+        return { ok: true };
+      },
+    ],
     // Model access (Phase 4): subscription or API key per provider; keys go through the vault.
     [
       "GET",
@@ -1159,6 +1247,11 @@ export function createApiHandler(deps: ApiDeps) {
       ]),
     );
   };
+  const catalogEntry = (id: string): CatalogEntry => {
+    const entry = deps.catalog?.().get(id);
+    if (!entry) throw new HttpError(404, `no integration ${id}`);
+    return entry;
+  };
   const siteEntry = (id: string): CatalogEntry => {
     const entry = deps.catalog?.().get(id);
     if (!entry?.sites) throw new HttpError(404, `integration ${id} has no sites`);
@@ -1235,6 +1328,29 @@ export function createApiHandler(deps: ApiDeps) {
       if (!path.startsWith("/api/")) {
         if (mutating || !deps.staticDir) throw new HttpError(404, "not found");
         serveStatic(deps.staticDir, path, res);
+        return;
+      }
+      // Google's redirect after the sign-in: a cross-site navigation, so the SameSite=Strict
+      // cookie is not sent. The random single-use state is the proof; the device that started
+      // it must still be paired.
+      if (method === "GET" && path === GOOGLE_CALLBACK) {
+        const params = new URL(req.url ?? "/", "http://x").searchParams;
+        let msg: string;
+        let status = 200;
+        try {
+          await google.finish(params, {
+            accept: (owner) => listSessions(db).some((d) => d.id === owner),
+          });
+          msg = t("oauth.page.done");
+          log("integrations: Google connected from the web");
+        } catch (err) {
+          status = 400;
+          msg = t("oauth.page.failed", { reason: (err as Error).message });
+        }
+        res.writeHead(status, { ...securityHeaders, "content-type": "text/html; charset=utf-8" });
+        res.end(
+          `<!doctype html><meta charset="utf-8"><title>achords</title><p>${escapeHtml(msg)}</p>`,
+        );
         return;
       }
       // The integration launcher trades its one-time ticket for the server's environment.

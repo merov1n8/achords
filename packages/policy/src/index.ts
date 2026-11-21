@@ -14,6 +14,7 @@ export {
   type IntegrationStatus,
   integrationStatus,
   loadCatalog,
+  ownerSecrets,
   type PublishMode,
   publishMode,
   type SiteStatus,
@@ -33,6 +34,7 @@ export {
   manifestChanges,
   type NewAgent,
   patchManifestText,
+  setIntegrationAgents,
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";

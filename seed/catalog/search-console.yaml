@@ -14,6 +14,8 @@ files:
   GSC_OAUTH_TOKEN_FILE:
     refresh_token: "vault:google-refresh-token"
     scope: https://www.googleapis.com/auth/webmasters
+# Same Google sign-in as GA4.
+oauth: google
 hosts: [searchconsole.googleapis.com, www.googleapis.com, oauth2.googleapis.com]
 tools:
   read:

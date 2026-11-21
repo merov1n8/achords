@@ -1,7 +1,8 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { GOOGLE_SCOPES } from "@achords/secrets";
 import { afterEach, describe, expect, it } from "vitest";
-import { connectGoogle, GOOGLE_SCOPES, parseClientJson } from "./connect-google.ts";
+import { connectGoogle } from "./connect-google.ts";
 
 const client = { clientId: "cid.apps", clientSecret: "csecret", projectId: "proj-1" };
 let tokenServer: Server | undefined;
@@ -33,19 +34,6 @@ function browser(params: (auth: URL) => Record<string, string>) {
     void fetch(back);
   };
 }
-
-describe("parseClientJson", () => {
-  it("reads a Desktop-app client", () => {
-    const j = JSON.stringify({
-      installed: { client_id: "a", client_secret: "b", project_id: "p" },
-    });
-    expect(parseClientJson(j)).toEqual({ clientId: "a", clientSecret: "b", projectId: "p" });
-  });
-  it("refuses a web client and junk", () => {
-    expect(() => parseClientJson('{"web":{}}')).toThrow(/Desktop app/);
-    expect(() => parseClientJson("nope")).toThrow(/JSON/);
-  });
-});
 
 describe("connectGoogle", () => {
   it("runs PKCE on loopback and stores the four secrets", async () => {
@@ -92,7 +80,7 @@ describe("connectGoogle", () => {
         print: () => {},
         tokenUrl: tok.url,
       }),
-    ).rejects.toThrow(/state mismatch/);
+    ).rejects.toThrow(/unknown or expired/);
     expect(stored).toEqual([]);
     expect(tok.seen).toHaveLength(0);
   });

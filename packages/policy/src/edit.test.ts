@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import {
   createAgentFiles,
   manifestChanges,
   patchManifestText,
+  setIntegrationAgents,
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";
@@ -162,5 +163,49 @@ network:
     expect(() => patchManifestText(BASE, { defaultModel: "cli-claude/haiku" })).toThrow(
       /must be one of models.allowed/,
     );
+  });
+});
+
+describe("setIntegrationAgents", () => {
+  let dir: string;
+  const agent = (id: string, extra = "") =>
+    `# ${id} notes\nid: ${id}\nname: ${id}\nrole: r\nworkspace: w\nmodels:\n  default: cli-claude/sonnet\n${extra}`;
+  const read = (id: string) => readFileSync(join(dir, id, "agent.yaml"), "utf8");
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "achords-agents-"));
+    for (const [id, extra] of [
+      ["boss", ""],
+      ["artist", "mcp: [blender, unity] # 3D\n"],
+      ["dev", "mcp: [unity]\n"],
+    ] as const) {
+      mkdirSync(join(dir, id));
+      writeFileSync(join(dir, id, "agent.yaml"), agent(id, extra));
+    }
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("grants to the chosen agents and takes it from the others, comments kept", () => {
+    expect(setIntegrationAgents(dir, "blender", ["boss", "dev"]).sort()).toEqual([
+      "artist",
+      "boss",
+      "dev",
+    ]);
+    expect(loadManifest(join(dir, "boss", "agent.yaml")).mcp).toEqual(["blender"]);
+    expect(loadManifest(join(dir, "dev", "agent.yaml")).mcp).toEqual(["unity", "blender"]);
+    expect(read("artist")).toContain("mcp: [unity] # 3D");
+    expect(read("artist")).toContain("# artist notes");
+    // Nothing to change: no file is touched.
+    expect(setIntegrationAgents(dir, "blender", ["boss", "dev"])).toEqual([]);
+    // Remove from everyone.
+    setIntegrationAgents(dir, "unity", []);
+    expect(loadManifest(join(dir, "dev", "agent.yaml")).mcp).toEqual(["blender"]);
+  });
+
+  it("writes nothing when an agent is unknown or one manifest is invalid", () => {
+    expect(() => setIntegrationAgents(dir, "blender", ["ghost"])).toThrow(/no agent ghost/);
+    writeFileSync(join(dir, "dev", "agent.yaml"), agent("dev", "mcp: [unity]\nbogus: 1\n"));
+    const before = ["boss", "artist", "dev"].map(read);
+    expect(() => setIntegrationAgents(dir, "blender", ["boss", "dev"])).toThrow(/bogus/);
+    expect(["boss", "artist", "dev"].map(read)).toEqual(before);
   });
 });

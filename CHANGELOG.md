@@ -58,6 +58,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Settings → Integrations can set up everything that needed the terminal before: **Add sign-in**
+  connects Google (choose the Desktop-app client JSON, then sign in in a new tab; from a phone or
+  another computer paste the address of the page Google ends on) or takes a token for Meta and
+  other shared services; **Revoke** removes a sign-in after a confirmation. **Add app** chooses
+  which agents may use Blender or Unity and shows whether the program is installed; **Edit** and
+  **Remove** on each row. The CLI commands keep working.
+
 - Kanban: opens on "All" workspaces with the assignee on every card; all columns fit the screen.
   A click (or Enter) opens a card: edit title and description, move it, keep sub-items and your
   own comments (the agent sees them next time), or delete it after a confirmation.

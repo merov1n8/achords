@@ -75,7 +75,13 @@ export interface IntegrationStatus {
   usedBy: string[];
   command?: string;
   commandFound: boolean;
+  /** Owner-wide vault ids (never values). */
+  secrets: string[];
   missingSecrets: string[];
+  /** Signed in from the web with this OAuth flow (ADR-0048). */
+  oauth?: "google";
+  /** What to install when the program is not on the PATH. */
+  install?: string;
   perProject: boolean;
   projectsReady: string[];
   scoped: boolean;
