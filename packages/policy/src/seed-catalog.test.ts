@@ -35,10 +35,16 @@ describe("shipped integration catalog", () => {
         e.id,
       ).toEqual([]);
     }
+    // Several sites per project, each with its own credentials (ADR-0047).
     expect(secretRefs(catalog.get("wordpress") as never, "acme")).toEqual([
-      "vault:wordpress-user-acme",
-      "vault:wordpress-password-acme",
+      "vault:wordpress-user-acme-{site}",
+      "vault:wordpress-password-acme-{site}",
     ]);
+    expect(catalog.get("wordpress")?.sites?.first).toEqual({
+      user: "vault:wordpress-user-{project}",
+      password: "vault:wordpress-password-{project}",
+    });
+    expect(catalog.get("wordpress")?.scope).toMatchObject({ args: ["site"], optional: true });
     // The site address is not a secret: it comes from the project's accounts.
     expect(accountRefs(catalog.get("wordpress") as never)).toEqual(["wordpress"]);
     // Local apps carry no credentials, so game-dev agents with a shell may use them.

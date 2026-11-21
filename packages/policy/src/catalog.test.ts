@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   allowedIntegrationTools,
+  type CatalogEntry,
   grantedIntegrations,
   integrationStatus,
   loadCatalog,
@@ -11,6 +12,9 @@ import {
   scopeRefusal,
   scopeTargets,
   secretRefs,
+  siteCredentials,
+  siteSlug,
+  siteStatus,
 } from "./catalog.ts";
 import { parseManifest } from "./manifest.ts";
 import { WEB_DEV } from "./test-fixtures.ts";
@@ -223,6 +227,26 @@ describe("integration status (doctor, web)", () => {
     ).find((s) => s.id === "site");
     expect(withSite).toMatchObject({ perProject: true, projectsReady: ["acme"] });
   });
+
+  it("groups entries for the web page: shared accounts, per client, local apps", () => {
+    const { seed, owner } = dirs();
+    writeFileSync(join(owner, "wordpress.yaml"), WORDPRESS);
+    writeFileSync(
+      join(owner, "ga.yaml"),
+      'id: ga\nname: GA\ncommand: uvx\nenv:\n  T: "vault:google-refresh-token"\n',
+    );
+    writeFileSync(join(owner, "blender.yaml"), "id: blender\nname: B\ncommand: uvx\n");
+    const kinds = Object.fromEntries(
+      integrationStatus(
+        loadCatalog(seed, owner),
+        [],
+        [],
+        () => true,
+        () => true,
+      ).map((s) => [s.id, s.kind]),
+    );
+    expect(kinds).toMatchObject({ ga: "account", wordpress: "client", blender: "local" });
+  });
 });
 
 describe("publish mode (ADR-0037)", () => {
@@ -255,5 +279,128 @@ describe("scope targets from account channels", () => {
     expect(scopeTargets(c.get("meta") as never, accounts)).toEqual(["1", "2", "@handle"]);
     expect(scopeTargets(c.get("ga4") as never, accounts)).toEqual(["9"]);
     expect(scopeTargets(c.get("ga4") as never, undefined)).toEqual([]);
+  });
+});
+
+describe("several sites per project, each with its own credentials", () => {
+  const SITES = `
+id: wordpress
+name: WordPress
+builtin: wordpress
+sites:
+  channel: wordpress
+  env: WP_SITES
+  secrets:
+    user: "vault:wordpress-user-{project}-{site}"
+    password: "vault:wordpress-password-{project}-{site}"
+  first:
+    user: "vault:wordpress-user-{project}"
+    password: "vault:wordpress-password-{project}"
+tools:
+  read: [site_info]
+scope:
+  args: [site]
+  optional: true
+`;
+  const load = () => {
+    const { seed, owner } = dirs();
+    writeFileSync(join(owner, "wordpress.yaml"), SITES);
+    return loadCatalog(seed, owner).get("wordpress") as CatalogEntry;
+  };
+
+  it("derives a deterministic vault id per site from its address", () => {
+    expect(siteSlug("https://www.Acme.example/")).toBe("www-acme-example");
+    expect(siteSlug("https://acme.example/blog")).toBe("acme-example-blog");
+    expect(siteSlug("http://localhost:8080")).toBe("localhost-8080");
+    const entry = load();
+    expect(siteCredentials(entry, "acme", "https://acme.example", 1)).toEqual([
+      {
+        user: "wordpress-user-acme-acme-example",
+        password: "wordpress-password-acme-acme-example",
+      },
+    ]);
+    // The first site may still use the ids from before several sites.
+    expect(siteCredentials(entry, "acme", "https://acme.example", 0)[1]).toEqual({
+      user: "wordpress-user-acme",
+      password: "wordpress-password-acme",
+    });
+    // Long addresses stay within the vault's 64 characters, still unique per site.
+    const long = siteCredentials(entry, "acme", `https://${"x".repeat(80)}.example`, 1)[0];
+    expect(long?.password).toMatch(/^wordpress-password-acme-x+-[0-9a-f]{8}$/);
+    expect(long?.password?.length).toBe(64);
+    // Per-site ids count as credentials: the shell and open-web rules see them.
+    expect(secretRefs(entry, "acme")).toEqual([
+      "vault:wordpress-user-acme-{site}",
+      "vault:wordpress-password-acme-{site}",
+    ]);
+  });
+
+  it("reports per site whether its credentials are set, never values", () => {
+    const entry = load();
+    const set = new Set([
+      "wordpress-user-acme",
+      "wordpress-password-acme",
+      "wordpress-user-acme-b-example",
+    ]);
+    const urls = ["https://a.example", "https://b.example"];
+    expect(siteStatus(entry, "acme", urls, (id) => set.has(id))).toEqual([
+      {
+        url: "https://a.example",
+        secrets: {
+          user: "wordpress-user-acme-a-example",
+          password: "wordpress-password-acme-a-example",
+        },
+        missing: [],
+        legacy: true,
+        ready: true,
+      },
+      {
+        url: "https://b.example",
+        secrets: {
+          user: "wordpress-user-acme-b-example",
+          password: "wordpress-password-acme-b-example",
+        },
+        missing: ["wordpress-password-acme-b-example"],
+        legacy: false,
+        ready: false,
+      },
+    ]);
+  });
+
+  it("counts a project ready when one of its sites has credentials, and lists the others", () => {
+    const { seed, owner } = dirs();
+    writeFileSync(join(owner, "wordpress.yaml"), SITES);
+    const status = integrationStatus(
+      loadCatalog(seed, owner),
+      [],
+      [
+        { slug: "acme", integrations: { wordpress: ["https://a.example", "https://b.example"] } },
+        { slug: "beta", integrations: {} },
+      ],
+      (id) => id.endsWith("-acme-a-example"),
+      () => true,
+    ).find((s) => s.id === "wordpress");
+    expect(status).toMatchObject({
+      perProject: true,
+      missingSecrets: [],
+      projectsReady: ["acme"],
+      ready: true,
+      sites: [
+        { project: "acme", url: "https://a.example", ready: true, missing: [] },
+        {
+          project: "acme",
+          url: "https://b.example",
+          ready: false,
+          missing: ["wordpress-user-acme-b-example", "wordpress-password-acme-b-example"],
+        },
+      ],
+    });
+  });
+
+  it("lets an optional scope argument be left out", () => {
+    const one = { args: ["site"], free: [], allowed: ["https://a.example"], optional: true };
+    expect(scopeRefusal(one, "site_info", {})).toBeUndefined();
+    expect(scopeRefusal(one, "site_info", { site: "https://b.example" })).toMatch(/not part/);
+    expect(scopeRefusal({ ...one, optional: false }, "site_info", {})).toMatch(/not limited/);
   });
 });

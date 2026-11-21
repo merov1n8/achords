@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Auto-update stopped at "pnpm install" (an undecided build-script setting that pnpm 12 treats as
+  an error) and then retried and notified every few seconds. The setting is decided, and a failed
+  update is now tried once per commit (again with "Check now" or when a newer commit lands); the
+  failing step's output goes to the gateway log.
 - A missing account or credential for one integration no longer fails the whole task: that integration is left out of the run and the agent is told why (e.g. social posting to Facebook while your own WordPress address is not set).
 - The live progress bar no longer slides over the chat box while an agent is working.
 - WordPress links were shown as [REDACTED]: the site address is not a secret, so it now comes from the project's accounts (channel `wordpress`) instead of the vault.
@@ -29,6 +33,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Settings → Integrations is grouped: shared sign-ins (Google, Meta) first, then your own pages and
+  sites, then per-client logins and the apps on this Mac. Projects and the vault use the same
+  pattern: a table, Add at the top right, add and edit in a modal. WordPress sites are managed in
+  one place (Projects → Edit, or your own accounts), no longer also as an account row. Adding a
+  secret offers what the integrations still miss.
 - Web UI redesign: Geist fonts, new design tokens with three light and three dark backgrounds and
   four accents per mode (Settings → Appearance), a sidebar that collapses to an icon rail, the
   new achords mark and favicon, and summary boxes on the Usage page.
@@ -50,6 +59,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   A click (or Enter) opens a card: edit title and description, move it, keep sub-items and your
   own comments (the agent sees them next time), or delete it after a confirmation.
 - Kanban cards can be edited and deleted (gateway API; the web view follows): change a card's title and description, keep a checklist on it and leave your own comments. The agent working on the card sees the checklist and comments. Deleting a card removes it with all its steps; a card that is running is not deleted (stop it first or wait until it finishes).
+- Several WordPress sites per client (or for your own accounts): list every site address in the project, and give each its own WordPress user and application password in the vault (`wordpress-user-<project>-<site>`, `wordpress-password-<project>-<site>`). Agents name the site they work on; with one site they need not. A site without credentials is left out and the agent is told; the others keep working. Existing single-site projects keep their old credentials. The connection test checks every site and says which still need credentials.
 - Spend: the Usage page shows today's and this month's cost by provider, agent or project, with API money apart from subscription estimates. Settings → Model access sets a daily and monthly API budget per provider: a note at 80%, and at 100% new API work waits until the next day or month (or until you raise it). Models without a reported cost are priced from ~/.achords/pricing.yaml.
 - Google Gemini (first stage, not tried live yet): agents can run on Gemini models through the official gemini CLI (`cli-gemini/<model>`), on your Google login or an API key (Settings → Model access). For now Gemini runs edit only their own folders, run no shell commands and get no achords tools or integrations.
 - Model access (Settings): Claude and OpenAI can each run on your subscription or on an API key; the key is kept in the vault and given only to that provider's runs, and switching back needs no new sign-in. Not yet tried with real API keys.

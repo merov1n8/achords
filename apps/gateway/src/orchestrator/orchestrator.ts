@@ -96,6 +96,7 @@ import {
   publishMode,
   scopeTargets,
   secretRefs,
+  siteCredentials,
   type Workflow,
 } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/providers";
@@ -537,15 +538,53 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     (task.assigneeAgentId ? agents().get(task.assigneeAgentId)?.workspace : undefined) ?? "shared";
   const pendingKey = (taskId: string) => `pending_move:${taskId}`;
   const accessKey = (taskId: string) => `pending_access:${taskId}`;
-  /** Server command and resolved environment of one integration for one agent and project. */
+  /**
+   * Server command and resolved environment of one integration for one agent and project.
+   * Sites without credentials (ADR-0047) are left out and pushed to `skipped`.
+   */
   const buildLaunch = (
     entry: CatalogEntry,
     agentId: string,
     project: Project | undefined,
     actor = `agent:${agentId}/mcp:${entry.id}`,
+    skipped: string[] = [],
   ): McpLaunch => {
     if (!deps.integrations) throw new Error("integrations are not available");
     const { resolveSecret, builtins } = deps.integrations;
+    // Several sites, each with its own credentials: only those whose ids are all set.
+    let siteEnv: Record<string, string> = {};
+    let siteUrls: string[] | undefined;
+    if (entry.sites) {
+      const urls = project?.integrations[entry.sites.channel] ?? [];
+      if (!project || !urls.length) {
+        throw new Error(
+          `integration ${entry.id} needs the project's ${entry.sites.channel} account`,
+        );
+      }
+      const tryIds = (ids: Record<string, string>) => {
+        try {
+          return Object.fromEntries(
+            Object.entries(ids).map(([field, id]) => [field, resolveSecret(`vault:${id}`, actor)]),
+          );
+        } catch (err) {
+          if (/is not set/.test((err as Error).message)) return undefined;
+          throw err;
+        }
+      };
+      const found = urls.flatMap((url, i) => {
+        for (const ids of siteCredentials(entry, project.slug, url, i)) {
+          const fields = tryIds(ids);
+          if (fields) return [{ url, ...fields }];
+        }
+        skipped.push(url);
+        return [];
+      });
+      if (!found.length) {
+        throw new Error(`integration ${entry.id} has no credentials yet for ${urls.join(", ")}`);
+      }
+      siteEnv = { [entry.sites.env]: JSON.stringify(found) };
+      siteUrls = found.map((s) => s.url);
+    }
     const resolve = (fields: Record<string, string>) =>
       Object.fromEntries(
         Object.entries(fields).map(([key, value]) => {
@@ -576,7 +615,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       args: builtin
         ? ["--disable-warning=ExperimentalWarning", builtin, ...entry.args]
         : entry.args,
-      env: resolve(entry.env),
+      env: { ...resolve(entry.env), ...siteEnv },
       files,
       ...(entry.scope
         ? {
@@ -584,7 +623,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               args: entry.scope.args,
               free: entry.scope.free,
               strip: entry.scope.strip,
-              allowed: scopeTargets(entry, project?.integrations),
+              allowed: siteUrls ?? scopeTargets(entry, project?.integrations),
+              // Left out only when the project has one target at all, so it is never a guess.
+              ...(entry.scope.optional && scopeTargets(entry, project?.integrations).length === 1
+                ? { optional: true }
+                : {}),
             },
           }
         : {}),
@@ -850,7 +893,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         if (pub[1] === "reject") return { ok: true, message: t("action.publishRejected", vars) };
         const entry = deps.integrations?.catalog().get(req.integration);
         const manifest = agents().get(req.agentId);
-        const project = task?.project ? projects().get(task.project) : undefined;
+        // The run's accounts: the client project's, or the owner's own (ADR-0042).
+        const project = task?.project ? projects().get(task.project) : ownProject(home);
         // Checked again at approval: the setup may have changed since the request.
         if (
           !deps.integrations?.call ||
@@ -1158,6 +1202,36 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (!entry.test) return { ok: false, text: "this integration has no connection test" };
       const project = slug && slug !== OWN ? projects().get(slug) : ownProject(home);
       if (!project) return { ok: false, text: `unknown project ${slug}` };
+      const test = entry.test;
+      const call = deps.integrations.call;
+      // Several sites (ADR-0047): one call per site with credentials, one line per site.
+      if (entry.sites) {
+        const skipped: string[] = [];
+        let launch: McpLaunch;
+        try {
+          launch = buildLaunch(entry, "owner", project, `owner:test/mcp:${id}`, skipped);
+        } catch (err) {
+          return { ok: false, text: (err as Error).message.replace(/^integration \S+ /, "It ") };
+        }
+        const urls = project.integrations[entry.sites.channel] ?? [];
+        const lines = await Promise.all(
+          urls.map(async (url, i) => {
+            if (skipped.includes(url)) {
+              const ids = Object.values(siteCredentials(entry, project.slug, url, i)[0] ?? {});
+              return {
+                ok: false,
+                line: `${url}: no credentials yet (set ${ids.join(" and ")} in the vault)`,
+              };
+            }
+            const args = Object.fromEntries(
+              Object.entries(test.args).map(([k, v]) => [k, v.replaceAll("{target}", url)]),
+            );
+            const r = await call(launch, test.tool, args);
+            return { ok: r.ok, line: `${url}: ${plainLine(redact(r.text)).slice(0, 300)}` };
+          }),
+        );
+        return { ok: lines.every((l) => l.ok), text: lines.map((l) => l.line).join("\n") };
+      }
       const target = scopeTargets(entry, project?.integrations)[0];
       const args = Object.fromEntries(
         Object.entries(entry.test.args).map(([k, v]) => [
@@ -1670,7 +1744,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const ready: { entry: CatalogEntry; launch: McpLaunch }[] = [];
         for (const entry of usable) {
           try {
-            ready.push({ entry, launch: buildLaunch(entry, agentId, accounts) });
+            const skipped: string[] = [];
+            ready.push({
+              entry,
+              launch: buildLaunch(entry, agentId, accounts, undefined, skipped),
+            });
+            if (skipped.length)
+              unavailable.push(`${entry.id} on ${skipped.join(", ")} (no credentials yet)`);
           } catch (err) {
             unavailable.push(
               `${entry.id} (${(err as Error).message.replace(/^integration \S+ /, "")})`,

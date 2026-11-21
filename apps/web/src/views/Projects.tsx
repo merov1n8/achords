@@ -1,10 +1,11 @@
 import { Plus, Trash2 } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
+import { Modal } from "../components/Modal.tsx";
+import { Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
-import type { Agent, Project, SecretStatus } from "../types.ts";
-import { SecretInput } from "./SecretInput.tsx";
+import type { Agent, Project } from "../types.ts";
 
 export function Projects() {
   const projects = usePoll(() => api<Project[]>("/api/projects"), 15000);
@@ -94,56 +95,62 @@ function NewProject(props: { workspaces: string[]; onClose: () => void; onCreate
     }
   };
   return (
-    <form class="panel gap-top narrow" onSubmit={submit}>
-      <div class="page-head">
-        <h2>{t("projects.new")}</h2>
-        <button type="button" class="btn ghost" onClick={props.onClose}>
-          {t("common.close")}
-        </button>
-      </div>
-      <label class="field">
-        {t("projects.name")}
-        <input
-          class="input"
-          value={f.name}
-          onInput={(e) => setF({ ...f, name: e.currentTarget.value })}
-        />
-      </label>
-      <label class="field">
-        {t("projects.slug")}
-        <input
-          class="input"
-          value={f.slug}
-          onInput={(e) => setF({ ...f, slug: e.currentTarget.value })}
-        />
-        <span class="muted small">{t("projects.slugHelp")}</span>
-      </label>
-      <label class="field">
-        {t("agents.workspace")}
-        <input
-          class="input"
-          list="project-workspaces"
-          value={f.workspace}
-          onInput={(e) => setF({ ...f, workspace: e.currentTarget.value })}
-        />
-        <datalist id="project-workspaces">
-          {props.workspaces.map((w) => (
-            <option key={w} value={w} />
-          ))}
-        </datalist>
-        <span class="muted small">{t("projects.workspaceHelp")}</span>
-      </label>
-      <button type="submit" class="btn primary">
-        {t("projects.create")}
-      </button>
-      {error && <p class="error">{error}</p>}
-    </form>
+    <Modal
+      title={t("projects.new")}
+      onClose={props.onClose}
+      footer={
+        <>
+          <button type="button" class="btn ghost" onClick={props.onClose}>
+            {t("common.cancel")}
+          </button>
+          <button type="submit" form="new-project" class="btn primary">
+            {t("projects.create")}
+          </button>
+        </>
+      }
+    >
+      <form id="new-project" onSubmit={submit}>
+        <label class="field">
+          {t("projects.name")}
+          <input
+            class="input"
+            value={f.name}
+            onInput={(e) => setF({ ...f, name: e.currentTarget.value })}
+          />
+        </label>
+        <label class="field">
+          {t("projects.slug")}
+          <input
+            class="input"
+            value={f.slug}
+            onInput={(e) => setF({ ...f, slug: e.currentTarget.value })}
+          />
+          <span class="muted small">{t("projects.slugHelp")}</span>
+        </label>
+        <label class="field">
+          {t("agents.workspace")}
+          <input
+            class="input"
+            list="project-workspaces"
+            value={f.workspace}
+            onInput={(e) => setF({ ...f, workspace: e.currentTarget.value })}
+          />
+          <datalist id="project-workspaces">
+            {props.workspaces.map((w) => (
+              <option key={w} value={w} />
+            ))}
+          </datalist>
+          <span class="muted small">{t("projects.workspaceHelp")}</span>
+        </label>
+        {error && <p class="error">{error}</p>}
+      </form>
+    </Modal>
   );
 }
 
 // Suggested account channels; any lowercase id works. GA4 and Search Console values also limit
 // what agents may query for this client (ADR-0036).
-const CHANNELS = [
+export const CHANNELS = [
   { id: "ga4", label: t("projects.channel.ga4") },
   { id: "search-console", label: t("projects.channel.searchConsole") },
   { id: "google-ads", label: t("projects.channel.googleAds") },
@@ -156,12 +163,20 @@ const CHANNELS = [
   { id: "x", label: "X" },
   { id: "pinterest", label: "Pinterest" },
   { id: "website", label: t("projects.channel.website") },
-  { id: "wordpress", label: t("projects.channel.wordpress") },
 ];
+
+// Channels with their own editor (several logins each, ADR-0047): kept out of the account rows,
+// and carried over unchanged when the rows are saved.
+export const SITE_CHANNELS = ["wordpress"];
 
 export type Row = { channel: string; value: string };
 export const toRows = (lists: Record<string, string[]>): Row[] =>
-  Object.entries(lists).flatMap(([channel, values]) => values.map((value) => ({ channel, value })));
+  Object.entries(lists)
+    .filter(([channel]) => !SITE_CHANNELS.includes(channel))
+    .flatMap(([channel, values]) => values.map((value) => ({ channel, value })));
+/** The site lists of `lists`, to send back with edited account rows. */
+export const siteLists = (lists: Record<string, string[]>): Record<string, string[]> =>
+  Object.fromEntries(Object.entries(lists).filter(([c]) => SITE_CHANNELS.includes(c)));
 export const toLists = (rows: Row[]): Record<string, string[]> => {
   const out: Record<string, string[]> = {};
   for (const r of rows) {
@@ -231,33 +246,6 @@ export function Accounts(props: {
   );
 }
 
-/** Per-project WordPress credentials (ADR-0034): written to the vault, never read back. */
-export function WordPressConnection(props: { slug: string }) {
-  const secrets = usePoll(() => api<SecretStatus[]>("/api/vault"), 30000);
-  const isSet = (id: string) => secrets.data?.some((s) => s.id === id && s.set) ?? false;
-  const field = (part: "user" | "password", label: string, type: "text" | "password") => {
-    const id = `wordpress-${part}-${props.slug}`;
-    return (
-      <SecretInput
-        key={id}
-        id={id}
-        label={label}
-        type={type}
-        set={isSet(id)}
-        onSaved={secrets.refresh}
-      />
-    );
-  };
-  return (
-    <div class="field">
-      {t("projects.wordpress")}
-      <span class="muted small">{t("projects.wordpressHelp")}</span>
-      {field("user", t("projects.wordpressUser"), "text")}
-      {field("password", t("projects.wordpressPassword"), "password")}
-    </div>
-  );
-}
-
 /** Name, workspace, accounts and PROJECT.md; the slug (folder) and files/ stay as they are. */
 function EditProject(props: {
   slug: string;
@@ -284,15 +272,22 @@ function EditProject(props: {
       )
       .catch((err: Error) => setStatus({ ok: false, text: err.message }));
   }, [props.slug]);
-  if (!f) return status ? <p class="error">{status.text}</p> : null;
   const save = async (e: Event) => {
     e.preventDefault();
+    if (!f) return;
     setStatus(undefined);
     try {
       const { rows, ...rest } = f;
+      // Sites are edited on their own (and may have changed meanwhile): keep the current ones.
+      const current = await api<{ integrations: Record<string, string[]> }>(
+        `/api/projects/${props.slug}`,
+      );
       await api(`/api/projects/${props.slug}`, {
         method: "PUT",
-        body: { ...rest, integrations: toLists(rows) },
+        body: {
+          ...rest,
+          integrations: { ...toLists(rows), ...siteLists(current.integrations ?? {}) },
+        },
       });
       setStatus({ ok: true, text: t("projects.saved") });
       props.onSaved();
@@ -301,53 +296,63 @@ function EditProject(props: {
     }
   };
   return (
-    <form class="panel gap-top" onSubmit={save}>
-      <div class="page-head">
-        <h2>
-          {t("projects.edit")} <code class="muted">{props.slug}</code>
-        </h2>
-        <button type="button" class="btn ghost" onClick={props.onClose}>
-          {t("common.close")}
-        </button>
-      </div>
-      <label class="field narrow">
-        {t("projects.name")}
-        <input
-          class="input"
-          value={f.name}
-          onInput={(e) => setF({ ...f, name: e.currentTarget.value })}
-        />
-      </label>
-      <label class="field narrow">
-        {t("agents.workspace")}
-        <input
-          class="input"
-          list="edit-project-workspaces"
-          value={f.workspace}
-          onInput={(e) => setF({ ...f, workspace: e.currentTarget.value })}
-        />
-        <datalist id="edit-project-workspaces">
-          {props.workspaces.map((w) => (
-            <option key={w} value={w} />
-          ))}
-        </datalist>
-      </label>
-      <Accounts rows={f.rows} onChange={(rows) => setF({ ...f, rows })} />
-      <WordPressConnection slug={props.slug} />
-      <label class="field">
-        PROJECT.md
-        <textarea
-          class="input mono"
-          rows={16}
-          value={f.doc}
-          onInput={(e) => setF({ ...f, doc: e.currentTarget.value })}
-        />
-        <span class="muted small">{t("projects.docHelp")}</span>
-      </label>
-      <button type="submit" class="btn primary">
-        {t("common.save")}
-      </button>
-      {status && <span class={status.ok ? "muted" : "error"}> {status.text}</span>}
-    </form>
+    <Modal
+      wide
+      title={`${t("projects.edit")}: ${props.slug}`}
+      onClose={props.onClose}
+      footer={
+        <>
+          {status && <span class={`grow ${status.ok ? "muted" : "error"}`}>{status.text}</span>}
+          <button type="button" class="btn ghost" onClick={props.onClose}>
+            {t("common.close")}
+          </button>
+          <button type="submit" form="edit-project" class="btn primary" disabled={!f}>
+            {t("common.save")}
+          </button>
+        </>
+      }
+    >
+      {!f ? (
+        !status && <p class="muted">{t("app.loading")}</p>
+      ) : (
+        <form id="edit-project" onSubmit={save}>
+          <label class="field">
+            {t("projects.name")}
+            <input
+              class="input"
+              value={f.name}
+              onInput={(e) => setF({ ...f, name: e.currentTarget.value })}
+            />
+          </label>
+          <label class="field">
+            {t("agents.workspace")}
+            <input
+              class="input"
+              list="edit-project-workspaces"
+              value={f.workspace}
+              onInput={(e) => setF({ ...f, workspace: e.currentTarget.value })}
+            />
+            <datalist id="edit-project-workspaces">
+              {props.workspaces.map((w) => (
+                <option key={w} value={w} />
+              ))}
+            </datalist>
+          </label>
+          <Accounts rows={f.rows} onChange={(rows) => setF({ ...f, rows })} />
+          <label class="field">
+            PROJECT.md
+            <textarea
+              class="input mono"
+              rows={12}
+              value={f.doc}
+              onInput={(e) => setF({ ...f, doc: e.currentTarget.value })}
+            />
+            <span class="muted small">{t("projects.docHelp")}</span>
+          </label>
+        </form>
+      )}
+      {/* Outside the form: sites save on their own, not with the Save button. */}
+      {f && <Sites slug={props.slug} />}
+    </Modal>
   );
 }

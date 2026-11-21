@@ -176,6 +176,7 @@ export function runGateway(home: string): Promise<number> {
       listActiveRuns(db).length === 0 &&
       !db.prepare("SELECT 1 FROM tasks WHERE status = 'claimed' LIMIT 1").get(),
     notify: (text) => notifyOwner(text),
+    log,
     exit: (code) => {
       void stopForUpdate?.(code);
     },
@@ -419,6 +420,7 @@ export function runGateway(home: string): Promise<number> {
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
           home,
+          catalog: () => loadCatalog(SEED_CATALOG, join(home, "catalog")),
           billing: {
             list: () =>
               Object.entries(BILLING).map(([provider, p]) => ({

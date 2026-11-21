@@ -55,9 +55,13 @@ describe("builtin WordPress MCP server", () => {
     await new Promise((r) => site.close(r));
   });
 
-  const start = (wpUrl: string) => {
+  const start = (wpUrl: string | { url: string; user: string; password: string }[]) => {
+    const env =
+      typeof wpUrl === "string"
+        ? { WP_URL: wpUrl, WP_USER: "editor", WP_APP_PASSWORD: "abcd efgh" }
+        : { WP_SITES: JSON.stringify(wpUrl) };
     const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", SERVER], {
-      env: { ...process.env, WP_URL: wpUrl, WP_USER: "editor", WP_APP_PASSWORD: "abcd efgh" },
+      env: { ...process.env, ...env },
       stdio: ["pipe", "pipe", "inherit"],
     });
     children.push(child);
@@ -138,6 +142,42 @@ describe("builtin WordPress MCP server", () => {
     const { rpc, tool } = start("http://example.com");
     await rpc("initialize", init);
     const r = await tool("site_info", {});
-    expect(r).toMatchObject({ isError: true, content: [{ text: "WP_URL must be https" }] });
+    expect(r).toMatchObject({
+      isError: true,
+      content: [{ text: "http://example.com must be https" }],
+    });
+  });
+
+  it("works on the site the call names, each with its own credentials", async () => {
+    const { rpc, tool } = start([
+      { url: "https://other.example", user: "a", password: "x" },
+      { url: `${url}/`, user: "b", password: "y" },
+    ]);
+    await rpc("initialize", init);
+    const r = await tool("get_post", { type: "posts", id: 1, site: url });
+    expect(r.isError).toBeFalsy();
+    expect(seen.at(-1)?.headers.authorization).toBe(
+      `Basic ${Buffer.from("b:y").toString("base64")}`,
+    );
+    const draft = await tool("create_draft", {
+      site: url,
+      type: "posts",
+      title: "T",
+      content: "<p>x</p>",
+    });
+    expect(JSON.parse(draft.content[0]?.text ?? "").edit).toBe(
+      `${url}/wp-admin/post.php?post=7&action=edit`,
+    );
+    // Several sites: the call must say which one.
+    expect((await tool("site_info", {})).content[0]?.text).toMatch(
+      /name the site: https:\/\/other.example, http:\/\/127/,
+    );
+    expect((await tool("site_info", { site: "https://nope.example" })).isError).toBe(true);
+  });
+
+  it("with one site the site may be left out", async () => {
+    const { rpc, tool } = start([{ url, user: "b", password: "y" }]);
+    await rpc("initialize", init);
+    expect((await tool("list_posts", { type: "posts" })).isError).toBeFalsy();
   });
 });
