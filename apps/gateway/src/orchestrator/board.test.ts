@@ -2,6 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  addChecklistItem,
+  addComment,
   createThread,
   getTask,
   listMessages,
@@ -161,6 +163,19 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
       }),
     ]);
     expect(liveProgress(db)).toEqual([]);
+  });
+
+  it("the assignee sees the owner's checklist and comments on the card", async () => {
+    setup([["dev", "roles: [dev]"]]);
+    const { id } = give();
+    addChecklistItem(db, id, "Hero section");
+    const layout = addChecklistItem(db, id, "Layout");
+    db.prepare("UPDATE task_checklist SET done = 1 WHERE id = ?").run(layout?.id ?? 0);
+    addComment(db, id, "Use the blue logo");
+    await orch.workOnce();
+    expect(calls[0]?.req.prompt).toContain(
+      "Owner's checklist for this card:\n- [ ] Hero section\n- [x] Layout\n\nOwner's comments on this card:\n- Use the blue logo",
+    );
   });
 
   it("planned stop: a running task is interrupted and continues later from a note, no attempt lost", async () => {

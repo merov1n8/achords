@@ -2,9 +2,13 @@ import { GripVertical, ListChecks } from "lucide-preact";
 import { useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
-import { ago, boardColumns, columnLabel, dropKind, type Matrix } from "../kanban.ts";
+import { ago, boardColumns, columnLabel, dropKind, type Matrix, unionColumns } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
 import type { Agent, Task } from "../types.ts";
+import { CardModal } from "./CardModal.tsx";
+
+const ALL = "*";
+type Flow = { workflow: { columns: string[] }; matrix: Matrix };
 
 const CHIP: Record<Task["status"], string> = {
   queued: "todo",
@@ -27,14 +31,17 @@ export function Kanban() {
   const agents = usePoll(() => api<Agent[]>("/api/agents"), 30000);
   const workspaces = [...new Set((agents.data ?? []).map((a) => a.workspace))].sort();
   const [picked, setPicked] = useState<string>();
-  const ws = picked ?? (workspaces.includes("shared") ? "shared" : workspaces[0]);
-  const flow = usePoll(
-    () =>
-      ws
-        ? api<{ workflow: { columns: string[] }; matrix: Matrix }>(`/api/workflow/${ws}`)
-        : Promise.resolve(undefined),
+  // "all" by default: every card at once, each with its assignee shown on the card.
+  const ws = picked ?? ALL;
+  const flows = usePoll(
+    async () => {
+      const list = await Promise.all(
+        workspaces.map((w) => api<Flow>(`/api/workflow/${w}`).then((f) => [w, f] as const)),
+      );
+      return Object.fromEntries(list) as Record<string, Flow>;
+    },
     30000,
-    [ws],
+    [workspaces.join(",")],
   );
   const tasks = usePoll(() => api<Task[]>("/api/tasks"), 3000);
   const [over, setOver] = useState<string>();
@@ -44,10 +51,20 @@ export function Kanban() {
   const [showRules, setShowRules] = useState(false);
   const drag = useRef<Drag | undefined>(undefined);
 
-  const columns = flow.data?.workflow.columns ?? [];
-  const matrix = flow.data?.matrix ?? [];
-  const inWs = new Set((agents.data ?? []).filter((a) => a.workspace === ws).map((a) => a.id));
+  const flowOf = flows.data ?? {};
+  const columns =
+    ws === ALL
+      ? unionColumns(workspaces.map((w) => flowOf[w]?.workflow.columns ?? []))
+      : (flowOf[ws]?.workflow.columns ?? []);
+  const agentWs = new Map((agents.data ?? []).map((a) => [a.id, a.workspace]));
+  // Workflow rules belong to the workspace of the card's assignee.
+  const matrixFor = (task: Task): Matrix =>
+    flowOf[agentWs.get(task.assigneeAgentId ?? "") ?? ""]?.matrix ?? [];
+  const inWs = new Set(
+    (agents.data ?? []).filter((a) => ws === ALL || a.workspace === ws).map((a) => a.id),
+  );
   const board = boardColumns(columns, tasks.data ?? [], inWs);
+  const [open, setOpen] = useState<string>();
 
   const move = async (task: Task, from: string, to: string) => {
     if (from === to) return;
@@ -84,7 +101,8 @@ export function Kanban() {
       .find((n) => n instanceof HTMLElement && n.dataset.col) as HTMLElement | undefined;
     const to = col?.dataset.col;
     setOver(to);
-    if (to && dropKind(matrix, d.from, to) === "override") setStatus(t("kanban.override"));
+    if (to && dropKind(matrixFor(d.task), d.from, to) === "override")
+      setStatus(t("kanban.override"));
   };
   const onUp = () => {
     const d = drag.current;
@@ -95,6 +113,7 @@ export function Kanban() {
     const to = over;
     setOver(undefined);
     if (d.active && to) move(d.task, d.from, to);
+    else if (!d.active) setOpen(d.task.id); // a click, not a drag: open the card
   };
   const onCancel = () => {
     const d = drag.current;
@@ -104,11 +123,15 @@ export function Kanban() {
     setOver(undefined);
   };
 
-  // Keyboard: Space picks up, arrows choose the column, Enter drops, Escape cancels.
+  // Keyboard: Enter opens the card; Space picks it up, arrows choose the column, Space or
+  // Enter drops, Escape cancels.
   const onKey = (e: KeyboardEvent, task: Task, from: string) => {
     const idx = (c: string) => columns.indexOf(c);
     if (!keyMove || keyMove.task.id !== task.id) {
-      if (e.key === " " || e.key === "Enter") {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        setOpen(task.id);
+      } else if (e.key === " ") {
         e.preventDefault();
         setKeyMove({ task, from, to: from });
         setStatus(t("kanban.picked", { title: task.title, to: columnLabel(from) }));
@@ -120,7 +143,7 @@ export function Kanban() {
       const next = columns[idx(keyMove.to) + (e.key === "ArrowRight" ? 1 : -1)];
       if (next) {
         setKeyMove({ ...keyMove, to: next });
-        const kind = dropKind(matrix, from, next);
+        const kind = dropKind(matrixFor(task), from, next);
         setStatus(
           `${t("kanban.picked", { title: task.title, to: columnLabel(next) })}${kind === "override" ? ` ${t("kanban.override")}` : ""}`,
         );
@@ -137,9 +160,10 @@ export function Kanban() {
 
   const target = over ?? keyMove?.to;
   const source = drag.current?.from ?? keyMove?.from;
+  const moving = drag.current?.task ?? keyMove?.task;
   const dropClass = (col: string) => {
-    if (!target || !source || col !== target) return "";
-    const kind = dropKind(matrix, source, col);
+    if (!target || !source || !moving || col !== target) return "";
+    const kind = dropKind(matrixFor(moving), source, col);
     return kind === "same" ? "" : kind === "allowed" ? "drop-ok" : "drop-override";
   };
 
@@ -152,6 +176,7 @@ export function Kanban() {
             <label class="row">
               <span class="muted">{t("kanban.workspace")}</span>
               <select class="input" value={ws} onChange={(e) => setPicked(e.currentTarget.value)}>
+                <option value={ALL}>{t("kanban.allWorkspaces")}</option>
                 {workspaces.map((w) => (
                   <option key={w} value={w}>
                     {w}
@@ -160,19 +185,20 @@ export function Kanban() {
               </select>
             </label>
           )}
-          <button
-            type="button"
-            class="btn ghost"
-            aria-pressed={showRules}
-            onClick={() => setShowRules(!showRules)}
-          >
-            <ListChecks class="icon" />
-            {t("kanban.rules")}
-          </button>
+          {ws !== ALL && (
+            <button
+              type="button"
+              class="btn ghost"
+              aria-pressed={showRules}
+              onClick={() => setShowRules(!showRules)}
+            >
+              <ListChecks class="icon" />
+              {t("kanban.rules")}
+            </button>
+          )}
         </div>
       </div>
-      <p class="muted small">{t("kanban.keyboardHelp")}</p>
-      <div class="kanban">
+      <div class="kanban" style={`--cols:${Math.max(columns.length, 1)}`}>
         {board.map((col) => (
           <section key={col.id} class={`column ${dropClass(col.id)}`} data-col={col.id}>
             <h2>
@@ -192,15 +218,18 @@ export function Kanban() {
                 onPointerCancel={onCancel}
                 onKeyDown={(e) => onKey(e, task, col.id)}
               >
-                <div class="t">
+                <div class="top">
                   <span class="grip" aria-hidden="true">
                     <GripVertical class="icon" />
                   </span>
-                  {task.title}
+                  <span class="who" title={t("kanban.assignee")}>
+                    {task.assigneeAgentId ?? t("kanban.unassigned")}
+                  </span>
                 </div>
+                <div class="t">{task.title}</div>
                 <div class="m">
                   <span class={`chip ${CHIP[task.status]}`}>{t(`status.${task.status}`)}</span>
-                  {task.assigneeAgentId ?? t("kanban.unassigned")} · {ago(task.updatedAt)}
+                  {ago(task.updatedAt)}
                   {children > 0 && <span>· {t("kanban.subtasks", { n: children })}</span>}
                 </div>
                 {task.error && task.status !== "done" && <div class="error">{task.error}</div>}
@@ -209,22 +238,31 @@ export function Kanban() {
           </section>
         ))}
       </div>
+      <p class="muted small kbd-help">{t("kanban.keyboardHelp")}</p>
+      {open && (
+        <CardModal
+          id={open}
+          columns={columns}
+          onClose={() => setOpen(undefined)}
+          onChanged={tasks.refresh}
+        />
+      )}
       {board.every((c) => c.cards.length === 0) && tasks.data && (
         <p class="muted">{t("kanban.empty")}</p>
       )}
       <p class="muted" aria-live="polite">
         {status}
       </p>
-      {(error ?? tasks.error ?? flow.error) && (
-        <p class="error">{error ?? tasks.error ?? flow.error}</p>
+      {(error ?? tasks.error ?? flows.error) && (
+        <p class="error">{error ?? tasks.error ?? flows.error}</p>
       )}
-      {showRules && (
+      {showRules && ws !== ALL && (
         <div class="panel gap-top">
           <h2>{t("kanban.rules")}</h2>
           <p class="muted">{t("kanban.rulesHelp", { ws: ws ?? "" })}</p>
           <table>
             <tbody>
-              {matrix.map((row) => (
+              {(flowOf[ws]?.matrix ?? []).map((row) => (
                 <tr key={row.to}>
                   <th>{columnLabel(row.to)}</th>
                   <td>
