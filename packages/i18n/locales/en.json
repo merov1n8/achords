@@ -2,7 +2,6 @@
   "app.loading": "Loading…",
   "app.unreachable": "Cannot reach the gateway.",
   "nav.main": "Main navigation",
-  "nav.menu": "Menu",
   "nav.chat": "Chat",
   "nav.kanban": "Kanban",
   "nav.agents": "Agents",
@@ -565,5 +564,7 @@
   "vault.other": "Something else (type its id)",
   "vault.nothingMissing": "Every connected integration has what it needs; pick \"Something else\" to add another secret.",
   "vault.deleteTitle": "Delete secret?",
-  "vault.deleteConfirm": "{id} will be deleted. Integrations that use it stop working until it is set again."
+  "vault.deleteConfirm": "{id} will be deleted. Integrations that use it stop working until it is set again.",
+  "nav.more": "More",
+  "kanban.columns": "Columns"
 }

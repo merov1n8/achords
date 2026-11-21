@@ -29,6 +29,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Phones: a bottom tab bar (Chat, Kanban, Agents, Monitors, More) and a "More" sheet with the
+  other pages and Settings replace the slide-in sidebar; the top bar shows the page title. The
+  kanban shows one column at a time with a column switcher.
 - Settings → Integrations is grouped: shared sign-ins (Google, Meta) first, then your own pages and
   sites, then per-client logins and the apps on this Mac. Projects and the vault use the same
   pattern: a table, Add at the top right, add and edit in a modal. WordPress sites are managed in
