@@ -110,6 +110,8 @@ export interface ApiDeps {
     | "requestPublish"
     | "testIntegration"
     | "logPublish"
+    | "createCard"
+    | "startCard"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -245,6 +247,10 @@ const str = (v: unknown, field: string, max = 10_000): string => {
   }
   return v;
 };
+
+/** An optional text field: absent, null or "" all mean "not chosen". */
+const optStr = (v: unknown, field: string, max: number): string | undefined =>
+  v === undefined || v === null || v === "" ? undefined : str(v, field, max);
 
 const strList = (v: unknown, field: string): string[] => {
   if (
@@ -631,6 +637,45 @@ export function createApiHandler(deps: ApiDeps) {
         if (!out.ok) throw new HttpError(409, out.reason);
         if (out.override)
           log(`kanban: owner override on task ${params[0]}: ${String(b.from)} → ${String(b.to)}`);
+        return out;
+      },
+    ],
+    // A card made by hand (owner): parked until started, or handed to its agent at once.
+    [
+      "POST",
+      /^\/api\/tasks$/,
+      async ({ res, body }) => {
+        const b = await body();
+        if (b.start !== undefined && typeof b.start !== "boolean") {
+          throw new HttpError(400, "start must be true or false");
+        }
+        const description = optStr(b.description, "description", 20_000);
+        const agent = optStr(b.agent, "agent", 64);
+        const project = optStr(b.project, "project", 64);
+        const column = optStr(b.column, "column", 32);
+        const out = deps.orchestrator.createCard({
+          title: str(b.title, "title", 200),
+          ...(description ? { description } : {}),
+          ...(agent ? { agent } : {}),
+          ...(project ? { project } : {}),
+          ...(column ? { column } : {}),
+          ...(b.start !== undefined ? { start: b.start as boolean } : {}),
+        });
+        if (!out.ok) throw new HttpError(400, out.reason);
+        log(`kanban: owner created task ${out.taskId}${b.start ? " and started it" : ""}`);
+        send(res, 201, getTask(db, out.taskId));
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/tasks\/([\w-]{1,64})\/start$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        if (!getTask(db, id)) throw new HttpError(404, "no such task");
+        const b = await body();
+        const out = deps.orchestrator.startCard(id, optStr(b.agent, "agent", 64));
+        if (!out.ok) throw new HttpError(/already/.test(out.reason) ? 409 : 400, out.reason);
+        log(`kanban: owner started task ${id}`);
         return out;
       },
     ],

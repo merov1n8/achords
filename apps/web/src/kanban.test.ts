@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ago, boardColumns, columnLabel, dropKind, type Rule, unionColumns } from "./kanban.ts";
+import {
+  ago,
+  boardColumns,
+  cardWorkspace,
+  columnLabel,
+  dropKind,
+  type Rule,
+  unionColumns,
+} from "./kanban.ts";
 import type { Task } from "./types.ts";
 
 const task = (id: string, over: Partial<Task> = {}): Task => ({
@@ -10,6 +18,8 @@ const task = (id: string, over: Partial<Task> = {}): Task => ({
   threadId: null,
   parentId: null,
   column: "in_progress",
+  project: null,
+  parked: false,
   error: null,
   createdAt: 0,
   updatedAt: 0,
@@ -31,7 +41,7 @@ describe("boardColumns", () => {
       task("child", { parentId: "a", column: null }),
       task("other", { assigneeAgentId: "ops" }),
     ];
-    const cols = boardColumns(["in_progress", "review"], tasks, new Set(["dev"]));
+    const cols = boardColumns(["in_progress", "review"], tasks, (k) => k.assigneeAgentId === "dev");
     expect(cols.map((c) => [c.id, c.cards.map((k) => [k.task.id, k.children])])).toEqual([
       [
         "in_progress",
@@ -42,6 +52,18 @@ describe("boardColumns", () => {
       ],
       ["review", [["c", 0]]],
     ]);
+  });
+});
+
+describe("cardWorkspace", () => {
+  const agents = new Map([["dev", "web"]]);
+  const projects = new Map([["acme", "clients"]]);
+  it("is the assignee's workspace; a card without one goes by its project, else shared", () => {
+    expect(cardWorkspace(task("a"), agents, projects)).toBe("web");
+    expect(cardWorkspace(task("a", { assigneeAgentId: "gone" }), agents, projects)).toBeUndefined();
+    const mine = { assigneeAgentId: null, project: "acme" };
+    expect(cardWorkspace(task("b", mine), agents, projects)).toBe("clients");
+    expect(cardWorkspace(task("c", { assigneeAgentId: null }), agents, projects)).toBe("shared");
   });
 });
 

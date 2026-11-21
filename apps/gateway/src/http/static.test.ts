@@ -62,6 +62,8 @@ describe("static web UI", () => {
           },
           syncAgents: () => [],
           openRoom: () => ({ ok: false, reason: "n/a" }),
+          createCard: () => ({ ok: false, reason: "n/a" }),
+          startCard: () => ({ ok: false, reason: "n/a" }),
         },
         allowedHosts: [`127.0.0.1:${port}`],
         staticDir,

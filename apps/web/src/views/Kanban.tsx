@@ -1,11 +1,20 @@
-import { GripVertical, ListChecks } from "lucide-preact";
+import { GripVertical, ListChecks, Plus } from "lucide-preact";
 import { useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
-import { ago, boardColumns, columnLabel, dropKind, type Matrix, unionColumns } from "../kanban.ts";
+import {
+  ago,
+  boardColumns,
+  cardWorkspace,
+  columnLabel,
+  dropKind,
+  type Matrix,
+  unionColumns,
+} from "../kanban.ts";
 import { usePoll } from "../poll.ts";
-import type { Agent, Task } from "../types.ts";
+import type { Agent, Project, Task } from "../types.ts";
 import { CardModal } from "./CardModal.tsx";
+import { NewCardModal } from "./NewCardModal.tsx";
 
 const ALL = "*";
 type Flow = { workflow: { columns: string[] }; matrix: Matrix };
@@ -44,6 +53,8 @@ export function Kanban() {
     [workspaces.join(",")],
   );
   const tasks = usePoll(() => api<Task[]>("/api/tasks"), 3000);
+  const projects = usePoll(() => api<Project[]>("/api/projects"), 60000);
+  const [creating, setCreating] = useState(false);
   const [over, setOver] = useState<string>();
   const [keyMove, setKeyMove] = useState<{ task: Task; from: string; to: string }>();
   const [status, setStatus] = useState("");
@@ -57,13 +68,14 @@ export function Kanban() {
       ? unionColumns(workspaces.map((w) => flowOf[w]?.workflow.columns ?? []))
       : (flowOf[ws]?.workflow.columns ?? []);
   const agentWs = new Map((agents.data ?? []).map((a) => [a.id, a.workspace]));
-  // Workflow rules belong to the workspace of the card's assignee.
-  const matrixFor = (task: Task): Matrix =>
-    flowOf[agentWs.get(task.assigneeAgentId ?? "") ?? ""]?.matrix ?? [];
-  const inWs = new Set(
-    (agents.data ?? []).filter((a) => ws === ALL || a.workspace === ws).map((a) => a.id),
-  );
-  const board = boardColumns(columns, tasks.data ?? [], inWs);
+  const projectWs = new Map((projects.data ?? []).map((p) => [p.slug, p.workspace]));
+  const wsOf = (task: Task) => cardWorkspace(task, agentWs, projectWs);
+  // Workflow rules belong to the card's workspace (its assignee's, else its project's).
+  const matrixFor = (task: Task): Matrix => flowOf[wsOf(task) ?? ""]?.matrix ?? [];
+  const board = boardColumns(columns, tasks.data ?? [], (task) => {
+    const w = wsOf(task);
+    return w !== undefined && (ws === ALL || w === ws);
+  });
   const [open, setOpen] = useState<string>();
   // Phones show one column at a time: the picked one, else the first with cards.
   const [shown, setShown] = useState<string>();
@@ -202,6 +214,10 @@ export function Kanban() {
               {t("kanban.rules")}
             </button>
           )}
+          <button type="button" class="btn primary" onClick={() => setCreating(true)}>
+            <Plus class="icon" />
+            {t("kanban.newCard")}
+          </button>
         </div>
       </div>
       <fieldset class="kanban-tabs" aria-label={t("kanban.columns")}>
@@ -250,7 +266,11 @@ export function Kanban() {
                 </div>
                 <div class="t">{task.title}</div>
                 <div class="m">
-                  <span class={`chip ${CHIP[task.status]}`}>{t(`status.${task.status}`)}</span>
+                  {task.parked ? (
+                    <span class="chip">{t("kanban.notStarted")}</span>
+                  ) : (
+                    <span class={`chip ${CHIP[task.status]}`}>{t(`status.${task.status}`)}</span>
+                  )}
                   {ago(task.updatedAt)}
                   {children > 0 && <span>· {t("kanban.subtasks", { n: children })}</span>}
                 </div>
@@ -265,8 +285,26 @@ export function Kanban() {
         <CardModal
           id={open}
           columns={columns}
+          agents={agents.data ?? []}
           onClose={() => setOpen(undefined)}
           onChanged={tasks.refresh}
+        />
+      )}
+      {creating && (
+        <NewCardModal
+          {...(ws !== ALL ? { workspace: ws } : {})}
+          agents={agents.data ?? []}
+          projects={projects.data ?? []}
+          columnsOf={(w) =>
+            flowOf[w]?.workflow.columns ??
+            unionColumns(workspaces.map((x) => flowOf[x]?.workflow.columns ?? []))
+          }
+          onClose={() => setCreating(false)}
+          onCreated={(task) => {
+            setCreating(false);
+            setStatus(t("kanban.created", { title: task.title }));
+            tasks.refresh();
+          }}
         />
       )}
       {board.every((c) => c.cards.length === 0) && tasks.data && (
