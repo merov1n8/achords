@@ -1,8 +1,8 @@
-import { Pencil, Plus, Trash2, Unplug } from "lucide-preact";
+import { KeyRound, Pencil, Plus, Trash2, Unplug } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { Confirm, Modal } from "../components/Modal.tsx";
-import { Sites } from "../components/Sites.tsx";
+import { SiteLogin, Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
 import { revocable, revokeAffects } from "../integrations.ts";
 import { usePoll } from "../poll.ts";
@@ -109,13 +109,15 @@ function Group(props: {
   if (!props.items.length) return null;
   return (
     <section class="gap-top">
-      <div class="page-head">
-        <div>
-          <h2>{props.title}</h2>
-          <p class="muted small">{props.help}</p>
+      {props.title && (
+        <div class="page-head">
+          <div>
+            <h2>{props.title}</h2>
+            <p class="muted small">{props.help}</p>
+          </div>
+          {props.add}
         </div>
-        {props.add}
-      </div>
+      )}
       <div class="panel">
         <table>
           <thead>
@@ -320,6 +322,122 @@ type Dialog =
   | { kind: "app"; edit?: IntegrationStatus }
   | { kind: "removeApp"; s: IntegrationStatus };
 
+/**
+ * Per client: one row per site (an integration with several sites, ADR-0047), each with its
+ * own status, login and connection test. Client integrations without sites keep the table.
+ */
+function ClientSites(props: { items: IntegrationStatus[]; onChanged: () => void }) {
+  const projects = usePoll(() => api<{ slug: string; name: string }[]>("/api/projects"), 60000);
+  const [login, setLogin] = useState<{ slug: string; url: string }>();
+  const [tests, setTests] = useState<
+    Record<string, { busy?: boolean; ok?: boolean; text?: string }>
+  >({});
+  const name = (slug: string) =>
+    slug === "own"
+      ? t("integrations.ownShort")
+      : (projects.data?.find((p) => p.slug === slug)?.name ?? slug);
+  const rows = props.items.flatMap((s) => s.sites.map((site) => ({ s, site })));
+  const plain = props.items.filter((s) => s.sites.length === 0);
+  if (!props.items.length) return null;
+  const test = async (id: string, project: string, site: string) => {
+    const key = `${id}|${project}|${site}`;
+    setTests((x) => ({ ...x, [key]: { busy: true } }));
+    try {
+      const r = await api<{ ok: boolean; text: string }>(`/api/integrations/${id}/test`, {
+        method: "POST",
+        body: { project, site },
+      });
+      setTests((x) => ({ ...x, [key]: r }));
+    } catch (err) {
+      setTests((x) => ({ ...x, [key]: { ok: false, text: (err as Error).message } }));
+    }
+  };
+  return (
+    <section class="gap-top">
+      <div class="page-head">
+        <div>
+          <h2>{t("integrations.group.client")}</h2>
+          <p class="muted small">{t("integrations.group.clientHelp")}</p>
+        </div>
+      </div>
+      {rows.length > 0 && (
+        <div class="panel">
+          <table>
+            <thead>
+              <tr>
+                <th>{t("sites.site")}</th>
+                <th>{t("chats.project")}</th>
+                <th>{t("integrations.name")}</th>
+                <th>{t("integrations.status")}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ s, site }) => {
+                const key = `${s.id}|${site.project}|${site.url}`;
+                const r = tests[key];
+                return (
+                  <tr key={key}>
+                    <td>
+                      <a href={site.url} target="_blank" rel="noreferrer">
+                        {site.url.replace(/^https?:\/\//, "")}
+                      </a>
+                      {r && !r.busy && (
+                        <div class={`small pre ${r.ok ? "muted" : "error"}`}>
+                          {r.ok ? "✓ " : "✗ "}
+                          {r.text}
+                        </div>
+                      )}
+                    </td>
+                    <td>{name(site.project)}</td>
+                    <td>{s.name}</td>
+                    <td>
+                      {site.ready ? (
+                        <span class="chip done">{t("integrations.ready")}</span>
+                      ) : (
+                        <span class="chip local">{t("sites.needsLogin")}</span>
+                      )}
+                    </td>
+                    <td class="actions">
+                      <button
+                        type="button"
+                        class="btn ghost"
+                        onClick={() => setLogin({ slug: site.project, url: site.url })}
+                      >
+                        <KeyRound class="icon" />
+                        {t("sites.login")}
+                      </button>
+                      {s.testable && (
+                        <button
+                          type="button"
+                          class="btn ghost"
+                          disabled={r?.busy || !site.ready}
+                          onClick={() => test(s.id, site.project, site.url)}
+                        >
+                          {r?.busy ? t("integrations.testing") : t("integrations.test")}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {plain.length > 0 && <Group title="" help="" items={plain} extra={() => null} />}
+      {login && (
+        <SiteLogin
+          slug={login.slug}
+          url={login.url}
+          onClose={() => setLogin(undefined)}
+          onSaved={props.onChanged}
+        />
+      )}
+    </section>
+  );
+}
+
 export function Integrations() {
   const list = usePoll(() => api<IntegrationStatus[]>("/api/integrations"), 30000);
   const [dialog, setDialog] = useState<Dialog>();
@@ -354,21 +472,7 @@ export function Integrations() {
         }
       />
       <OwnAccounts onSaved={list.refresh} />
-      <Group
-        title={t("integrations.group.client")}
-        help={t("integrations.group.clientHelp")}
-        items={of("client")}
-        extra={(s) =>
-          s.sites.map((site) => (
-            <div key={`${site.project}-${site.url}`}>
-              {site.project === "own" ? t("integrations.ownShort") : site.project}: {site.url}{" "}
-              <span class={site.ready ? "muted" : "error"}>
-                {site.ready ? "✓" : t("sites.needsLogin")}
-              </span>
-            </div>
-          ))
-        }
-      />
+      <ClientSites items={of("client")} onChanged={list.refresh} />
       <Group
         title={t("integrations.group.local")}
         help={t("integrations.group.localHelp")}

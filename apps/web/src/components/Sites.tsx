@@ -25,20 +25,6 @@ export function Sites(props: { slug: string }) {
   const [creds, setCreds] = useState<string>();
   const [removing, setRemoving] = useState<string>();
   const list = sites.data?.sites ?? [];
-  const site = list.find((s) => s.url === creds);
-  const [savedParts, setSavedParts] = useState<string[]>([]);
-  // The login modal closes once both user and password are set (either saved now or before).
-  const loginSaved = (part: "user" | "password") => {
-    sites.refresh();
-    const now = [...savedParts, part];
-    setSavedParts(now);
-    const isSet = (p: "user" | "password") =>
-      now.includes(p) || site?.legacy || !site?.missing.includes(site.secrets[p]);
-    if (isSet("user") && isSet("password")) {
-      setCreds(undefined);
-      setSavedParts([]);
-    }
-  };
   return (
     <div class="field">
       <div class="row">
@@ -101,35 +87,12 @@ export function Sites(props: { slug: string }) {
         />
       )}
       {creds && (
-        <Modal
-          title={t("sites.loginTitle", { url: creds })}
-          onClose={() => {
-            setCreds(undefined);
-            setSavedParts([]);
-          }}
-        >
-          {site ? (
-            <>
-              <p class="muted small">{t("sites.loginHelp")}</p>
-              <SecretInput
-                id={site.secrets.user}
-                label={t("projects.wordpressUser")}
-                type="text"
-                set={!site.missing.includes(site.secrets.user) || site.legacy}
-                onSaved={() => loginSaved("user")}
-              />
-              <SecretInput
-                id={site.secrets.password}
-                label={t("projects.wordpressPassword")}
-                set={!site.missing.includes(site.secrets.password) || site.legacy}
-                onSaved={() => loginSaved("password")}
-              />
-              {site.legacy && <p class="muted small">{t("sites.legacy")}</p>}
-            </>
-          ) : (
-            <p class="muted">{t("app.loading")}</p>
-          )}
-        </Modal>
+        <SiteLogin
+          slug={props.slug}
+          url={creds}
+          onClose={() => setCreds(undefined)}
+          onSaved={sites.refresh}
+        />
       )}
       {removing && (
         <Confirm
@@ -194,6 +157,56 @@ function AddSite(props: { base: string; onClose: () => void; onAdded: (url: stri
         </label>
         {error && <p class="error">{error}</p>}
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * The login of one WordPress site (user + application password, write-only into the vault).
+ * Closes once both are set. Used under Projects → Edit and on the Integrations page.
+ */
+export function SiteLogin(props: {
+  slug: string;
+  url: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const base = `/api/projects/${props.slug}/sites/wordpress`;
+  const sites = usePoll(() => api<{ sites: Site[] }>(base), 30000, [props.slug]);
+  const site = sites.data?.sites.find((s) => s.url === props.url);
+  const [savedParts, setSavedParts] = useState<string[]>([]);
+  const saved = (part: "user" | "password") => {
+    sites.refresh();
+    props.onSaved();
+    const now = [...savedParts, part];
+    setSavedParts(now);
+    const isSet = (p: "user" | "password") =>
+      now.includes(p) || site?.legacy || !site?.missing.includes(site.secrets[p]);
+    if (isSet("user") && isSet("password")) props.onClose();
+  };
+  return (
+    <Modal title={t("sites.loginTitle", { url: props.url })} onClose={props.onClose}>
+      {site ? (
+        <>
+          <p class="muted small">{t("sites.loginHelp")}</p>
+          <SecretInput
+            id={site.secrets.user}
+            label={t("projects.wordpressUser")}
+            type="text"
+            set={!site.missing.includes(site.secrets.user) || site.legacy}
+            onSaved={() => saved("user")}
+          />
+          <SecretInput
+            id={site.secrets.password}
+            label={t("projects.wordpressPassword")}
+            set={!site.missing.includes(site.secrets.password) || site.legacy}
+            onSaved={() => saved("password")}
+          />
+          {site.legacy && <p class="muted small">{t("sites.legacy")}</p>}
+        </>
+      ) : (
+        <p class={sites.error ? "error" : "muted"}>{sites.error ?? t("app.loading")}</p>
+      )}
     </Modal>
   );
 }

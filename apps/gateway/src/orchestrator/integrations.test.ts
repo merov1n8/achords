@@ -790,6 +790,23 @@ describe("integrations in runs (ADR-0034)", () => {
       });
     });
 
+    it("connection test of one site (one row on the Integrations page)", async () => {
+      sites(acmeYaml(), ["https://a.example", "https://b.example"]);
+      vaultIds = new Set(["wp-user-acme", "wp-password-acme"]);
+      callText = '{"name":"Acme"}';
+      expect(await orch.testIntegration("wps", "acme", "https://a.example")).toEqual({
+        ok: true,
+        text: "name: Acme",
+      });
+      expect(called.map((c) => c.args)).toEqual([{ site: "https://a.example" }]);
+      const b = await orch.testIntegration("wps", "acme", "https://b.example");
+      expect(b).toMatchObject({ ok: false, text: /^no credentials yet/ });
+      expect(await orch.testIntegration("wps", "acme", "https://c.example")).toMatchObject({
+        ok: false,
+        text: /not one of this project's sites/,
+      });
+    });
+
     it("an approved draft runs with the run's own accounts when there is no client project", async () => {
       sites(join(home, "accounts.yaml"), ["https://mine.example"]);
       const task = await give("writer");
