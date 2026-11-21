@@ -100,6 +100,9 @@ import { serveStatic } from "./static.ts";
 // listens on: another gateway on 127.0.0.1 (a test, a second instance) cannot overwrite it.
 const cookieName = (req: IncomingMessage) => `achords_session_${req.socket.localPort}`;
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
+/** The owner's remote address for the web UI (e.g. this Mac's Tailscale name). */
+const REMOTE_HOST_KEY = "web.remote_host";
+const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/;
 const BODY_LIMIT = 64 * 1024;
 // About 10 minutes of Opus audio, like the Telegram voice limit.
 const AUDIO_LIMIT = 10 * 1024 * 1024;
@@ -146,6 +149,8 @@ export interface ApiDeps {
   vault?: () => Vault;
   /** Exact Host header values accepted (DNS-rebinding protection). */
   allowedHosts: string[];
+  /** This machine's Tailscale name, if Tailscale can tell (suggestion for the remote address). */
+  tailscaleHost?: () => Promise<string | undefined>;
   /** Local speech to text for web voice notes (ADR-0014) and its scratch folder. */
   transcriber?: Transcriber;
   runDir?: string;
@@ -330,6 +335,33 @@ export function createApiHandler(deps: ApiDeps) {
       ({ req, res, session }) => {
         revokeSession(db, session.id);
         send(res, 200, { ok: true }, { "set-cookie": sessionCookie(req, "", 0) });
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/remote-access$/,
+      async () => ({
+        host: getSetting(db, REMOTE_HOST_KEY) ?? "",
+        // What this Mac's Tailscale reports, when it can be asked (a suggestion only).
+        suggested: (await deps.tailscaleHost?.().catch(() => undefined)) ?? "",
+      }),
+    ],
+    [
+      "PUT",
+      /^\/api\/remote-access$/,
+      async ({ body }) => {
+        const given = (await body()).host;
+        const raw = (given === undefined || given === "" ? "" : str(given, "host", 300))
+          .trim()
+          .toLowerCase()
+          .replace(/^https?:\/\//, "")
+          .replace(/\/+$/, "");
+        if (raw && !HOST_NAME.test(raw)) {
+          throw new HttpError(400, "Enter the address only, e.g. mini.tail1234.ts.net");
+        }
+        setSetting(db, REMOTE_HOST_KEY, raw);
+        log(raw ? `web: remote address set to ${raw}` : "web: remote address cleared");
+        return { host: raw };
       },
     ],
     [
@@ -1641,7 +1673,10 @@ export function createApiHandler(deps: ApiDeps) {
 
   return async (req: IncomingMessage, res: ServerResponse) => {
     try {
-      if (!deps.allowedHosts.includes(req.headers.host ?? "")) {
+      const host = req.headers.host ?? "";
+      // Local names, the container listener, and the remote address the owner set on the web
+      // (Tailscale serve forwards with that Host). Anything else may be DNS rebinding.
+      if (!deps.allowedHosts.includes(host) && host !== getSetting(db, REMOTE_HOST_KEY)) {
         throw new HttpError(421, "unknown host");
       }
       const method = req.method ?? "GET";

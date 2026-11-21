@@ -347,6 +347,35 @@ describe("HTTP API", () => {
     expect(status).toBe(421);
   });
 
+  it("accepts the remote address the owner set on the web (Tailscale), nothing else", async () => {
+    const { call, cookie } = await pair();
+    const hostStatus = (host: string) =>
+      new Promise<number>((resolve, reject) => {
+        const r = request(`${base}/api/session`, { headers: { cookie, host } }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+        r.on("error", reject);
+        r.end();
+      });
+    expect(await hostStatus("mac.tail1.ts.net")).toBe(421);
+    const bad = await call("/api/remote-access", {
+      method: "PUT",
+      body: JSON.stringify({ host: "https://evil example/" }),
+    });
+    expect(bad.status).toBe(400);
+    const ok = await call("/api/remote-access", {
+      method: "PUT",
+      body: JSON.stringify({ host: "https://Mac.tail1.ts.net/" }),
+    });
+    expect(await ok.json()).toMatchObject({ host: "mac.tail1.ts.net" });
+    expect(await hostStatus("mac.tail1.ts.net")).toBe(200);
+    expect(await hostStatus("evil.example")).toBe(421);
+    // Cleared: back to local only.
+    await call("/api/remote-access", { method: "PUT", body: JSON.stringify({ host: "" }) });
+    expect(await hostStatus("mac.tail1.ts.net")).toBe(421);
+  });
+
   it("requires the CSRF header and a same-origin Origin on state-changing requests", async () => {
     const { call, cookie } = await pair();
     const noCsrf = await fetch(`${base}/api/threads`, {
