@@ -1341,6 +1341,12 @@ fieldset.repeat {
 .card-meta {
   margin-bottom: 14px;
 }
+.start-card {
+  margin-bottom: 14px;
+}
+.start-card p {
+  margin: 0 0 10px;
+}
 .card-meta a {
   display: inline-flex;
   gap: 4px;

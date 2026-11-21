@@ -66,6 +66,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Kanban: a "New card" button (top right) to make a card by hand: title, description, and
+  optionally an agent, a project and the column. With "Start now" the agent begins right away;
+  otherwise the card shows "Not started" and no agent touches it until you press Start in the
+  card (pick an agent there if it has none). Every card gets its own chat, where results,
+  questions and approvals appear.
 - Kanban: opens on "All" workspaces with the assignee on every card; all columns fit the screen.
   A click (or Enter) opens a card: edit title and description, move it, keep sub-items and your
   own comments (the agent sees them next time), or delete it after a confirmation.

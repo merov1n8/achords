@@ -55,6 +55,26 @@ export function updateTask(
 }
 
 /**
+ * Starts a parked card (made by hand): gives it its agent and budget and makes it claimable.
+ * Returns false if it was not parked (already started, or unknown). Policy checks come before.
+ */
+export function startParked(
+  db: Db,
+  id: string,
+  input: { assigneeAgentId: string; budgetUsd?: number },
+  now = Date.now(),
+): boolean {
+  const r = db
+    .prepare(
+      `UPDATE tasks SET parked = 0, assignee_agent_id = ?, budget_usd = COALESCE(?, budget_usd),
+         updated_at = ?
+       WHERE id = ? AND parked = 1`,
+    )
+    .run(input.assigneeAgentId, input.budgetUsd ?? null, now, id);
+  return Number(r.changes) === 1;
+}
+
+/**
  * Deletes a card (a root task) with every task below it. Refused while any of them is claimed:
  * a worker holds it and would finish into a task that no longer exists. Discussion threads
  * opened inside the card go too; the card's chat stays.

@@ -8,19 +8,17 @@ export interface BoardColumn {
   cards: { task: Task; children: number }[];
 }
 
-/** Cards of one workspace (by the assignee's workspace) in workflow column order. */
+/** Cards the predicate keeps (e.g. one workspace's) in workflow column order. */
 export function boardColumns(
   columns: string[],
   tasks: Task[],
-  agentsInWorkspace: Set<string>,
+  shows: (task: Task) => boolean,
 ): BoardColumn[] {
   const children = new Map<string, number>();
   for (const task of tasks) {
     if (task.parentId) children.set(task.parentId, (children.get(task.parentId) ?? 0) + 1);
   }
-  const cards = tasks.filter(
-    (task) => task.column && task.assigneeAgentId && agentsInWorkspace.has(task.assigneeAgentId),
-  );
+  const cards = tasks.filter((task) => task.column && shows(task));
   return columns.map((id) => ({
     id,
     cards: cards
@@ -28,6 +26,20 @@ export function boardColumns(
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((task) => ({ task, children: children.get(task.id) ?? 0 })),
   }));
+}
+
+/**
+ * The workspace a card belongs to, as the gateway decides its workflow: the assignee's; a card
+ * made by hand without an agent goes by its project, else "shared". Undefined for an agent that
+ * no longer exists.
+ */
+export function cardWorkspace(
+  task: Pick<Task, "assigneeAgentId" | "project">,
+  agentWorkspaces: Map<string, string>,
+  projectWorkspaces: Map<string, string>,
+): string | undefined {
+  if (task.assigneeAgentId) return agentWorkspaces.get(task.assigneeAgentId);
+  return projectWorkspaces.get(task.project ?? "") ?? "shared";
 }
 
 /** For the owner every drop is possible; one that no owner rule grants is an override (logged). */

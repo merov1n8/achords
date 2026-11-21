@@ -114,6 +114,16 @@ describe("task queue", () => {
     ]);
   });
 
+  it("never claims a parked card (made by hand, not started)", () => {
+    const db = openCoreDatabase(":memory:");
+    const parked = enqueue(db, { title: "later", parked: true }, 1);
+    expect(parked.parked).toBe(true);
+    const free = enqueue(db, { title: "now" }, 2);
+    expect(claim(db, { workerId: "w", leaseMs: LEASE })?.id).toBe(free.id);
+    expect(claim(db, { workerId: "w", leaseMs: LEASE })).toBeUndefined();
+    expect(getTask(db, parked.id)).toMatchObject({ status: "queued", parked: true });
+  });
+
   it("cancels queued and claimed tasks but not finished ones", () => {
     const db = openCoreDatabase(":memory:");
     const a = enqueue(db, { title: "a" });
