@@ -99,3 +99,34 @@ export interface Monitor {
   lastCheckAt: number | null;
   lastChangeAt: number | null;
 }
+
+/** GET /api/skills (ADR-0049). */
+export interface Skill {
+  workspace: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  source?: string;
+  updated?: string;
+  body: string;
+}
+
+export interface SkillProposal {
+  id: string;
+  proposedBy: string;
+  workspace: string;
+  name: string;
+  description: string;
+  body: string;
+  reason: string;
+  replaces: string | null;
+  sourceUrl: string | null;
+  createdAt: number;
+}
+
+export interface SkillsPage {
+  skills: Skill[];
+  workspaces: string[];
+  modes: Record<string, "review" | "auto">;
+  proposals: SkillProposal[];
+}

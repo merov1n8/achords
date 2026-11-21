@@ -124,6 +124,19 @@ describe("HTTP API", () => {
             questions.push({ from, question: `log: ${report.tool}` });
             return { ok: true, text: "logged" };
           },
+          skillRead: (from, name) => {
+            questions.push({ from, question: `skill_read: ${name}` });
+            return { ok: true, text: "skill body" };
+          },
+          skillFetch: async (_from, url) => ({
+            ok: true,
+            text: `page ${url}`,
+            untrusted: "example.com",
+          }),
+          skillPropose: (from, request) => {
+            questions.push({ from, question: `skill_propose: ${JSON.stringify(request)}` });
+            return { ok: true, text: "sent" };
+          },
           delegate: (from, request) => {
             delegations.push({ from, request });
             return request.agent === "nope"
@@ -1156,5 +1169,121 @@ describe("HTTP API", () => {
     expect((await call("/api/nope")).status).toBe(404);
     const t = createThread(db, {});
     expect(listMessages(db, t.id)).toEqual([]);
+  });
+
+  it("skills: agents read, fetch and propose only with granted tools; workspace never from the body", async () => {
+    const run = tokens.issue("task-s", "web-dev", ["skill_read", "skill_propose"]);
+    const post = (tool: string, body: unknown) =>
+      fetch(`${base}/api/agent/${tool}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${run.token}` },
+        body: JSON.stringify(body),
+      });
+    expect(await (await post("skill_read", { name: "x", workspace: "other" })).json()).toEqual({
+      ok: true,
+      text: "skill body",
+    });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-s" },
+      question: "skill_read: x",
+    });
+    await post("skill_propose", {
+      name: "r",
+      description: "d",
+      body: "b",
+      reason: "why",
+      source_url: "https://example.com/r.md",
+      workspace: "shared",
+    });
+    expect(questions.at(-1)?.question).toBe(
+      'skill_propose: {"name":"r","description":"d","body":"b","reason":"why","sourceUrl":"https://example.com/r.md"}',
+    );
+    expect((await post("skill_fetch", { url: "https://example.com" })).status).toBe(403);
+    expect((await post("skill_nope", {})).status).toBe(403);
+  });
+
+  it("skills: the owner adds, edits, switches, deletes and sets the mode (session + CSRF only)", async () => {
+    upsertAgent(db, { id: "web-dev", name: "Web", role: "dev", workspace: "web-clients" });
+    const { call } = await pair();
+    const add = (body: unknown) =>
+      call("/api/skills", { method: "POST", body: JSON.stringify(body) });
+    const draft = {
+      workspace: "web-clients",
+      name: "owner-report",
+      description: "Report",
+      body: "Plain.",
+    };
+    expect((await add(draft)).status).toBe(200);
+    expect((await add(draft)).status).toBe(409);
+    expect((await add({ ...draft, name: "../x" })).status).toBe(400);
+    expect((await add({ ...draft, workspace: ".." })).status).toBe(400);
+    expect(
+      readFileSync(join(runDir, "skills", "web-clients", "owner-report.md"), "utf8"),
+    ).toContain("Plain.");
+
+    const put = (path: string, body: unknown) =>
+      call(path, { method: "PUT", body: JSON.stringify(body) });
+    expect((await put("/api/skills/web-clients/owner-report", { enabled: false })).status).toBe(
+      200,
+    );
+    await put("/api/skills/web-clients/owner-report", { description: "New", body: "Changed." });
+    expect((await put("/api/skills/web-clients/missing", { enabled: true })).status).toBe(404);
+    expect((await put("/api/skills-mode/web-clients", { mode: "auto" })).status).toBe(200);
+    expect((await put("/api/skills-mode/web-clients", { mode: "yolo" })).status).toBe(400);
+
+    const list = (await (await call("/api/skills")).json()) as {
+      skills: { name: string; description: string; enabled: boolean; body: string }[];
+      workspaces: string[];
+      modes: Record<string, string>;
+      proposals: unknown[];
+    };
+    expect(list.skills).toMatchObject([
+      { name: "owner-report", description: "New", enabled: false, body: "Changed." },
+    ]);
+    expect(list.workspaces).toEqual(["shared", "web-clients"]);
+    expect(list.modes).toEqual({ shared: "review", "web-clients": "auto" });
+    expect(list.proposals).toEqual([]);
+
+    // Writes need the CSRF header; an agent's run token is not a session.
+    const noCsrf = await call("/api/skills/web-clients/owner-report", {
+      method: "DELETE",
+      headers: { "x-achords-csrf": "wrong" },
+    });
+    expect(noCsrf.status).toBe(403);
+    const run = tokens.issue("task-x", "web-dev", ["skill_propose"]);
+    const viaToken = await fetch(`${base}/api/skills`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${run.token}`,
+        origin: base,
+      },
+      body: JSON.stringify(draft),
+    });
+    expect(viaToken.status).toBe(401);
+    expect((await call("/api/skills/web-clients/owner-report", { method: "DELETE" })).status).toBe(
+      200,
+    );
+    expect((await call("/api/skills/web-clients/owner-report", { method: "DELETE" })).status).toBe(
+      404,
+    );
+  });
+
+  it("skills: approve and reject go through the message actions; import refuses unsafe links", async () => {
+    const { call } = await pair();
+    const act = await call("/api/actions", {
+      method: "POST",
+      body: JSON.stringify({ data: "skill:approve:ab12" }),
+    });
+    expect(act.status).toBe(200);
+    expect(decisions.at(-1)).toEqual({ id: "ab12", approve: true });
+    for (const url of [
+      "http://example.com/s.md",
+      "https://127.0.0.1/s.md",
+      "https://localhost/x",
+    ]) {
+      const r = await call("/api/skills/import", { method: "POST", body: JSON.stringify({ url }) });
+      expect(r.status, url).toBe(422);
+    }
   });
 });

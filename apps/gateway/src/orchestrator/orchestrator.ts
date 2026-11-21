@@ -103,6 +103,7 @@ import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/provi
 import { z } from "zod";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
 import { describeCall, describeResult } from "./publish-text.ts";
+import { createSkillFlow, type SkillRequest } from "./skills.ts";
 
 /** Tool output (often markdown or JSON) as one plain line for the owner. */
 export const plainLine = (text: string): string => {
@@ -301,7 +302,22 @@ export interface Orchestrator {
     from: string,
     to: string,
   ): { ok: true; override: boolean } | { ok: false; reason: string };
-  /** A message button (Telegram or web): proposal|move|access|publish:<verb>:<id>. */
+  /** Skills (ADR-0049): the full text of a skill the calling agent sees. */
+  skillRead(
+    from: { from: "task"; taskId: string },
+    name: string,
+  ): { ok: true; text: string } | { ok: false; reason: string };
+  /** Fetches a skill page for the calling agent, with the closest existing skills. */
+  skillFetch(
+    from: { from: "task"; taskId: string },
+    url: string,
+  ): Promise<{ ok: true; text: string; untrusted: string } | { ok: false; reason: string }>;
+  /** A new skill or a patch: applied where the rules allow it, otherwise Approve / Reject. */
+  skillPropose(
+    from: { from: "task"; taskId: string },
+    request: SkillRequest,
+  ): { ok: true; text: string } | { ok: false; reason: string };
+  /** A message button (Telegram or web): proposal|move|access|publish|skill:<verb>:<id>. */
   runAction(data: string): { ok: boolean; message: string };
   /** A workspace's workflow and its permission matrix (read-only web view). */
   workflow(workspace: string): { workflow: Workflow; matrix: ReturnType<typeof permissionMatrix> };
@@ -348,6 +364,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const { db, home } = deps;
   const redact = deps.redact ?? ((s: string) => s);
   const agentsDir = join(home, "agents");
+  const skills = createSkillFlow({ db, dir: join(home, "skills"), redact });
 
   // Re-read on every use so manifest edits apply without a restart; mirrored into the DB
   // because tasks reference agents by id.
@@ -776,7 +793,38 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   };
 
+  /** The skill caller from its task: agent, workspace and whether the run reads the open web. */
+  const skillCaller = (taskId: string) => {
+    const task = getTask(db, taskId);
+    const m = task?.assigneeAgentId ? agents().get(task.assigneeAgentId) : undefined;
+    if (!task || !m || task.workerSpec) return undefined;
+    return {
+      agentId: m.id,
+      workspace: m.workspace,
+      taskId: task.id,
+      threadId: task.threadId,
+      openWeb:
+        m.tools.some((x) => x === "WebFetch" || x === "WebSearch") ||
+        elevatedUntil(task.rootId ?? task.id) !== undefined,
+    };
+  };
+
   const orchestrator: Orchestrator = {
+    skillRead(from, name) {
+      const c = skillCaller(from.taskId);
+      return c ? skills.read(c.workspace, name) : { ok: false, reason: "unknown calling task" };
+    },
+
+    async skillFetch(from, url) {
+      const c = skillCaller(from.taskId);
+      return c ? skills.fetch(c.workspace, url) : { ok: false, reason: "unknown calling task" };
+    },
+
+    skillPropose(from, request) {
+      const c = skillCaller(from.taskId);
+      return c ? skills.propose(c, request) : { ok: false, reason: "unknown calling task" };
+    },
+
     openRoom(from, request) {
       const all = agents();
       const parent = getTask(db, from.taskId);
@@ -874,6 +922,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
 
     runAction(data) {
+      const skill = /^skill:(approve|reject):([\w-]{1,36})$/.exec(data);
+      if (skill) return skills.decide(skill[2] as string, skill[1] === "approve");
       const pub = /^publish:(approve|reject):([\w-]{1,36})$/.exec(data);
       if (pub) {
         const id = pub[2] as string;
@@ -1505,7 +1555,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const catalogIds = deps.integrations
           ? [...deps.integrations.catalog().keys()].join(", ")
           : "";
-        const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
+        const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nSkills: when the owner sends a link to a skill to build in, delegate it to the agent whose work it fits; agents can fetch the link and save or merge the skill.\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
 
         const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
         const bossBudget = req.billing === "api" ? deps.budget?.(provider.id) : undefined;
@@ -1895,6 +1945,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         "propose_agent",
         "move_task",
         "request_access",
+        "skill_read",
+        "skill_fetch",
+        "skill_propose",
         ...(delegates.length ? ["delegate", "open_room"] : []),
         ...(manifest.tools.length ? ["spawn_worker"] : []),
       ];
@@ -1948,6 +2001,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
     built.req.appendSystemPrompt =
       `${built.req.appendSystemPrompt ?? ""}\n\n${INJECTION_GUARD}`.trim();
+    // Skills (ADR-0049): only the index; the hub's skill_read gives the full text.
+    if (servers.achords) {
+      built.req.appendSystemPrompt = `${built.req.appendSystemPrompt}\n\n${skills.promptBlock(manifest.workspace)}`;
+    }
     // Live progress (step 5b): the agent keeps its own checklist; discussion turns are too short.
     if (!task.roomId) {
       built.req.tools = [...built.req.tools, "TodoWrite"];

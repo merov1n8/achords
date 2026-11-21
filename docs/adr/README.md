@@ -47,3 +47,4 @@
 - [ADR-0045: Google Gemini through the gemini CLI (stage 1)](0045-gemini-through-gemini-cli.md)
 - [ADR-0046: Spend meters and API budgets](0046-spend-meters-and-api-budgets.md)
 - [ADR-0047: Several sites per project, each with its own credentials](0047-several-sites-per-project.md)
+- [ADR-0049: Skills: Markdown how-tos, progressive disclosure, owner-approved proposals](0049-skills.md)

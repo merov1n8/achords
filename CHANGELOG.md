@@ -63,6 +63,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Skills: short how-tos your agents follow (Skills page in the sidebar and in the phone's More menu). Agents see each skill's name and description and read the full text when they need it. After a task that took several attempts or a correction from you, an agent can propose a new skill or a change; you get it in the chat with Approve / Reject, changes shown as before and after. Per workspace you can let new skills be saved automatically; changes always wait for you. Send a link in chat ("found a good skill, build it in") and it is built in directly, or proposed as a change to a similar skill you already have. On the Skills page you can also add, edit, switch off, delete and import skills from a link yourself. Two starter skills ship: writing the final report in plain language, and a self-check before reporting done.
+
 - Kanban: opens on "All" workspaces with the assignee on every card; all columns fit the screen.
   A click (or Enter) opens a card: edit title and description, move it, keep sub-items and your
   own comments (the agent sees them next time), or delete it after a confirmation.
