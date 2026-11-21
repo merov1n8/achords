@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Google Gemini (first stage, not tried live yet): agents can run on Gemini models through the official gemini CLI (`cli-gemini/<model>`), on your Google login or an API key (Settings → Model access). For now Gemini runs edit only their own folders, run no shell commands and get no achords tools or integrations.
 - Model access (Settings): Claude and OpenAI can each run on your subscription or on an API key; the key is kept in the vault and given only to that provider's runs, and switching back needs no new sign-in. Not yet tried with real API keys.
 - Automatic updates (Settings → Updates, on by default): achords checks its public main branch every hour, takes a new version only when the automatic tests passed, installs it when no agent is working, and goes back to the previous version by itself if the new one does not build or start. You get one line about what changed.
 - Your own accounts (Settings → Integrations): pages, properties, sites and your own WordPress for work that has no client project. Google and Meta sign-ins were already shared by everything; now your own business can use them too, while a client project still only reaches that client's accounts.

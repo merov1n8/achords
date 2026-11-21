@@ -23,7 +23,7 @@ import {
   loadProjects,
   ownProject,
 } from "@achords/policy";
-import { CODEX_API_KEY_ENV, cliClaude, cliCodex, localOpenAI } from "@achords/providers";
+import { CODEX_API_KEY_ENV, cliClaude, cliCodex, cliGemini, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
@@ -225,6 +225,10 @@ export function runGateway(home: string): Promise<number> {
       // Manifest models "local/<name>" (ADR-0006); ACHORDS_LOCAL_URL points at mlx-lm etc.
       // OpenAI models through the official codex CLI (ADR-0040).
       "cli-codex": cliCodex(),
+      // Google Gemini through the official gemini CLI (ADR-0045, stage 1).
+      "cli-gemini": existsSync(join(dirname(process.execPath), "gemini"))
+        ? cliGemini({ command: [join(dirname(process.execPath), "gemini")] })
+        : cliGemini(),
       local: localOpenAI(
         process.env.ACHORDS_LOCAL_URL ? { baseUrl: process.env.ACHORDS_LOCAL_URL } : {},
       ),
