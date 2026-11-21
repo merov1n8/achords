@@ -52,9 +52,15 @@ and Search Console site, and the one sign-in reaches all of them.
    revokes the refresh token after 7 days). Verification is not needed for own use; the sign-in
    shows "Google hasn't verified this app": Advanced → Go to ….
 3. Create an OAuth client of type "Desktop app" and download its JSON.
-4. `pnpm achords connect google ~/Downloads/client_secret_….json`, sign in, tick every box.
-   The client and refresh token land in the vault (`google-client-id`, `google-client-secret`,
-   `google-refresh-token`, `google-project-id`); delete the JSON afterwards.
+4. Web: Settings → Integrations → Shared sign-ins → **Add sign-in** → Google. Choose (or paste)
+   the JSON, then **Sign in with Google**; sign in in the new tab and tick every box. Google sends
+   the browser back to `http://127.0.0.1:<port>/api/oauth/google/callback` on the gateway (ADR-0048).
+   On a phone or another computer that page shows an error: copy its whole address into the box
+   in the dialog and press **Finish sign-in**. A started sign-in is valid for 10 minutes.
+   Terminal alternative: `pnpm achords connect google ~/Downloads/client_secret_….json`.
+   Either way the client and refresh token land in the vault (`google-client-id`,
+   `google-client-secret`, `google-refresh-token`, `google-project-id`); delete the JSON
+   afterwards. **Revoke** on the GA4 or Search Console row deletes these four (both stop working).
 5. Per client project, name its own property and site in `~/.achords/projects/<slug>/project.yaml`
    (agents see nothing else, ADR-0036):
 
@@ -63,6 +69,20 @@ and Search Console site, and the one sign-in reaches all of them.
      ga4: ["324490876"]                      # GA4 property id (Admin → Property details)
      search-console: ["sc-domain:example.com"] # exactly as Search Console lists it
    ```
+
+## Meta and other token sign-ins
+
+Web: Settings → Integrations → **Add sign-in** → Meta, paste the long-lived Page/User token
+(stored as `meta-access-token`, never shown again). Terminal: `pnpm achords secret set
+meta-access-token`. **Revoke** on the row deletes the token.
+
+## Apps on this computer (Blender, Unity)
+
+Web: Settings → Integrations → Apps on this Mac → **Add app**: pick the app, check that its
+program is found (the dialog shows how to install it otherwise) and tick the agents that may use
+it. This writes their `agent.yaml` `mcp` list (validated first, comments kept); **Edit** changes
+the agents, **Remove** takes the app from every agent. Terminal alternative: add the id to `mcp:`
+in `~/.achords/agents/<id>/agent.yaml`.
 
 ## WordPress
 

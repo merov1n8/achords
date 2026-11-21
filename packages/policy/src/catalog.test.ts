@@ -8,6 +8,7 @@ import {
   grantedIntegrations,
   integrationStatus,
   loadCatalog,
+  ownerSecrets,
   publishMode,
   scopeRefusal,
   scopeTargets,
@@ -246,6 +247,34 @@ describe("integration status (doctor, web)", () => {
       ).map((s) => [s.id, s.kind]),
     );
     expect(kinds).toMatchObject({ ga: "account", wordpress: "client", blender: "local" });
+  });
+
+  it("names the owner-wide vault ids, the web sign-in kind and the install hint", () => {
+    const { seed, owner } = dirs();
+    writeFileSync(join(owner, "wordpress.yaml"), WORDPRESS);
+    writeFileSync(
+      join(owner, "ga.yaml"),
+      'id: ga\nname: GA\ncommand: uvx\noauth: google\nenv:\n  T: "vault:google-refresh-token"\n  U: "vault:google-refresh-token"\n',
+    );
+    writeFileSync(
+      join(owner, "blender.yaml"),
+      "id: blender\nname: B\ncommand: uvx\ninstall: Get uv\n",
+    );
+    const catalog = loadCatalog(seed, owner);
+    expect(ownerSecrets(catalog.get("ga") as CatalogEntry)).toEqual(["google-refresh-token"]);
+    expect(ownerSecrets(catalog.get("wordpress") as CatalogEntry)).toEqual([]);
+    const by = Object.fromEntries(
+      integrationStatus(
+        catalog,
+        [],
+        [],
+        () => false,
+        () => false,
+      ).map((s) => [s.id, s]),
+    );
+    expect(by.ga).toMatchObject({ oauth: "google", secrets: ["google-refresh-token"] });
+    expect(by.blender).toMatchObject({ install: "Get uv", secrets: [] });
+    expect(by.wordpress?.oauth).toBeUndefined();
   });
 });
 

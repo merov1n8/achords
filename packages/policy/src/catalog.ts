@@ -28,6 +28,11 @@ export const catalogEntrySchema = z
     // file with these fields, written by the launcher and deleted when the server exits.
     files: z.record(z.string().regex(ENV), z.record(z.string(), value)).default({}),
     hosts: z.array(z.string().min(1)).default([]),
+    // How the owner signs in from the web (ADR-0048): "google" = the shared Google sign-in that
+    // fills the google-* vault ids; without it the owner types the entry's vault secrets.
+    oauth: z.enum(["google"]).optional(),
+    // What to install when `command` is not on the gateway's PATH (shown on the web page).
+    install: z.string().min(1).optional(),
     tools: z
       .object({
         read: z.array(z.string().regex(TOOL)).default([]),
@@ -151,6 +156,15 @@ export function secretRefs(entry: CatalogEntry, project?: string): string[] {
     .map((v) => (project ? v.replaceAll("{project}", project) : v));
 }
 
+/** Owner-wide vault ids of an entry (no `{project}` or `{site}`), without the `vault:` prefix. */
+export const ownerSecrets = (entry: CatalogEntry): string[] => [
+  ...new Set(
+    secretRefs(entry)
+      .filter((r) => !r.includes("{project}") && !r.includes("{site}"))
+      .map((r) => r.slice("vault:".length)),
+  ),
+];
+
 /**
  * The integrations a manifest may use, or the reason it may not. Deny by default: unknown ids,
  * and secrets next to a shell (same-user processes can read each other's environment).
@@ -229,8 +243,14 @@ export interface IntegrationStatus {
   /** Program that starts the server (undefined for builtin servers). */
   command?: string;
   commandFound: boolean;
+  /** Owner-wide vault ids the entry uses (ids only, never values). */
+  secrets: string[];
   /** Owner-wide vault ids that are not set. */
   missingSecrets: string[];
+  /** Web sign-in kind (catalog `oauth`), e.g. "google". */
+  oauth?: "google";
+  /** Install hint for a missing program. */
+  install?: string;
   /** Credentials per client project (`{project}`): the projects that have all of them. */
   perProject: boolean;
   projectsReady: string[];
@@ -265,10 +285,8 @@ export function integrationStatus(
     const refs = secretRefs(entry);
     const accounts = accountRefs(entry);
     const perProject = refs.some((r) => r.includes("{project}")) || accounts.length > 0;
-    const missingSecrets = refs
-      .filter((r) => !r.includes("{project}") && !r.includes("{site}"))
-      .map(vaultId)
-      .filter((id) => !hasSecret(id));
+    const secrets = ownerSecrets(entry);
+    const missingSecrets = secrets.filter((id) => !hasSecret(id));
     const sites = entry.sites
       ? projectList.flatMap((p) =>
           siteStatus(
@@ -300,7 +318,10 @@ export function integrationStatus(
       usedBy: agentList.filter((m) => m.mcp.includes(entry.id)).map((m) => m.id),
       ...(entry.command ? { command: entry.command } : {}),
       commandFound,
+      secrets,
       missingSecrets,
+      ...(entry.oauth ? { oauth: entry.oauth } : {}),
+      ...(entry.install ? { install: entry.install } : {}),
       perProject,
       projectsReady,
       scoped: entry.scope !== undefined,

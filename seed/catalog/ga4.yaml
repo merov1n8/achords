@@ -14,6 +14,8 @@ files:
     client_secret: "vault:google-client-secret"
     refresh_token: "vault:google-refresh-token"
     quota_project_id: "vault:google-project-id"
+# Signed in from the web Integrations page or with `achords connect google`.
+oauth: google
 hosts: [analyticsdata.googleapis.com, analyticsadmin.googleapis.com, oauth2.googleapis.com]
 tools:
   read:

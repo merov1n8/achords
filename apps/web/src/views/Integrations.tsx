@@ -1,20 +1,20 @@
-import { KeyRound, Plus, Trash2 } from "lucide-preact";
+import { Pencil, Plus, Trash2, Unplug } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
-import { Modal } from "../components/Modal.tsx";
+import { Confirm, Modal } from "../components/Modal.tsx";
 import { Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
+import { revocable, revokeAffects } from "../integrations.ts";
 import { usePoll } from "../poll.ts";
 import type { IntegrationStatus } from "../types.ts";
+import { AddSignin, LocalApp } from "./IntegrationForms.tsx";
 import { CHANNELS, type Row, siteLists, toLists, toRows } from "./Projects.tsx";
-import { SecretInput } from "./SecretInput.tsx";
 
 /** What each integration still needs, in plain words. */
 function needs(s: IntegrationStatus): string[] {
   const out: string[] = [];
   if (!s.commandFound) out.push(t("integrations.noCommand", { command: s.command ?? "" }));
-  if (s.missingSecrets.some((id) => id.startsWith("google-")))
-    out.push(t("integrations.googleSignIn"));
+  if (s.oauth === "google" && s.missingSecrets.length) out.push(t("integrations.googleSignIn"));
   else if (s.missingSecrets.length)
     out.push(t("integrations.missingSecrets", { ids: s.missingSecrets.join(", ") }));
   if (s.kind === "client" && !s.projectsReady.length) out.push(t("integrations.noProjectSecrets"));
@@ -94,18 +94,28 @@ function Status(props: { s: IntegrationStatus }) {
   );
 }
 
-/** One table of integrations; `extra` adds the group's own cell (sign-in, sites, …). */
+/**
+ * One table of integrations; `extra` adds the group's own cell (sign-in, sites, …), `add` the
+ * primary button of the section and `actions` the row's own buttons next to Test.
+ */
 function Group(props: {
   title: string;
   help: string;
   items: IntegrationStatus[];
   extra: (s: IntegrationStatus) => preact.ComponentChildren;
+  add?: preact.ComponentChildren;
+  actions?: (s: IntegrationStatus) => preact.ComponentChildren;
 }) {
   if (!props.items.length) return null;
   return (
     <section class="gap-top">
-      <h2>{props.title}</h2>
-      <p class="muted small">{props.help}</p>
+      <div class="page-head">
+        <div>
+          <h2>{props.title}</h2>
+          <p class="muted small">{props.help}</p>
+        </div>
+        {props.add}
+      </div>
       <div class="panel">
         <table>
           <thead>
@@ -135,6 +145,7 @@ function Group(props: {
                 </td>
                 <td class="actions">
                   <TestButton s={s} />
+                  {props.actions?.(s)}
                 </td>
               </tr>
             ))}
@@ -142,37 +153,6 @@ function Group(props: {
         </table>
       </div>
     </section>
-  );
-}
-
-/** The token of a shared sign-in that is typed in (Meta); Google comes from `achords connect`. */
-function SetToken(props: { s: IntegrationStatus; onSaved: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ids = props.s.missingSecrets.filter((id) => !id.startsWith("google-"));
-  if (!ids.length) return null;
-  return (
-    <>
-      <button type="button" class="btn" onClick={() => setOpen(true)}>
-        <KeyRound class="icon" />
-        {t("integrations.setToken")}
-      </button>
-      {open && (
-        <Modal title={props.s.name} onClose={() => setOpen(false)}>
-          {ids.map((id) => (
-            <SecretInput
-              key={id}
-              id={id}
-              label={t("integrations.setSecret")}
-              set={false}
-              onSaved={() => {
-                setOpen(false);
-                props.onSaved();
-              }}
-            />
-          ))}
-        </Modal>
-      )}
-    </>
   );
 }
 
@@ -319,9 +299,33 @@ function AddAccount(props: { onClose: () => void; onAdd: (row: Row) => Promise<v
   );
 }
 
+/** Icon button of a table row. */
+function RowButton(props: { label: string; icon: preact.ComponentChildren; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      class="iconbtn"
+      aria-label={props.label}
+      title={props.label}
+      onClick={props.onClick}
+    >
+      {props.icon}
+    </button>
+  );
+}
+
+type Dialog =
+  | { kind: "signin" }
+  | { kind: "revoke"; s: IntegrationStatus }
+  | { kind: "app"; edit?: IntegrationStatus }
+  | { kind: "removeApp"; s: IntegrationStatus };
+
 export function Integrations() {
   const list = usePoll(() => api<IntegrationStatus[]>("/api/integrations"), 30000);
-  const of = (kind: IntegrationStatus["kind"]) => (list.data ?? []).filter((s) => s.kind === kind);
+  const [dialog, setDialog] = useState<Dialog>();
+  const all = list.data ?? [];
+  const of = (kind: IntegrationStatus["kind"]) => all.filter((s) => s.kind === kind);
+  const close = () => setDialog(undefined);
   return (
     <>
       <div class="page-head">
@@ -332,7 +336,22 @@ export function Integrations() {
         title={t("integrations.group.account")}
         help={t("integrations.group.accountHelp")}
         items={of("account")}
-        extra={(s) => <SetToken s={s} onSaved={list.refresh} />}
+        extra={() => null}
+        add={
+          <button type="button" class="btn primary" onClick={() => setDialog({ kind: "signin" })}>
+            <Plus class="icon" />
+            {t("integrations.addSignin")}
+          </button>
+        }
+        actions={(s) =>
+          revocable(s) && (
+            <RowButton
+              label={t("integrations.revoke")}
+              icon={<Unplug class="icon" />}
+              onClick={() => setDialog({ kind: "revoke", s })}
+            />
+          )
+        }
       />
       <OwnAccounts onSaved={list.refresh} />
       <Group
@@ -354,9 +373,76 @@ export function Integrations() {
         title={t("integrations.group.local")}
         help={t("integrations.group.localHelp")}
         items={of("local")}
-        extra={() => null}
+        extra={(s) => !s.commandFound && s.install && <div class="muted">{s.install}</div>}
+        add={
+          <button type="button" class="btn primary" onClick={() => setDialog({ kind: "app" })}>
+            <Plus class="icon" />
+            {t("integrations.addApp")}
+          </button>
+        }
+        actions={(s) => (
+          <>
+            <RowButton
+              label={t("common.edit")}
+              icon={<Pencil class="icon" />}
+              onClick={() => setDialog({ kind: "app", edit: s })}
+            />
+            {s.usedBy.length > 0 && (
+              <RowButton
+                label={t("common.remove")}
+                icon={<Trash2 class="icon" />}
+                onClick={() => setDialog({ kind: "removeApp", s })}
+              />
+            )}
+          </>
+        )}
       />
       {list.error && <p class="error">{list.error}</p>}
+      {dialog?.kind === "signin" && (
+        <AddSignin items={of("account")} onClose={close} onSaved={list.refresh} />
+      )}
+      {dialog?.kind === "revoke" && (
+        <Confirm
+          title={t("integrations.revokeTitle", { name: dialog.s.oauth ? "Google" : dialog.s.name })}
+          message={t("integrations.revokeConfirm", {
+            names: revokeAffects(of("account"), dialog.s).join(", "),
+          })}
+          confirmLabel={t("integrations.revoke")}
+          danger
+          onConfirm={async () => {
+            await api(`/api/integrations/${dialog.s.id}/secrets`, { method: "DELETE" });
+            list.refresh();
+          }}
+          onClose={close}
+        />
+      )}
+      {dialog?.kind === "app" && (
+        <LocalApp
+          items={of("local")}
+          {...(dialog.edit ? { edit: dialog.edit } : {})}
+          onClose={close}
+          onSaved={list.refresh}
+        />
+      )}
+      {dialog?.kind === "removeApp" && (
+        <Confirm
+          title={t("integrations.removeAppTitle", { name: dialog.s.name })}
+          message={t("integrations.removeAppConfirm", {
+            name: dialog.s.name,
+            agents: dialog.s.usedBy.join(", "),
+          })}
+          confirmLabel={t("common.remove")}
+          danger
+          onConfirm={async () => {
+            await api(`/api/integrations/${dialog.s.id}/agents`, {
+              method: "PUT",
+              body: { agents: [] },
+            });
+            list.refresh();
+          }}
+          onClose={close}
+        />
+      )}
     </>
   );
 }
