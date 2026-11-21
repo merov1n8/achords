@@ -1293,6 +1293,33 @@ describe("HTTP API", () => {
     expect((await call("/api/projects/gone", { method: "DELETE" })).status).toBe(404);
   });
 
+  it("projects: git repositories accept GitHub and GitLab addresses only", async () => {
+    const { call } = await pair();
+    await call("/api/projects", {
+      method: "POST",
+      body: '{"slug":"repo","name":"Repo","workspace":"web-clients"}',
+    });
+    const put = (repository: string[]) =>
+      call("/api/projects/repo", {
+        method: "PUT",
+        body: JSON.stringify({ integrations: { repository } }),
+      });
+    expect(
+      (
+        await put([
+          "https://github.com/acme/booking",
+          "https://gitlab.com/acme/game.git",
+          "git@gitlab.com:acme/tools.git",
+          "https://gitlab.example.agency/team/site",
+        ])
+      ).status,
+    ).toBe(200);
+    for (const bad of ["github.com/acme/x", "https://github.com/acme", "ftp://x/y/z", "rm -rf /"]) {
+      const r = await put([bad]);
+      expect(r.status, bad).toBe(400);
+    }
+  });
+
   it("projects: list, create, and pick one for a thread", async () => {
     const { call } = await pair();
     const created = await call("/api/projects", {

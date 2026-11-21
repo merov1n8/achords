@@ -358,7 +358,7 @@
   "integrations.noProjectSecrets": "No client project has its credentials yet",
   "integrations.noAccounts": "No project lists its accounts (Projects → Edit → Accounts)",
   "projects.accounts": "Accounts",
-  "projects.accountsHelp": "The client's accounts, one per row; add several rows for the same channel. Agents of this project see them. Google Analytics, Search Console, Facebook and Instagram entries also limit agents to exactly these properties, sites, pages and accounts (use the IDs).",
+  "projects.accountsHelp": "The client's accounts, one per row; add several rows for the same channel. Agents of this project see them. Google Analytics, Search Console, Facebook and Instagram entries also limit agents to exactly these properties, sites, pages and accounts (use the IDs). Git repositories: agents of this project work only in these.",
   "projects.addAccount": "Add account",
   "projects.channel": "Channel",
   "projects.accountValue": "Account, page, handle or ID",
@@ -731,7 +731,9 @@
   "projects.removedTitle": "Project removed",
   "projects.removedText": "Its folder was moved here. Check it and delete it in Finder when you no longer need it:",
   "sites.site": "Site",
-  "projects.channel.repository": "Git repository (GitHub or GitLab address; agents of this project work only in these)",
+  "projects.channel.repository": "Git repository (GitHub or GitLab)",
   "chat.rename": "Rename chat",
-  "chat.renameHint": "Click to rename"
+  "chat.renameHint": "Click to rename",
+  "projects.pickChannel": "Choose a type",
+  "chat.titlePlaceholder": "Name this chat"
 }

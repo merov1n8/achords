@@ -1755,9 +1755,10 @@ td.actions > * {
   overflow-wrap: anywhere;
 }
 .title-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   border: 0;
   background: none;
   padding: 0 2px;
@@ -1779,4 +1780,14 @@ td.actions > * {
   font-size: 15px;
   font-weight: 600;
   max-width: 420px;
+}
+.title-edit .grow-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.title-edit .pencil {
+  width: 13px;
+  height: 13px;
+  color: var(--muted);
+  flex: none;
 }

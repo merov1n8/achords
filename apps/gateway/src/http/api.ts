@@ -102,6 +102,8 @@ import { serveStatic } from "./static.ts";
 // listens on: another gateway on 127.0.0.1 (a test, a second instance) cannot overwrite it.
 const cookieName = (req: IncomingMessage) => `achords_session_${req.socket.localPort}`;
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
+const GIT_REPO =
+  /^(https:\/\/[a-z0-9.-]+(:\d+)?(\/[\w.-]+){2,}\/?|git@[a-z0-9.-]+:[\w.-]+(\/[\w.-]+)+)$/i;
 /** The owner's remote address for the web UI (e.g. this Mac's Tailscale name). */
 const REMOTE_HOST_KEY = "web.remote_host";
 const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/;
@@ -1577,12 +1579,22 @@ export function createApiHandler(deps: ApiDeps) {
     if (!v || typeof v !== "object" || Array.isArray(v)) {
       throw new HttpError(400, "integrations: must be an object of lists");
     }
-    return Object.fromEntries(
+    const lists = Object.fromEntries(
       Object.entries(v as Record<string, unknown>).map(([key, list]) => [
         key,
         strList(list, `integrations.${key}`),
       ]),
     );
+    // Git repositories: an https or ssh address of a repository (GitHub, GitLab, self-hosted).
+    for (const r of lists.repository ?? []) {
+      if (r.trim() && !GIT_REPO.test(r.trim())) {
+        throw new HttpError(
+          400,
+          `"${r.slice(0, 80)}" is not a repository address; use e.g. https://github.com/owner/repo or https://gitlab.com/group/project`,
+        );
+      }
+    }
+    return lists;
   };
   const catalogEntry = (id: string): CatalogEntry => {
     const entry = deps.catalog?.().get(id);

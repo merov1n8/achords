@@ -215,18 +215,33 @@ export function Accounts(props: {
       {t("projects.accounts")}
       {props.rows.map((r, i) => (
         <div class="row" key={i}>
-          <input
+          <select
             class="input"
-            style={{ maxWidth: "12rem" }}
-            list="project-channels"
-            placeholder={t("projects.channel")}
+            style={{ maxWidth: "16rem" }}
             aria-label={t("projects.channel")}
             value={r.channel}
-            onInput={(e) => set(i, { channel: e.currentTarget.value })}
-          />
+            onChange={(e) => set(i, { channel: e.currentTarget.value })}
+          >
+            <option value="" disabled>
+              {t("projects.pickChannel")}
+            </option>
+            {CHANNELS.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+            {/* A type set by hand in project.yaml stays selectable. */}
+            {r.channel && !CHANNELS.some((c) => c.id === r.channel) && (
+              <option value={r.channel}>{r.channel}</option>
+            )}
+          </select>
           <input
             class="input"
-            placeholder={t("projects.accountValue")}
+            placeholder={
+              r.channel === "repository"
+                ? "https://github.com/owner/repo"
+                : t("projects.accountValue")
+            }
             aria-label={t("projects.accountValue")}
             value={r.value}
             onInput={(e) => set(i, { value: e.currentTarget.value })}
@@ -241,11 +256,6 @@ export function Accounts(props: {
           </button>
         </div>
       ))}
-      <datalist id="project-channels">
-        {CHANNELS.map((c) => (
-          <option key={c.id} value={c.id} label={c.label} />
-        ))}
-      </datalist>
       <div>
         <button
           type="button"
