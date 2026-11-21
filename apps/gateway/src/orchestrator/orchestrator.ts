@@ -485,6 +485,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ...(roots.length > 1 ? { addDirs: roots.slice(1) } : {}),
       ...(system ? { appendSystemPrompt: system } : {}),
       ...(m.budget.per_run_usd ? { maxBudgetUsd: m.budget.per_run_usd } : {}),
+      ...(m.effort ? { effort: m.effort } : {}),
       ...(pay ? { billing: pay.mode, ...(pay.env ? { env: pay.env } : {}) } : {}),
     };
     return { provider, req };

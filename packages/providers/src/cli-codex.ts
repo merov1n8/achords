@@ -147,6 +147,13 @@ export function codexArgs(
     req.cwd,
     "-c",
     'approval_policy="never"',
+    // Codex knows low/medium/high; the claude-only xhigh and max map to its highest.
+    ...(req.effort
+      ? [
+          "-c",
+          `model_reasoning_effort="${req.effort === "low" || req.effort === "medium" ? req.effort : "high"}"`,
+        ]
+      : []),
     // API mode: our own provider entry reads the key from the run's environment; the ChatGPT
     // login of the codex CLI is not touched (Phase 4).
     ...(req.billing === "api"

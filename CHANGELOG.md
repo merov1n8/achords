@@ -36,6 +36,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Modals close after a successful save (project edit, WordPress logins, sign-in tokens, Google
+  sign-in). Agent workflow roles are checkboxes of the roles the workflows use, plus your own.
+- Agents have an Effort setting (low to max): passed to Claude as `--effort`, to OpenAI models as
+  reasoning effort (up to high); Gemini ignores it.
 - Agents → Edit opens the same form as New agent, filled in: name, role, workspace, scope
   (AGENT.md), workflow roles, models, tools, folders, shell, network, delegation and budget.
   Settings the form does not show (integrations, publishing) are kept.

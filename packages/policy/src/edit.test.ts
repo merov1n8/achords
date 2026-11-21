@@ -268,6 +268,14 @@ describe("updateAgent (web: edit with the same form as create)", () => {
     expect(readFileSync(join(dir, "social", "AGENT.md"), "utf8")).toBe(fields.doc);
   });
 
+  it("sets and clears the effort level", () => {
+    updateAgent(dir, "social", { ...fields, effort: "xhigh" });
+    expect(loadManifest(join(dir, "social", "agent.yaml")).effort).toBe("xhigh");
+    updateAgent(dir, "social", fields);
+    expect(loadManifest(join(dir, "social", "agent.yaml")).effort).toBeUndefined();
+    expect(() => updateAgent(dir, "social", { ...fields, effort: "huge" as "max" })).toThrow();
+  });
+
   it("sets a shell and a budget when given, removes the budget at 0", () => {
     updateAgent(dir, "social", {
       ...fields,

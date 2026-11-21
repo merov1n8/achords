@@ -65,6 +65,8 @@ export const manifestSchema = z
       .object({ allow: z.array(z.string().min(1)).default([]) })
       .strict()
       .default({ allow: [] }),
+    // Claude --effort (codex reasoning effort, capped at high); absent = the CLI's default.
+    effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
     publish_mode: z
       .object({
         default: publish.default("review"),
