@@ -57,6 +57,7 @@ export {
   OWN,
   ownProject,
   type Project,
+  removeProject,
   saveOwnAccounts,
   updateProject,
 } from "./projects.ts";

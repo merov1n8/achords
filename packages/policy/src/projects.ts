@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
@@ -119,6 +126,27 @@ export function updateProject(
   );
   if (patch.doc !== undefined) writeFileSync(join(cur.dir, "PROJECT.md"), patch.doc);
   return loadProjects(projectsDir).get(slug) as Project;
+}
+
+/**
+ * Takes a project out of Achords without deleting anything: its folder (PROJECT.md, files/) is
+ * moved to `asideDir/<slug>-<date>` for the owner to look through and delete by hand. Returns
+ * the new path. The slug is free again afterwards.
+ */
+export function removeProject(
+  projectsDir: string,
+  slug: string,
+  asideDir: string,
+  now = Date.now(),
+): string {
+  const cur = loadProjects(projectsDir).get(slug);
+  if (!cur) throw new Error(`no project ${slug}`);
+  mkdirSync(asideDir, { recursive: true, mode: 0o700 });
+  const day = new Date(now).toISOString().slice(0, 10);
+  let target = join(asideDir, `${slug}-${day}`);
+  for (let n = 2; existsSync(target); n++) target = join(asideDir, `${slug}-${day}-${n}`);
+  renameSync(cur.dir, target);
+  return target;
 }
 
 /** Trimmed values, empty ones and empty lists left out (the web form sends blank rows). */

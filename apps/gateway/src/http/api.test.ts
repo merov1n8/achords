@@ -1272,6 +1272,24 @@ describe("HTTP API", () => {
     expect((await fetch(`${base}/api/runs/live`)).status).toBe(401);
   });
 
+  it("projects: delete moves the folder aside (files kept), refused while work runs", async () => {
+    const { call } = await pair();
+    await call("/api/projects", {
+      method: "POST",
+      body: '{"slug":"gone","name":"Gone","workspace":"web-clients"}',
+    });
+    const busy = enqueue(db, { title: "running", project: "gone" });
+    const refused = await call("/api/projects/gone", { method: "DELETE" });
+    expect(refused.status).toBe(409);
+    db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(busy.id);
+    const res = await call("/api/projects/gone", { method: "DELETE" });
+    const { movedTo } = (await res.json()) as { movedTo: string };
+    expect(movedTo).toMatch(/projects-removed\/gone-\d{4}-\d{2}-\d{2}$/);
+    expect(existsSync(join(movedTo, "PROJECT.md"))).toBe(true);
+    expect((await call("/api/projects/gone")).status).toBe(404);
+    expect((await call("/api/projects/gone", { method: "DELETE" })).status).toBe(404);
+  });
+
   it("projects: list, create, and pick one for a thread", async () => {
     const { call } = await pair();
     const created = await call("/api/projects", {
