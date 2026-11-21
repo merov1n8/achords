@@ -36,6 +36,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Integrations → Per client lists every WordPress site as its own row (site, project, status)
+  with its own Login and Test connection.
 - The product is written Achords in the web UI, notices and docs. The agent list shows the name
   with @id under it instead of a separate id column.
 - The Chat page has its own chat list column (search, Recent / By project, pin, rename, archive,
