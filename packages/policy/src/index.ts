@@ -40,6 +40,7 @@ export {
   parseManifest,
 } from "./manifest.ts";
 export { allowRules } from "./permissions.ts";
+export { costOf, loadPricing, type Pricing } from "./pricing.ts";
 export {
   createProject,
   loadOwnAccounts,

@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  apiSpendSince,
   appendMessage,
   getSetting,
   homePaths,
@@ -15,11 +16,14 @@ import {
   setDraining,
   setSetting,
 } from "@achords/core";
+import { t } from "@achords/i18n";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
 import {
+  costOf,
   integrationStatus,
   loadAgents,
   loadCatalog,
+  loadPricing,
   loadProjects,
   ownProject,
 } from "@achords/policy";
@@ -192,8 +196,47 @@ export function runGateway(home: string): Promise<number> {
     };
   };
 
+  // Phase 4 budgets: API money per provider and day/month; warn at 80%, wait at 100%.
+  const periodStart = (period: "day" | "month") => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    if (period === "month") d.setDate(1);
+    return d.getTime();
+  };
+  const budget = (provider: string): string | undefined => {
+    const label = BILLING[provider]?.label ?? provider;
+    for (const period of ["day", "month"] as const) {
+      const limit = Number(getSetting(db, `budget.${provider}.${period}`) ?? 0);
+      if (!limit) continue;
+      const since = periodStart(period);
+      const spent = apiSpendSince(db, provider, since);
+      const once = (what: string, text: string) => {
+        const key = `budget.told.${provider}.${period}.${what}.${since}`;
+        if (getSetting(db, key)) return;
+        setSetting(db, key, "1");
+        notifyOwner(text);
+      };
+      const vars = {
+        provider: label,
+        period: t(`budget.${period}`),
+        spent: spent.toFixed(2),
+        limit: limit.toFixed(2),
+      };
+      if (spent >= limit) {
+        const reason = t("budget.reached", vars);
+        once("stop", `⛔ ${reason}`);
+        return reason;
+      }
+      if (spent >= limit * 0.8) once("warn", `⚠️ ${t("budget.warning", vars)}`);
+    }
+    return undefined;
+  };
+
   const orchestrator = createOrchestrator({
     billing,
+    budget,
+    // Price list for CLIs that report tokens only; read per run, so edits apply at once.
+    price: (model, usage) => costOf(loadPricing(home), model, usage),
     db,
     home,
     hub,
@@ -388,6 +431,22 @@ export function runGateway(home: string): Promise<number> {
             setMode: (provider, mode) => {
               if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
               setSetting(db, `billing.${provider}`, mode);
+            },
+            budgets: () =>
+              Object.fromEntries(
+                Object.keys(BILLING).map((p) => [
+                  p,
+                  {
+                    day: Number(getSetting(db, `budget.${p}.day`) ?? 0),
+                    month: Number(getSetting(db, `budget.${p}.month`) ?? 0),
+                    spentDay: apiSpendSince(db, p, periodStart("day")),
+                    spentMonth: apiSpendSince(db, p, periodStart("month")),
+                  },
+                ]),
+              ),
+            setBudget: (provider, period, usd) => {
+              if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
+              setSetting(db, `budget.${provider}.${period}`, String(usd));
             },
           },
           update: {
