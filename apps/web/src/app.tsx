@@ -182,7 +182,7 @@ function Sidebar(props: {
     <nav class="side" aria-label={t("nav.main")}>
       <div class="brand">
         <Mark />
-        <span class="lbl">achords</span>
+        <span class="lbl">Achords</span>
         <button
           type="button"
           class="iconbtn collapse-btn"

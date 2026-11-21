@@ -101,7 +101,7 @@ it. This writes their `agent.yaml` `mcp` list (validated first, comments kept); 
 the agents, **Remove** takes the app from every agent. Terminal alternative: add the id to `mcp:`
 in `~/.achords/agents/<id>/agent.yaml`.
 
-achords opens the app in the background when a run needs it and it is not running, waits until
+Achords opens the app in the background when a run needs it and it is not running, waits until
 it answers (Blender: up to 1 minute; Unity: up to 3 minutes) and quits it again 3 minutes after
 the last task that needs it has finished. It never closes an app you opened yourself. Every open
 and close is in the gateway log (`apps: …`). Agents need no shell command to open the apps.

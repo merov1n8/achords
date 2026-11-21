@@ -1,4 +1,4 @@
-# achords
+# Achords
 
 Self-hosted, single-tenant multi-agent hub. One orchestrator agent plus role-scoped sub-agents,
 per-agent model choice (frontier CLI, API or local), web dashboard and Telegram, quiet by default.
