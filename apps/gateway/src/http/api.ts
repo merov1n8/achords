@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   AuthError,
   addChecklistItem,
@@ -66,16 +66,20 @@ import {
   loadOwnAccounts,
   loadProjects,
   OWN,
+  ownerSecrets,
   parseSkillText,
   readSkill,
   saveOwnAccounts,
+  secretRefs,
+  setIntegrationAgents,
   siteStatus,
+  updateAgent,
   updateManifestModels,
   updateManifestName,
   updateProject,
   writeSkill,
 } from "@achords/policy";
-import type { Vault } from "@achords/secrets";
+import { createGoogleSignins, parseClientJson, type Vault } from "@achords/secrets";
 import type { McpTickets, RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import { fetchSkillSource } from "../orchestrator/skill-fetch.ts";
@@ -122,6 +126,8 @@ export interface ApiDeps {
     | "skillRead"
     | "skillFetch"
     | "skillPropose"
+    | "createCard"
+    | "startCard"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -164,6 +170,8 @@ export interface ApiDeps {
   localModels?: () => Promise<string[]>;
   /** OpenAI models the codex CLI offers (ADR-0040), as `cli-codex/<slug>`. */
   codexModels?: () => string[];
+  /** Google endpoints (tests point them at a fake). */
+  google?: { authUrl?: string; tokenUrl?: string };
   /** Built web UI (apps/web/dist). Non-API GETs are served from here. */
   staticDir?: string;
   log?: (msg: string) => void;
@@ -258,6 +266,10 @@ const str = (v: unknown, field: string, max = 10_000): string => {
   return v;
 };
 
+/** An optional text field: absent, null or "" all mean "not chosen". */
+const optStr = (v: unknown, field: string, max: number): string | undefined =>
+  v === undefined || v === null || v === "" ? undefined : str(v, field, max);
+
 const strList = (v: unknown, field: string): string[] => {
   if (
     !Array.isArray(v) ||
@@ -269,6 +281,8 @@ const strList = (v: unknown, field: string): string[] => {
   return v as string[];
 };
 
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 export function createApiHandler(deps: ApiDeps) {
   const { db } = deps;
   const log = deps.log ?? (() => {});
@@ -276,6 +290,12 @@ export function createApiHandler(deps: ApiDeps) {
     if (!deps.vault) throw new HttpError(503, "vault not available");
     return deps.vault();
   };
+  // Web Google sign-in (ADR-0048): same OAuth flow as `achords connect google`.
+  const google = createGoogleSignins({
+    store: (id, value) => vault().set(id, value, "web:google-signin"),
+    ...deps.google,
+  });
+  const GOOGLE_CALLBACK = "/api/oauth/google/callback";
 
   const routes: [string, RegExp, Handler][] = [
     [
@@ -646,6 +666,45 @@ export function createApiHandler(deps: ApiDeps) {
         return out;
       },
     ],
+    // A card made by hand (owner): parked until started, or handed to its agent at once.
+    [
+      "POST",
+      /^\/api\/tasks$/,
+      async ({ res, body }) => {
+        const b = await body();
+        if (b.start !== undefined && typeof b.start !== "boolean") {
+          throw new HttpError(400, "start must be true or false");
+        }
+        const description = optStr(b.description, "description", 20_000);
+        const agent = optStr(b.agent, "agent", 64);
+        const project = optStr(b.project, "project", 64);
+        const column = optStr(b.column, "column", 32);
+        const out = deps.orchestrator.createCard({
+          title: str(b.title, "title", 200),
+          ...(description ? { description } : {}),
+          ...(agent ? { agent } : {}),
+          ...(project ? { project } : {}),
+          ...(column ? { column } : {}),
+          ...(b.start !== undefined ? { start: b.start as boolean } : {}),
+        });
+        if (!out.ok) throw new HttpError(400, out.reason);
+        log(`kanban: owner created task ${out.taskId}${b.start ? " and started it" : ""}`);
+        send(res, 201, getTask(db, out.taskId));
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/tasks\/([\w-]{1,64})\/start$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        if (!getTask(db, id)) throw new HttpError(404, "no such task");
+        const b = await body();
+        const out = deps.orchestrator.startCard(id, optStr(b.agent, "agent", 64));
+        if (!out.ok) throw new HttpError(/already/.test(out.reason) ? 409 : 400, out.reason);
+        log(`kanban: owner started task ${id}`);
+        return out;
+      },
+    ],
     // Card detail for the edit view; the board list above stays light.
     [
       "GET",
@@ -938,6 +997,81 @@ export function createApiHandler(deps: ApiDeps) {
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
     ["GET", /^\/api\/integrations$/, () => deps.integrations?.() ?? []],
+    // Revoke a shared sign-in: its owner-wide vault ids (Google: shared by GA4 and Search Console).
+    [
+      "DELETE",
+      /^\/api\/integrations\/([a-z0-9][a-z0-9-]{0,63})\/secrets$/,
+      ({ params, session }) => {
+        const ids = ownerSecrets(catalogEntry(params[0] as string));
+        if (!ids.length) throw new HttpError(404, "this integration has no shared sign-in");
+        const deleted = ids.filter((id) => vault().delete(id, `web:${session.deviceName}`));
+        log(`integrations: owner revoked ${params[0]} (${deleted.length} secret(s) deleted)`);
+        return { deleted };
+      },
+    ],
+    // Apps on this computer: which agents may use one (their agent.yaml `mcp`).
+    [
+      "PUT",
+      /^\/api\/integrations\/([a-z0-9][a-z0-9-]{0,63})\/agents$/,
+      async ({ params, body }) => {
+        const entry = catalogEntry(params[0] as string);
+        // Only credential-free entries: those are safe next to a shell (ADR-0034).
+        if (secretRefs(entry).length) {
+          throw new HttpError(400, "only apps without credentials can be given to agents here");
+        }
+        if (!deps.agentsDir) throw new HttpError(404, "no agents folder");
+        const agents = strList((await body()).agents, "agents");
+        const changed = attempt(() =>
+          setIntegrationAgents(deps.agentsDir as string, entry.id, agents),
+        );
+        log(
+          `integrations: owner set the agents of ${entry.id} (changed: ${changed.join(", ") || "none"})`,
+        );
+        return { agents, changed };
+      },
+    ],
+    // Google sign-in from the web (ADR-0048). Google sends the browser back to the loopback
+    // callback below; from another device that address fails, so the page lets the owner paste
+    // it here instead.
+    [
+      "POST",
+      /^\/api\/oauth\/google\/start$/,
+      async ({ req, session, body }) => {
+        const text = str((await body()).client, "client", 20_000);
+        const client = attempt(() => parseClientJson(text));
+        const redirect = `http://127.0.0.1:${req.socket.localPort}${GOOGLE_CALLBACK}`;
+        return google.start(client, redirect, session.id);
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/oauth\/google\/status\/([\w-]{1,64})$/,
+      ({ params, session }) => {
+        const out = google.status(params[0] as string, session.id);
+        if (!out) throw new HttpError(404, "this sign-in is unknown or expired; start it again");
+        return out;
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/oauth\/google\/finish$/,
+      async ({ session, body }) => {
+        let u: URL;
+        try {
+          u = new URL(str((await body()).url, "url", 8000).trim());
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(400, "that is not an address; copy the whole address bar");
+        }
+        try {
+          await google.finish(u.searchParams, { owner: session.id });
+        } catch (err) {
+          throw new HttpError(400, (err as Error).message);
+        }
+        log("integrations: Google connected from the web (pasted address)");
+        return { ok: true };
+      },
+    ],
     // Model access (Phase 4): subscription or API key per provider; keys go through the vault.
     [
       "GET",
@@ -1074,14 +1208,25 @@ export function createApiHandler(deps: ApiDeps) {
       "GET",
       /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})$/,
       async ({ params }) => {
-        const m = loadManifest(manifestPath(params[0] as string));
+        const path = manifestPath(params[0] as string);
+        const m = loadManifest(path);
         const local = (await deps.localModels?.().catch(() => [])) ?? [];
+        const docPath = join(dirname(path), "AGENT.md");
         return {
           id: m.id,
           name: m.name,
           role: m.role,
           workspace: m.workspace,
           models: m.models,
+          // The same fields as the create form, for editing.
+          roles: m.roles,
+          tools: m.tools,
+          fs: m.fs,
+          ...(m.shell ? { shell: m.shell } : {}),
+          network: m.network,
+          delegation: m.delegation,
+          ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
+          doc: existsSync(docPath) ? readFileSync(docPath, "utf8") : "",
           // Aliases always run the newest model of a family; local models as pulled.
           suggestions: [
             ...CLAUDE_ALIASES,
@@ -1112,37 +1257,10 @@ export function createApiHandler(deps: ApiDeps) {
       async ({ res, body }) => {
         if (!deps.agentsDir) throw new HttpError(404, "no agents folder");
         const b = await body();
-        const list = (v: unknown, field: string) => (v === undefined ? [] : strList(v, field));
-        const obj = (v: unknown) =>
-          v && typeof v === "object" ? (v as Record<string, unknown>) : {};
-        const models = obj(b.models);
-        const fs = obj(b.fs);
-        const perRun = Number(obj(b.budget).per_run_usd ?? 0);
         try {
           const made = createAgentFiles(deps.agentsDir, {
             id: str(b.id, "id", 64),
-            name: str(b.name, "name", 100),
-            role: str(b.role, "role", 100),
-            workspace: str(b.workspace, "workspace", 64),
-            roles: list(b.roles, "roles"),
-            models: {
-              default: str(models.default, "models.default", 200),
-              allowed: list(models.allowed, "models.allowed"),
-            },
-            tools: list(b.tools, "tools"),
-            fs: { read: list(fs.read, "fs.read"), write: list(fs.write, "fs.write") },
-            ...(b.shell !== undefined
-              ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
-              : {}),
-            network: { allow: list(obj(b.network).allow, "network.allow") },
-            delegation: {
-              can_delegate_to: list(
-                obj(b.delegation).can_delegate_to,
-                "delegation.can_delegate_to",
-              ),
-              accepts_from: list(obj(b.delegation).accepts_from, "delegation.accepts_from"),
-            },
-            ...(perRun > 0 ? { budget: { per_run_usd: perRun } } : {}),
+            ...agentForm(b),
             description: str(b.description, "description", 5000),
           });
           deps.orchestrator.syncAgents(); // mirror into the DB, seed a new workspace's workflow
@@ -1153,6 +1271,27 @@ export function createApiHandler(deps: ApiDeps) {
           const msg = (err as Error).message;
           throw new HttpError(/already exists/.test(msg) ? 409 : 400, msg);
         }
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        manifestPath(id); // 404 for an unknown agent
+        const b = await body();
+        try {
+          updateAgent(deps.agentsDir ?? "", id, {
+            ...agentForm(b),
+            doc: str(b.doc, "doc", 50_000),
+          });
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(400, (err as Error).message);
+        }
+        deps.orchestrator.syncAgents(); // name/workspace show in the list right away
+        log(`agent edited in the web UI: ${id}`);
+        return { ok: true };
       },
     ],
     [
@@ -1288,6 +1427,11 @@ export function createApiHandler(deps: ApiDeps) {
       ]),
     );
   };
+  const catalogEntry = (id: string): CatalogEntry => {
+    const entry = deps.catalog?.().get(id);
+    if (!entry) throw new HttpError(404, `no integration ${id}`);
+    return entry;
+  };
   const siteEntry = (id: string): CatalogEntry => {
     const entry = deps.catalog?.().get(id);
     if (!entry?.sites) throw new HttpError(404, `integration ${id} has no sites`);
@@ -1353,6 +1497,35 @@ export function createApiHandler(deps: ApiDeps) {
     };
   };
 
+  /** The agent form (create and edit share it); validated again by the manifest schema. */
+  const agentForm = (b: Record<string, unknown>) => {
+    const list = (v: unknown, field: string) => (v === undefined ? [] : strList(v, field));
+    const obj = (v: unknown) => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+    const models = obj(b.models);
+    const fs = obj(b.fs);
+    const perRun = Number(obj(b.budget).per_run_usd ?? 0);
+    return {
+      name: str(b.name, "name", 100),
+      role: str(b.role, "role", 100),
+      workspace: str(b.workspace, "workspace", 64),
+      roles: list(b.roles, "roles"),
+      models: {
+        default: str(models.default, "models.default", 200),
+        allowed: list(models.allowed, "models.allowed"),
+      },
+      tools: list(b.tools, "tools"),
+      fs: { read: list(fs.read, "fs.read"), write: list(fs.write, "fs.write") },
+      ...(b.shell !== undefined
+        ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
+        : {}),
+      network: { allow: list(obj(b.network).allow, "network.allow") },
+      delegation: {
+        can_delegate_to: list(obj(b.delegation).can_delegate_to, "delegation.can_delegate_to"),
+        accepts_from: list(obj(b.delegation).accepts_from, "delegation.accepts_from"),
+      },
+      ...(perRun > 0 ? { budget: { per_run_usd: perRun } } : {}),
+    };
+  };
   const manifestPath = (id: string) => {
     const path = join(deps.agentsDir ?? "", id, "agent.yaml");
     if (!deps.agentsDir || !existsSync(path)) throw new HttpError(404, "no such agent");
@@ -1381,6 +1554,29 @@ export function createApiHandler(deps: ApiDeps) {
       if (!path.startsWith("/api/")) {
         if (mutating || !deps.staticDir) throw new HttpError(404, "not found");
         serveStatic(deps.staticDir, path, res);
+        return;
+      }
+      // Google's redirect after the sign-in: a cross-site navigation, so the SameSite=Strict
+      // cookie is not sent. The random single-use state is the proof; the device that started
+      // it must still be paired.
+      if (method === "GET" && path === GOOGLE_CALLBACK) {
+        const params = new URL(req.url ?? "/", "http://x").searchParams;
+        let msg: string;
+        let status = 200;
+        try {
+          await google.finish(params, {
+            accept: (owner) => listSessions(db).some((d) => d.id === owner),
+          });
+          msg = t("oauth.page.done");
+          log("integrations: Google connected from the web");
+        } catch (err) {
+          status = 400;
+          msg = t("oauth.page.failed", { reason: (err as Error).message });
+        }
+        res.writeHead(status, { ...securityHeaders, "content-type": "text/html; charset=utf-8" });
+        res.end(
+          `<!doctype html><meta charset="utf-8"><title>achords</title><p>${escapeHtml(msg)}</p>`,
+        );
         return;
       }
       // The integration launcher trades its one-time ticket for the server's environment.

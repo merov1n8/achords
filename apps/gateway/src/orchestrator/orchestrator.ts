@@ -26,6 +26,7 @@ import {
   createThread,
   type Db,
   defer,
+  deleteThread,
   dueSchedules,
   enqueueChild,
   enqueueRoot,
@@ -59,6 +60,7 @@ import {
   setRunProgress,
   setSetting,
   setThreadProject,
+  startParked,
   startRun,
   type Task,
   upsertAgent,
@@ -337,6 +339,21 @@ export interface Orchestrator {
     request: { agent: string; title: string; instructions: string },
     opts?: { budgetUsd?: number },
   ): { ok: true; taskId: string } | { ok: false; reason: string };
+  /**
+   * A card the owner makes by hand, with a chat of its own for results and questions. Not
+   * started, it is parked (never claimed); `start` hands it to the agent at once, the same way
+   * as "@agent" in a chat.
+   */
+  createCard(input: {
+    title: string;
+    description?: string;
+    agent?: string;
+    project?: string;
+    column?: string;
+    start?: boolean;
+  }): { ok: true; taskId: string } | { ok: false; reason: string };
+  /** Starts a parked card (with `agent` if it has none) in the workflow's start column. */
+  startCard(taskId: string, agent?: string): { ok: true } | { ok: false; reason: string };
 }
 
 export const MAX_DELEGATION_DEPTH = 3;
@@ -516,7 +533,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   // Projects (ADR-0031): re-read on use, like manifests.
   const projects = () => loadProjects(join(home, "projects"));
   /** The workflow for a card: the project's own workflow.yaml if it has one. */
-  const workflowForTask = (task: Task): Workflow => {
+  const workflowForTask = (task: Pick<Task, "project" | "assigneeAgentId">): Workflow => {
     const project = task.project ? projects().get(task.project) : undefined;
     if (project && existsSync(project.workflowPath)) return loadWorkflow(project.workflowPath);
     return workflowFor(workspaceOf(task));
@@ -551,8 +568,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       .join("\n");
     return `Project: ${p.name} (${p.slug}, workspace ${p.workspace})\n${accounts ? `Client accounts:\n${accounts}\n` : ""}${p.doc.trim()}\n\n`;
   };
-  const workspaceOf = (task: Task) =>
-    (task.assigneeAgentId ? agents().get(task.assigneeAgentId)?.workspace : undefined) ?? "shared";
+  // A card made by hand without an agent belongs to its project's workspace.
+  const workspaceOf = (task: Pick<Task, "assigneeAgentId" | "project">) =>
+    (task.assigneeAgentId
+      ? agents().get(task.assigneeAgentId)?.workspace
+      : task.project
+        ? projects().get(task.project)?.workspace
+        : undefined) ?? "shared";
   const pendingKey = (taskId: string) => `pending_move:${taskId}`;
   const accessKey = (taskId: string) => `pending_access:${taskId}`;
   /**
@@ -663,6 +685,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   /** on_enter automation; `byOwner` skips nothing here (approval is checked before moving). */
   const enterColumn = (task: Task, column: string, wf: Workflow) => {
+    // A card that has not started has no work to review yet.
+    if (task.parked) return;
     const assign = wf.on_enter[column]?.assign;
     if (!assign?.startsWith("role:")) return;
     const role = assign.slice(5);
@@ -1484,6 +1508,89 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         caller: caller.id,
       });
       return { ok: true, taskId: child.id };
+    },
+
+    createCard(input) {
+      const all = agents();
+      const { title, agent, project } = input;
+      if (agent && (agent === BOSS_ID || !all.has(agent))) {
+        return { ok: false, reason: `There is no agent called ${agent}.` };
+      }
+      if (project && !projects().has(project)) {
+        return { ok: false, reason: `There is no project called ${project}.` };
+      }
+      if (input.start && !agent) return { ok: false, reason: "Pick an agent to start it now." };
+      const wf = workflowForTask({ project: project ?? null, assigneeAgentId: agent ?? null });
+      const column =
+        input.column ?? (wf.columns.includes("backlog") ? "backlog" : (wf.columns[0] as string));
+      if (!wf.columns.includes(column)) {
+        return { ok: false, reason: `There is no column "${column}" in this workflow.` };
+      }
+      const threadId = createThread(db, { title, ...(project ? { project } : {}) }).id;
+      if (input.start && agent) {
+        const r = orchestrator.delegate(
+          { from: "boss", threadId },
+          { agent, title, instructions: input.description ?? "" },
+        );
+        if (!r.ok) {
+          deleteThread(db, threadId);
+          return r;
+        }
+        post(threadId, t("thread.direct", { agent }));
+        return r;
+      }
+      const task = enqueueRoot(db, {
+        caller: BOSS_ID,
+        title,
+        threadId,
+        parked: true,
+        ...(input.description ? { description: input.description } : {}),
+        ...(agent ? { assigneeAgentId: agent } : {}),
+        ...(project ? { project } : {}),
+      });
+      placeCard(db, task.id, column, "owner");
+      post(threadId, t("thread.cardCreated", { title }));
+      return { ok: true, taskId: task.id };
+    },
+
+    startCard(taskId, agent) {
+      const task = getTask(db, taskId);
+      if (!task?.column || task.parentId) return { ok: false, reason: "There is no such card." };
+      if (!task.parked) return { ok: false, reason: "This card has already started." };
+      const id = agent ?? task.assigneeAgentId;
+      if (!id) return { ok: false, reason: "Pick an agent to start this card." };
+      const all = agents();
+      const boss = all.get(BOSS_ID);
+      if (!boss) return { ok: false, reason: "boss agent is not configured" };
+      const target = all.get(id);
+      // The same checks as work the boss hands out from a chat.
+      const reason = refuse(boss, target, undefined, id);
+      if (reason || !target)
+        return { ok: false, reason: reason ?? `There is no agent called ${id}.` };
+      const budget = target.budget.per_run_usd;
+      if (
+        !startParked(db, taskId, {
+          assigneeAgentId: id,
+          ...(budget !== undefined ? { budgetUsd: budget } : {}),
+        })
+      ) {
+        return { ok: false, reason: "This card has already started." };
+      }
+      const started = getTask(db, taskId) as Task;
+      const wf = workflowForTask(started);
+      const from = started.column as string;
+      if (from !== wf.start) {
+        const check = checkMove(wf, { assignee: id, column: from }, wf.start, { kind: "owner" });
+        moveCard(db, {
+          taskId,
+          from,
+          to: wf.start,
+          actor: "owner",
+          override: check.ok && check.override,
+        });
+      }
+      if (started.threadId) post(started.threadId, t("thread.direct", { agent: id }));
+      return { ok: true };
     },
 
     async handleMessage(threadId, text, channel) {

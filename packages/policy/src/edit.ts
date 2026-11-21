@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -19,7 +20,11 @@ function editManifest(path: string, change: (doc: Document) => void): void {
   change(doc);
   const text = doc.toString({ flowCollectionPadding: false }); // [a, b] like hand-written files
   parseManifest(text, path); // throws with field paths if invalid
-  // Atomic replace, same permissions.
+  replaceFile(path, text);
+}
+
+/** Atomic replace, same permissions. */
+function replaceFile(path: string, text: string): void {
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, text, { mode: statSync(path).mode & 0o777 });
   renameSync(tmp, path);
@@ -42,6 +47,45 @@ export function updateManifestModels(
 /** Renames an agent (display name only; id and role stay). */
 export function updateManifestName(path: string, name: string): void {
   editManifest(path, (doc) => doc.setIn(["name"], name.trim()));
+}
+
+/** Everything the web form edits; the id stays, fields the form does not show are kept. */
+export type AgentFields = Omit<NewAgent, "id" | "description"> & { doc: string };
+
+/**
+ * Saves the web form for an existing agent: agent.yaml keeps its comments and every field the
+ * form does not cover (mcp, publish mode, …); AGENT.md is replaced. Validated before writing.
+ */
+export function updateAgent(agentsDir: string, id: string, f: AgentFields): void {
+  if (!ID.test(id)) throw new Error("id: lowercase letters, digits and dashes");
+  const dir = join(agentsDir, id);
+  const list = (doc: Document, path: string[], items: string[]) => {
+    const old = doc.getIn(path, true) as { flow?: boolean } | undefined;
+    doc.setIn(path, doc.createNode([...items], { flow: old ? old.flow === true : true }));
+  };
+  editManifest(join(dir, "agent.yaml"), (doc) => {
+    doc.setIn(["name"], f.name.trim());
+    doc.setIn(["role"], f.role.trim());
+    doc.setIn(["workspace"], f.workspace.trim());
+    if (f.roles?.length) list(doc, ["roles"], f.roles);
+    else doc.deleteIn(["roles"]);
+    doc.setIn(["models", "default"], f.models.default);
+    list(doc, ["models", "allowed"], f.models.allowed);
+    list(doc, ["tools"], f.tools ?? []);
+    list(doc, ["fs", "read"], f.fs?.read ?? []);
+    list(doc, ["fs", "write"], f.fs?.write ?? []);
+    // Absent shell = no shell at all (deny by default).
+    if (f.shell) list(doc, ["shell", "allow"], f.shell.allow);
+    else doc.deleteIn(["shell"]);
+    list(doc, ["network", "allow"], f.network?.allow ?? []);
+    list(doc, ["delegation", "can_delegate_to"], f.delegation?.can_delegate_to ?? []);
+    list(doc, ["delegation", "accepts_from"], f.delegation?.accepts_from ?? []);
+    if (f.budget?.per_run_usd) doc.setIn(["budget", "per_run_usd"], f.budget.per_run_usd);
+    else doc.deleteIn(["budget"]);
+  });
+  const tmp = join(dir, `AGENT.md.tmp-${process.pid}`);
+  writeFileSync(tmp, f.doc.endsWith("\n") ? f.doc : `${f.doc}\n`);
+  renameSync(tmp, join(dir, "AGENT.md"));
 }
 
 export interface NewAgent {
@@ -184,4 +228,29 @@ export function manifestChanges(before: string, after: string): string[] {
     lines.push(`default model: ${a.models.default} → ${b.models.default}`);
   }
   return lines;
+}
+
+/**
+ * Grants an integration to exactly `agents` (their agent.yaml `mcp`) and takes it from every
+ * other agent. Every changed manifest is validated before the first file is written; each file
+ * is replaced atomically. Returns the agents whose file changed.
+ */
+export function setIntegrationAgents(agentsDir: string, id: string, agents: string[]): string[] {
+  const all = readdirSync(agentsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(join(agentsDir, d.name, "agent.yaml")))
+    .map((d) => d.name);
+  const unknown = agents.filter((a) => !all.includes(a));
+  if (unknown.length) throw new Error(`no agent ${unknown.join(", ")}`);
+  const changes: [string, string][] = [];
+  for (const agent of all) {
+    const path = join(agentsDir, agent, "agent.yaml");
+    const before = readFileSync(path, "utf8");
+    const has = parseManifest(before, path).mcp.includes(id);
+    const want = agents.includes(agent);
+    if (has === want) continue;
+    const patch = want ? { add: { mcp: [id] } } : { remove: { mcp: [id] } };
+    changes.push([path, patchManifestText(before, patch, `agents/${agent}/agent.yaml`)]);
+  }
+  for (const [path, text] of changes) replaceFile(path, text);
+  return changes.map(([path]) => path.split("/").at(-2) as string);
 }

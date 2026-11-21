@@ -40,6 +40,9 @@ export interface Task {
   parentId: string | null;
   /** Kanban column (workflow); null = shown inside its root task's card. */
   column: string | null;
+  project: string | null;
+  /** Made by hand and not started yet: no agent works on it until the owner starts it. */
+  parked: boolean;
   error: string | null;
   createdAt: number;
   updatedAt: number;
@@ -75,7 +78,13 @@ export interface IntegrationStatus {
   usedBy: string[];
   command?: string;
   commandFound: boolean;
+  /** Owner-wide vault ids (never values). */
+  secrets: string[];
   missingSecrets: string[];
+  /** Signed in from the web with this OAuth flow (ADR-0048). */
+  oauth?: "google";
+  /** What to install when the program is not on the PATH. */
+  install?: string;
   perProject: boolean;
   projectsReady: string[];
   scoped: boolean;

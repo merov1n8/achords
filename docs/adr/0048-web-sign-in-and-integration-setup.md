@@ -1,0 +1,15 @@
+# ADR-0048: Web sign-in and integration setup
+
+Status: Accepted (2026-11-21)
+
+- Context: Shared sign-ins (Google, Meta) and the agents that may use the apps on this computer (Blender, Unity) could only be set up from the terminal (`achords connect google`, `achords secret set`, editing `agent.yaml`). Someone who installs achords from GitHub must be able to do all of it from the web UI, also from another device over Tailscale (ADR-0017), where `127.0.0.1` is not the gateway.
+
+- Decision:
+  - **One OAuth module.** The Google flow (Desktop-app client, PKCE, `state`, code exchange, scope check, the four `google-*` vault ids) lives in `@achords/secrets` (`createGoogleSignins`) and is used by both the CLI and the gateway.
+  - **Callback on the gateway.** `POST /api/oauth/google/start` (owner session + CSRF) takes the client JSON and returns Google's consent address with `redirect_uri = http://127.0.0.1:<gateway port>/api/oauth/google/callback` (Desktop-app clients accept any loopback port and path). `GET /api/oauth/google/callback` is the only `/api/` route without a session: Google's redirect is a cross-site navigation, so the `SameSite=Strict` cookie is not sent. It is protected instead by the `state`: 32 random bytes, single use (a replay exchanges nothing), valid 10 minutes, at most 10 pending, kept in memory only (a restart forgets them), and bound to the session that started it, which must still be paired when the callback arrives. The answer is a plain HTML page; the code exchange and vault writes happen on the gateway, and no token is ever sent to the browser.
+  - **Another device.** There the callback address does not load. The web page asks the owner to copy that address and paste it; `POST /api/oauth/google/finish` (session + CSRF) only finishes a sign-in started by the same session. `GET /api/oauth/google/status/<state>` lets the starting page see when the callback finished it.
+  - **Catalog fields.** `oauth: google` marks entries signed in through this flow (GA4, Search Console: one choice in "Add sign-in"); other shared entries show write-only inputs for their owner-wide vault ids. `install` is a hint shown when the entry's program is not on the gateway's PATH.
+  - **Revoke** (`DELETE /api/integrations/<id>/secrets`) deletes the entry's owner-wide vault ids; for Google that is the sign-in GA4 and Search Console share, and the confirmation says so.
+  - **Local apps** (`PUT /api/integrations/<id>/agents`) set which agents list the entry under `mcp`, only for entries without credentials (safe next to a shell, ADR-0034). Every changed `agent.yaml` is validated before the first one is written, each atomically, comments kept. This is a direct owner action, like editing models, not an agent proposal (ADR-0041).
+
+- Consequences: Everything the CLI set up for integrations can be done from the web; the CLI commands stay. The callback is reachable by anyone who can reach `127.0.0.1` on the gateway machine, but without a live `state` it does nothing. A sign-in started before a gateway restart must be started again.

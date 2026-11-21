@@ -141,6 +141,7 @@ describe("doctor", () => {
     const base = {
       name: "x",
       commandFound: true,
+      secrets: [],
       missingSecrets: [],
       perProject: false,
       projectsReady: [],

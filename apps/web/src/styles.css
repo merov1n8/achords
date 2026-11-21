@@ -558,6 +558,11 @@ main > .page {
   gap: 12px;
   margin-bottom: 18px;
 }
+/* A section title with help text shrinks so its Add button stays on the right. */
+.page-head > div {
+  flex: 1 1 320px;
+  min-width: 0;
+}
 
 /* Chat */
 .conversation {
@@ -1340,6 +1345,12 @@ fieldset.repeat {
 }
 .card-meta {
   margin-bottom: 14px;
+}
+.start-card {
+  margin-bottom: 14px;
+}
+.start-card p {
+  margin: 0 0 10px;
 }
 .card-meta a {
   display: inline-flex;

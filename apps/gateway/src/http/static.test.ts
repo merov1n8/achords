@@ -65,6 +65,8 @@ describe("static web UI", () => {
           skillRead: () => ({ ok: false, reason: "n/a" }),
           skillFetch: async () => ({ ok: false, reason: "n/a" }),
           skillPropose: () => ({ ok: false, reason: "n/a" }),
+          createCard: () => ({ ok: false, reason: "n/a" }),
+          startCard: () => ({ ok: false, reason: "n/a" }),
         },
         allowedHosts: [`127.0.0.1:${port}`],
         staticDir,

@@ -7,7 +7,22 @@ import { usePoll } from "../poll.ts";
 import type { Agent } from "../types.ts";
 
 type Models = { default: string; allowed: string[] };
-type AgentDetail = { id: string; name: string; models: Models; suggestions: string[] };
+/** GET /api/agents/:id: the same fields as the create form, for editing. */
+type AgentDetail = {
+  id: string;
+  name: string;
+  role: string;
+  workspace: string;
+  roles: string[];
+  models: Models;
+  tools: string[];
+  fs: { read: string[]; write: string[] };
+  shell?: { allow: string[] };
+  network: { allow: string[] };
+  delegation: { can_delegate_to: string[]; accepts_from: string[] };
+  budget?: { per_run_usd: number };
+  doc: string;
+};
 
 export function Agents() {
   const agents = usePoll(() => api<Agent[]>("/api/agents"), 10000);
@@ -58,151 +73,23 @@ export function Agents() {
           </tbody>
         </table>
       </div>
-      {editing && (
-        <ModelEditor
-          key={editing}
-          id={editing}
-          onClose={() => setEditing(undefined)}
-          onChanged={agents.refresh}
-        />
-      )}
-      {creating && (
-        <NewAgentForm
+      {(editing || creating) && (
+        <AgentForm
+          key={editing ?? "new"}
+          {...(editing ? { id: editing } : {})}
           agents={agents.data ?? []}
-          onClose={() => setCreating(false)}
-          onCreated={(id) => {
+          onClose={() => {
             setCreating(false);
+            setEditing(undefined);
+          }}
+          onSaved={() => {
+            setCreating(false);
+            setEditing(undefined);
             agents.refresh();
-            setEditing(id);
           }}
         />
       )}
     </>
-  );
-}
-
-function ModelEditor({
-  id,
-  onClose,
-  onChanged,
-}: {
-  id: string;
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  const [detail, setDetail] = useState<AgentDetail>();
-  const [models, setModels] = useState<Models>();
-  const [custom, setCustom] = useState("");
-  const [name, setName] = useState("");
-  const [status, setStatus] = useState<{ ok: boolean; text: string }>();
-
-  useEffect(() => {
-    api<AgentDetail>(`/api/agents/${id}`)
-      .then((d) => {
-        setDetail(d);
-        setModels(d.models);
-        setName(d.name);
-      })
-      .catch((err: Error) => setStatus({ ok: false, text: err.message }));
-  }, [id]);
-
-  if (!detail || !models) {
-    return (
-      <Modal title={t("agents.settingsOf", { agent: id })} onClose={onClose}>
-        <p class={status ? "error" : "muted"}>{status?.text ?? t("app.loading")}</p>
-      </Modal>
-    );
-  }
-
-  // Everything the owner can pick: the agent's current models, aliases and pulled local models.
-  const options = [...new Set([...models.allowed, models.default, ...detail.suggestions])];
-  const toggle = (m: string) => {
-    const allowed = models.allowed.includes(m)
-      ? models.allowed.filter((x) => x !== m)
-      : [...models.allowed, m];
-    setModels({ ...models, allowed });
-  };
-  const addCustom = (e: Event) => {
-    e.preventDefault();
-    const m = custom.trim();
-    if (m && !models.allowed.includes(m)) setModels({ ...models, allowed: [...models.allowed, m] });
-    setCustom("");
-  };
-  const save = async () => {
-    setStatus(undefined);
-    try {
-      if (name.trim() !== detail.name) {
-        await api(`/api/agents/${id}/name`, { method: "PUT", body: { name } });
-        setDetail({ ...detail, name: name.trim() });
-        onChanged();
-      }
-      const out = await api<{ models: Models }>(`/api/agents/${id}/models`, {
-        method: "PUT",
-        body: models,
-      });
-      setModels(out.models);
-      setStatus({ ok: true, text: t("agents.saved") });
-    } catch (err) {
-      setStatus({ ok: false, text: (err as Error).message });
-    }
-  };
-
-  return (
-    <Modal
-      title={t("agents.settingsOf", { agent: id })}
-      onClose={onClose}
-      footer={
-        <>
-          {status && <span class={`grow ${status.ok ? "muted" : "error"}`}>{status.text}</span>}
-          <button type="button" class="btn ghost" onClick={onClose}>
-            {t("common.close")}
-          </button>
-          <button type="button" class="btn primary" onClick={save}>
-            {t("common.save")}
-          </button>
-        </>
-      }
-    >
-      <label class="field">
-        {t("agents.name")}
-        <input class="input" value={name} onInput={(e) => setName(e.currentTarget.value)} />
-      </label>
-      <p class="muted">{t("agents.allowedHelp")}</p>
-      <div class="model-list">
-        {options.map((m) => (
-          <label key={m} class="model">
-            <input
-              type="checkbox"
-              checked={models.allowed.includes(m)}
-              onChange={() => toggle(m)}
-            />
-            <code>{m}</code>
-            <input
-              type="radio"
-              name="default"
-              title={t("agents.default")}
-              checked={models.default === m}
-              disabled={!models.allowed.includes(m)}
-              onChange={() => setModels({ ...models, default: m })}
-            />
-            <span>
-              {models.default === m && <span class="chip progress">{t("agents.default")}</span>}
-            </span>
-          </label>
-        ))}
-      </div>
-      <form class="composer" onSubmit={addCustom}>
-        <input
-          class="input mono"
-          placeholder="provider/model"
-          value={custom}
-          onInput={(e) => setCustom((e.target as HTMLInputElement).value)}
-        />
-        <button type="submit" class="btn">
-          {t("agents.add")}
-        </button>
-      </form>
-    </Modal>
   );
 }
 
@@ -212,15 +99,20 @@ const lines = (text: string) =>
     .map((l) => l.trim())
     .filter(Boolean);
 
-/** New persistent agent: every permission starts off and is switched on one by one. */
-function NewAgentForm({
+/**
+ * Create or edit an agent with one form. New agents start with every permission off; editing
+ * loads the same fields (fields the form does not show, like integrations, stay as they are).
+ */
+function AgentForm({
+  id,
   agents,
   onClose,
-  onCreated,
+  onSaved,
 }: {
+  id?: string;
   agents: Agent[];
   onClose: () => void;
-  onCreated: (id: string) => void;
+  onSaved: () => void;
 }) {
   const [opts, setOpts] = useState<{ tools: string[]; models: string[] }>();
   const [f, setF] = useState({
@@ -230,7 +122,7 @@ function NewAgentForm({
     workspace: "",
     roles: "",
     description: "",
-    model: "cli-claude/sonnet",
+    models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] } as Models,
     tools: [] as string[],
     write: "",
     read: "",
@@ -241,12 +133,37 @@ function NewAgentForm({
     budget: "",
   });
   const [error, setError] = useState<string>();
+  const [loaded, setLoaded] = useState(!id);
+  const [custom, setCustom] = useState("");
   const formId = useId();
   useEffect(() => {
     api<{ tools: string[]; models: string[] }>("/api/agent-options")
       .then(setOpts)
       .catch((err: Error) => setError(err.message));
-  }, []);
+    if (!id) return;
+    api<AgentDetail>(`/api/agents/${id}`)
+      .then((d) => {
+        setF({
+          id: d.id,
+          name: d.name,
+          role: d.role,
+          workspace: d.workspace,
+          roles: d.roles.join(", "),
+          description: d.doc,
+          models: { default: d.models.default, allowed: d.models.allowed ?? [d.models.default] },
+          tools: d.tools,
+          write: d.fs.write.join("\n"),
+          read: d.fs.read.join("\n"),
+          shell: d.shell?.allow.join("\n") ?? "",
+          network: d.network.allow.join("\n"),
+          acceptsFrom: d.delegation.accepts_from,
+          delegatesTo: d.delegation.can_delegate_to,
+          budget: d.budget ? String(d.budget.per_run_usd) : "",
+        });
+        setLoaded(true);
+      })
+      .catch((err: Error) => setError(err.message));
+  }, [id]);
   const set = (patch: Partial<typeof f>) => setF({ ...f, ...patch });
   const toggle = (list: string[], v: string) =>
     list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
@@ -279,28 +196,31 @@ function NewAgentForm({
     e.preventDefault();
     setError(undefined);
     try {
-      await api("/api/agents", {
-        method: "POST",
-        body: {
-          id: f.id.trim(),
-          name: f.name,
-          role: f.role,
-          workspace: f.workspace,
-          roles: f.roles
-            .split(",")
-            .map((r) => r.trim())
-            .filter(Boolean),
-          description: f.description,
-          models: { default: f.model, allowed: [f.model] },
-          tools: f.tools,
-          fs: { write: lines(f.write), read: lines(f.read) },
-          ...(f.tools.includes("Bash") ? { shell: { allow: lines(f.shell) } } : {}),
-          network: { allow: lines(f.network) },
-          delegation: { can_delegate_to: f.delegatesTo, accepts_from: f.acceptsFrom },
-          ...(Number(f.budget) > 0 ? { budget: { per_run_usd: Number(f.budget) } } : {}),
-        },
-      });
-      onCreated(f.id.trim());
+      const form = {
+        name: f.name,
+        role: f.role,
+        workspace: f.workspace,
+        roles: f.roles
+          .split(",")
+          .map((r) => r.trim())
+          .filter(Boolean),
+        models: f.models,
+        tools: f.tools,
+        fs: { write: lines(f.write), read: lines(f.read) },
+        ...(f.tools.includes("Bash") ? { shell: { allow: lines(f.shell) } } : {}),
+        network: { allow: lines(f.network) },
+        delegation: { can_delegate_to: f.delegatesTo, accepts_from: f.acceptsFrom },
+        ...(Number(f.budget) > 0 ? { budget: { per_run_usd: Number(f.budget) } } : {}),
+      };
+      if (id) {
+        await api(`/api/agents/${id}`, { method: "PUT", body: { ...form, doc: f.description } });
+      } else {
+        await api("/api/agents", {
+          method: "POST",
+          body: { ...form, id: f.id.trim(), description: f.description },
+        });
+      }
+      onSaved();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -309,7 +229,7 @@ function NewAgentForm({
   return (
     <Modal
       wide
-      title={t("agents.new")}
+      title={id ? t("agents.edit", { agent: id }) : t("agents.new")}
       onClose={onClose}
       footer={
         <>
@@ -317,13 +237,14 @@ function NewAgentForm({
             {t("common.cancel")}
           </button>
           <button type="submit" form={formId} class="btn primary">
-            {t("agents.form.create")}
+            {id ? t("common.save") : t("agents.form.create")}
           </button>
         </>
       }
     >
-      <form id={formId} onSubmit={submit}>
-        {text("id", t("agents.form.id"), t("agents.form.idHelp"))}
+      {!loaded && <p class="muted">{error ?? t("app.loading")}</p>}
+      <form id={formId} onSubmit={submit} hidden={!loaded}>
+        {!id && text("id", t("agents.form.id"), t("agents.form.idHelp"))}
         {text("name", t("agents.name"))}
         {text("role", t("agents.form.role"), t("agents.form.roleHelp"))}
         <label class="field">
@@ -343,28 +264,68 @@ function NewAgentForm({
         <label class="field">
           {t("agents.form.description")}
           <textarea
-            class="input"
-            rows={3}
+            class={`input ${id ? "mono" : ""}`}
+            rows={id ? 10 : 3}
             value={f.description}
             onInput={(e) => set({ description: e.currentTarget.value })}
           />
           <span class="muted small">{t("agents.form.descriptionHelp")}</span>
         </label>
         {text("roles", t("agents.form.roles"), t("agents.form.rolesHelp"))}
-        <label class="field">
-          {t("agents.form.model")}
-          <select
-            class="input"
-            value={f.model}
-            onChange={(e) => set({ model: e.currentTarget.value })}
-          >
-            {(opts?.models ?? [f.model]).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div class="field">
+          {t("agents.form.models")}
+          <span class="muted small">{t("agents.allowedHelp")}</span>
+          <div class="model-list">
+            {[...new Set([...f.models.allowed, f.models.default, ...(opts?.models ?? [])])].map(
+              (m) => (
+                <label key={m} class="model">
+                  <input
+                    type="checkbox"
+                    checked={f.models.allowed.includes(m)}
+                    onChange={() =>
+                      set({ models: { ...f.models, allowed: toggle(f.models.allowed, m) } })
+                    }
+                  />
+                  <code>{m}</code>
+                  <input
+                    type="radio"
+                    name={`${formId}-default`}
+                    title={t("agents.default")}
+                    checked={f.models.default === m}
+                    disabled={!f.models.allowed.includes(m)}
+                    onChange={() => set({ models: { ...f.models, default: m } })}
+                  />
+                  <span>
+                    {f.models.default === m && (
+                      <span class="chip progress">{t("agents.default")}</span>
+                    )}
+                  </span>
+                </label>
+              ),
+            )}
+          </div>
+          <div class="row">
+            <input
+              class="input mono"
+              placeholder="provider/model"
+              value={custom}
+              onInput={(e) => setCustom(e.currentTarget.value)}
+            />
+            <button
+              type="button"
+              class="btn"
+              disabled={!custom.trim()}
+              onClick={() => {
+                const m = custom.trim();
+                if (!f.models.allowed.includes(m))
+                  set({ models: { ...f.models, allowed: [...f.models.allowed, m] } });
+                setCustom("");
+              }}
+            >
+              {t("agents.add")}
+            </button>
+          </div>
+        </div>
 
         <h3 class="sec">{t("agents.form.permissions")}</h3>
         <p class="muted">{t("agents.form.permissionsHelp")}</p>

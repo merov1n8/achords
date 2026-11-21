@@ -14,6 +14,7 @@ export {
   type IntegrationStatus,
   integrationStatus,
   loadCatalog,
+  ownerSecrets,
   type PublishMode,
   publishMode,
   type SiteStatus,
@@ -27,12 +28,15 @@ export {
 export * from "./check.ts";
 export {
   AGENT_LIST_FIELDS,
+  type AgentFields,
   type AgentListField,
   type AgentPatch,
   createAgentFiles,
   manifestChanges,
   type NewAgent,
   patchManifestText,
+  setIntegrationAgents,
+  updateAgent,
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";

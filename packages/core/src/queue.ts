@@ -44,6 +44,8 @@ export interface Task {
   roomId: string | null;
   /** Left by a planned stop: where the agent was, for the run that continues. */
   resumeNote: string | null;
+  /** A card made by hand and not started yet: never claimed until the owner starts it. */
+  parked: boolean;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
@@ -52,6 +54,7 @@ const toTask = (r: Record<string, unknown>): Task => ({
   project: (r.project as string | null) ?? null,
   roomId: (r.room_id as string | null) ?? null,
   resumeNote: (r.resume_note as string | null) ?? null,
+  parked: Number(r.parked) === 1,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),
@@ -97,14 +100,17 @@ export function enqueue(
     budgetUsd?: number;
     /** Project slug (ADR-0031). */
     project?: string;
+    /** Not claimable until started (a card the owner made by hand). */
+    parked?: boolean;
   },
   now = Date.now(),
 ): Task {
   const row = db
     .prepare(
       `INSERT INTO tasks (id, thread_id, parent_id, title, description, priority,
-         assignee_agent_id, max_attempts, sensitivity, budget_usd, project, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+         assignee_agent_id, max_attempts, sensitivity, budget_usd, project, parked, created_at,
+         updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
@@ -118,6 +124,7 @@ export function enqueue(
       input.sensitivity ?? "normal",
       input.budgetUsd ?? null,
       input.project ?? null,
+      input.parked ? 1 : 0,
       now,
       now,
     );
@@ -174,6 +181,7 @@ export function claim(
            attempts = attempts + 1, updated_at = ?
          WHERE id = (
            SELECT id FROM tasks WHERE status = 'queued' AND waiting_children = 0 AND waiting_owner = 0
+             AND parked = 0
              AND (not_before IS NULL OR not_before <= ?)
            ORDER BY priority DESC, created_at, rowid LIMIT 1
          )

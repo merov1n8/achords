@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,6 +6,8 @@ import {
   createAgentFiles,
   manifestChanges,
   patchManifestText,
+  setIntegrationAgents,
+  updateAgent,
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";
@@ -162,5 +164,132 @@ network:
     expect(() => patchManifestText(BASE, { defaultModel: "cli-claude/haiku" })).toThrow(
       /must be one of models.allowed/,
     );
+  });
+});
+
+describe("setIntegrationAgents", () => {
+  let dir: string;
+  const agent = (id: string, extra = "") =>
+    `# ${id} notes\nid: ${id}\nname: ${id}\nrole: r\nworkspace: w\nmodels:\n  default: cli-claude/sonnet\n${extra}`;
+  const read = (id: string) => readFileSync(join(dir, id, "agent.yaml"), "utf8");
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "achords-agents-"));
+    for (const [id, extra] of [
+      ["boss", ""],
+      ["artist", "mcp: [blender, unity] # 3D\n"],
+      ["dev", "mcp: [unity]\n"],
+    ] as const) {
+      mkdirSync(join(dir, id));
+      writeFileSync(join(dir, id, "agent.yaml"), agent(id, extra));
+    }
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("grants to the chosen agents and takes it from the others, comments kept", () => {
+    expect(setIntegrationAgents(dir, "blender", ["boss", "dev"]).sort()).toEqual([
+      "artist",
+      "boss",
+      "dev",
+    ]);
+    expect(loadManifest(join(dir, "boss", "agent.yaml")).mcp).toEqual(["blender"]);
+    expect(loadManifest(join(dir, "dev", "agent.yaml")).mcp).toEqual(["unity", "blender"]);
+    expect(read("artist")).toContain("mcp: [unity] # 3D");
+    expect(read("artist")).toContain("# artist notes");
+    // Nothing to change: no file is touched.
+    expect(setIntegrationAgents(dir, "blender", ["boss", "dev"])).toEqual([]);
+    // Remove from everyone.
+    setIntegrationAgents(dir, "unity", []);
+    expect(loadManifest(join(dir, "dev", "agent.yaml")).mcp).toEqual(["blender"]);
+  });
+
+  it("writes nothing when an agent is unknown or one manifest is invalid", () => {
+    expect(() => setIntegrationAgents(dir, "blender", ["ghost"])).toThrow(/no agent ghost/);
+    writeFileSync(join(dir, "dev", "agent.yaml"), agent("dev", "mcp: [unity]\nbogus: 1\n"));
+    const before = ["boss", "artist", "dev"].map(read);
+    expect(() => setIntegrationAgents(dir, "blender", ["boss", "dev"])).toThrow(/bogus/);
+    expect(["boss", "artist", "dev"].map(read)).toEqual(before);
+  });
+});
+
+describe("updateAgent (web: edit with the same form as create)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "achords-edit-"));
+    createAgentFiles(dir, {
+      id: "social",
+      name: "Social",
+      role: "posts",
+      workspace: "marketing",
+      models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+      tools: ["Read", "Bash"],
+      shell: { allow: ["ls"] },
+      description: "Writes posts.",
+    });
+    // Fields the form does not show must survive an edit.
+    const path = join(dir, "social", "agent.yaml");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}mcp: [wordpress, meta] # owner's note\npublish_mode:\n  default: review\n`,
+    );
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const fields = {
+    name: "Social media",
+    role: "posts and replies",
+    workspace: "marketing",
+    roles: ["writer"],
+    models: {
+      default: "cli-codex/gpt-6.2-sol",
+      allowed: ["cli-claude/sonnet", "cli-codex/gpt-6.2-sol"],
+    },
+    tools: ["Read"],
+    fs: { read: ["/tmp/a"], write: [] },
+    network: { allow: ["example.com"] },
+    delegation: { can_delegate_to: [], accepts_from: ["boss"] },
+    doc: "# Social media\n\nWrites and schedules posts.\n",
+  };
+
+  it("rewrites the form fields, keeps the rest (mcp, publish mode, comments), drops a removed shell", () => {
+    updateAgent(dir, "social", fields);
+    const m = loadManifest(join(dir, "social", "agent.yaml"));
+    expect(m).toMatchObject({
+      name: "Social media",
+      role: "posts and replies",
+      roles: ["writer"],
+      models: fields.models,
+      tools: ["Read"],
+      mcp: ["wordpress", "meta"],
+      network: { allow: ["example.com"] },
+      delegation: { accepts_from: ["boss"] },
+    });
+    expect(m.shell).toBeUndefined();
+    expect(readFileSync(join(dir, "social", "agent.yaml"), "utf8")).toMatch(/owner's note/);
+    expect(readFileSync(join(dir, "social", "AGENT.md"), "utf8")).toBe(fields.doc);
+  });
+
+  it("sets a shell and a budget when given, removes the budget at 0", () => {
+    updateAgent(dir, "social", {
+      ...fields,
+      tools: ["Bash"],
+      shell: { allow: ["npm test"] },
+      budget: { per_run_usd: 2 },
+    });
+    expect(loadManifest(join(dir, "social", "agent.yaml"))).toMatchObject({
+      shell: { allow: ["npm test"] },
+      budget: { per_run_usd: 2 },
+    });
+    updateAgent(dir, "social", { ...fields, budget: { per_run_usd: 0 } });
+    expect(loadManifest(join(dir, "social", "agent.yaml")).budget?.per_run_usd).toBeUndefined();
+  });
+
+  it("refuses invalid values and leaves both files untouched", () => {
+    const before = readFileSync(join(dir, "social", "agent.yaml"), "utf8");
+    expect(() =>
+      updateAgent(dir, "social", { ...fields, fs: { read: ["relative/path"], write: [] } }),
+    ).toThrow();
+    expect(readFileSync(join(dir, "social", "agent.yaml"), "utf8")).toBe(before);
+    expect(readFileSync(join(dir, "social", "AGENT.md"), "utf8")).toMatch(/Writes posts/);
+    expect(() => updateAgent(dir, "../x", fields)).toThrow(/id/);
   });
 });

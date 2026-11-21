@@ -9,6 +9,7 @@ import {
   listChecklist,
   listComments,
   removeChecklistItem,
+  startParked,
   updateChecklistItem,
   updateTask,
 } from "./cards.ts";
@@ -115,5 +116,37 @@ describe("deleteCard", () => {
     const child = enqueueChild(db, root, { title: "child", caller: "boss" });
     expect(deleteCard(db, child.id)).toEqual({ ok: false, reason: "not a card" });
     expect(deleteCard(db, "missing")).toEqual({ ok: false, reason: "no such task" });
+  });
+});
+
+describe("startParked", () => {
+  const withAgent = () => {
+    const db = openCoreDatabase(":memory:");
+    db.prepare(
+      "INSERT INTO agents (id, name, role, created_at, updated_at) VALUES ('dev', 'dev', 'dev', 0, 0)",
+    ).run();
+    return db;
+  };
+
+  it("un-parks once, sets the assignee and budget; then a worker may claim it", () => {
+    const db = withAgent();
+    const t = enqueue(db, { title: "later", parked: true }, 1);
+    expect(claim(db, { workerId: "w", leaseMs: LEASE })).toBeUndefined();
+    expect(startParked(db, t.id, { assigneeAgentId: "dev", budgetUsd: 2 }, 5)).toBe(true);
+    expect(getTask(db, t.id)).toMatchObject({
+      parked: false,
+      assigneeAgentId: "dev",
+      budgetUsd: 2,
+      updatedAt: 5,
+    });
+    expect(startParked(db, t.id, { assigneeAgentId: "dev" })).toBe(false);
+    expect(claim(db, { workerId: "w", leaseMs: LEASE })?.id).toBe(t.id);
+  });
+
+  it("keeps an existing budget when none is given", () => {
+    const db = withAgent();
+    const t = enqueue(db, { title: "later", parked: true, budgetUsd: 3 }, 1);
+    startParked(db, t.id, { assigneeAgentId: "dev" });
+    expect(getTask(db, t.id)?.budgetUsd).toBe(3);
   });
 });

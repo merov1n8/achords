@@ -38,6 +38,7 @@ describe("HTTP API", () => {
   const decisions: { id: string; approve: boolean }[] = [];
   const moves: unknown[] = [];
   const rooms: unknown[] = [];
+  const cards: unknown[] = [];
   let synced = 0;
   const tokens = createRunTokens();
   const mcpTickets = createMcpTickets();
@@ -47,8 +48,24 @@ describe("HTTP API", () => {
   let projectsDir: string;
   let budgetDay = 0;
   const heard: number[] = [];
+  let tokenServer: Server;
+  let tokenReply: object = {};
+  const tokenForms: URLSearchParams[] = [];
 
   beforeEach(async () => {
+    // Fake Google token endpoint for the web sign-in.
+    tokenForms.length = 0;
+    tokenServer = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => {
+        body += c;
+      });
+      req.on("end", () => {
+        tokenForms.push(new URLSearchParams(body));
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(tokenReply));
+      });
+    });
+    await new Promise<void>((r) => tokenServer.listen(0, "127.0.0.1", r));
     db = openCoreDatabase(":memory:");
     agentsDir = mkdtempSync(join(tmpdir(), "achords-api-agents-"));
     runDir = mkdtempSync(join(tmpdir(), "achords-api-run-"));
@@ -137,6 +154,23 @@ describe("HTTP API", () => {
             questions.push({ from, question: `skill_propose: ${JSON.stringify(request)}` });
             return { ok: true, text: "sent" };
           },
+          createCard: (input) => {
+            cards.push(input);
+            if (input.agent === "nobody") {
+              return { ok: false, reason: "There is no agent called nobody." };
+            }
+            if (input.project === "ghost") {
+              return { ok: false, reason: "There is no project called ghost." };
+            }
+            const task = enqueue(db, { title: input.title, parked: !input.start });
+            return { ok: true, taskId: task.id };
+          },
+          startCard: (taskId, agent) => {
+            cards.push({ start: taskId, agent });
+            return taskId === "started"
+              ? { ok: false, reason: "This card has already started." }
+              : { ok: true };
+          },
           delegate: (from, request) => {
             delegations.push({ from, request });
             return request.agent === "nope"
@@ -169,6 +203,7 @@ describe("HTTP API", () => {
             usedBy: ["advertiser"],
             command: "uvx",
             commandFound: true,
+            secrets: ["google-refresh-token"],
             missingSecrets: ["google-refresh-token"],
             perProject: false,
             projectsReady: [],
@@ -188,12 +223,17 @@ describe("HTTP API", () => {
           },
         },
         localModels: async () => ["qwen3:8b"],
+        google: {
+          authUrl: "https://accounts.example/auth",
+          tokenUrl: `http://127.0.0.1:${(tokenServer.address() as AddressInfo).port}/token`,
+        },
         log: (m) => logs.push(m),
       }),
     );
   });
   afterEach(async () => {
     await new Promise((r) => server.close(r));
+    await new Promise((r) => tokenServer.close(r));
     vault.close();
     db.close();
   });
@@ -819,6 +859,64 @@ describe("HTTP API", () => {
     expect((await call("/api/tasks/nope")).status).toBe(404);
   });
 
+  it("kanban: the owner creates a card by hand and starts it later", async () => {
+    const { call, cookie } = await pair();
+    cards.length = 0;
+    const res = await call("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Write the FAQ",
+        description: "",
+        agent: "dev",
+        project: "acme",
+        column: "backlog",
+        start: false,
+      }),
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ title: "Write the FAQ", parked: true });
+    // Empty optional fields are left out; the orchestrator gets only what was chosen.
+    expect(cards).toEqual([
+      { title: "Write the FAQ", agent: "dev", project: "acme", column: "backlog", start: false },
+    ]);
+    for (const [body, error] of [
+      [{}, /title/],
+      [{ title: "x".repeat(201) }, /title/],
+      [{ title: "x", description: "d".repeat(20_001) }, /description/],
+      [{ title: "x", agent: 5 }, /agent/],
+      [{ title: "x", start: "yes" }, /start/],
+      [{ title: "x", agent: "nobody" }, /^There is no agent called nobody\.$/],
+      [{ title: "x", project: "ghost" }, /^There is no project called ghost\.$/],
+    ] as const) {
+      const bad = await call("/api/tasks", { method: "POST", body: JSON.stringify(body) });
+      expect(bad.status).toBe(400);
+      expect(((await bad.json()) as { error: string }).error).toMatch(error);
+    }
+    // Owner session with CSRF only.
+    const noCsrf = await fetch(`${base}/api/tasks`, {
+      method: "POST",
+      headers: { cookie, origin: base, "content-type": "application/json" },
+      body: '{"title":"x"}',
+    });
+    expect(noCsrf.status).toBe(403);
+
+    const card = enqueue(db, { title: "later", parked: true });
+    const start = await call(`/api/tasks/${card.id}/start`, {
+      method: "POST",
+      body: '{"agent":"dev"}',
+    });
+    expect(await start.json()).toEqual({ ok: true });
+    expect(cards.at(-1)).toEqual({ start: card.id, agent: "dev" });
+    expect((await call("/api/tasks/nope/start", { method: "POST", body: "{}" })).status).toBe(404);
+    const started = enqueue(db, { title: "s" });
+    db.prepare("UPDATE tasks SET id = 'started' WHERE id = ?").run(started.id);
+    const again = await call("/api/tasks/started/start", { method: "POST", body: "{}" });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toBe(
+      "This card has already started.",
+    );
+  });
+
   it("kanban: the owner deletes a card unless it is running", async () => {
     const { call } = await pair();
     const card = enqueue(db, { title: "card" });
@@ -965,6 +1063,33 @@ describe("HTTP API", () => {
     });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toMatch(/absolute/);
+
+    // Edit uses the same form, pre-filled from GET, and keeps what the form does not show.
+    const detail = (await (await call("/api/agents/qa")).json()) as Record<string, unknown>;
+    expect(detail).toMatchObject({
+      role: "qa",
+      roles: ["qa"],
+      tools: ["Read"],
+      fs: { read: [], write: [] },
+      doc: expect.stringContaining("Reviews web work."),
+    });
+    const { id: _id, description: _d, ...rest } = form;
+    const put = (body: unknown) =>
+      call("/api/agents/qa", { method: "PUT", body: JSON.stringify(body) });
+    expect(
+      (await put({ ...rest, role: "reviewer", doc: "# Tester\n\nChecks pages." })).status,
+    ).toBe(200);
+    expect(readFileSync(join(agentsDir, "qa", "agent.yaml"), "utf8")).toContain("role: reviewer");
+    expect(readFileSync(join(agentsDir, "qa", "AGENT.md"), "utf8")).toContain("Checks pages.");
+    expect((await put({ ...rest, doc: "x", fs: { write: ["relative"] } })).status).toBe(400);
+    expect(
+      (
+        await call("/api/agents/nope", {
+          method: "PUT",
+          body: JSON.stringify({ ...rest, doc: "x" }),
+        })
+      ).status,
+    ).toBe(404);
   });
 
   it("agent rooms: agents open them with their run token; the owner reads them (ADR-0032)", async () => {
@@ -1285,5 +1410,173 @@ describe("HTTP API", () => {
       const r = await call("/api/skills/import", { method: "POST", body: JSON.stringify({ url }) });
       expect(r.status, url).toBe(422);
     }
+  });
+
+  describe("integrations from the web: Google sign-in, revoke, local apps", () => {
+    const CLIENT = JSON.stringify({
+      installed: { client_id: "cid.apps", client_secret: "csecret", project_id: "proj-1" },
+    });
+    const start = async (call: Awaited<ReturnType<typeof pair>>["call"]) => {
+      const res = await call("/api/oauth/google/start", {
+        method: "POST",
+        body: JSON.stringify({ client: CLIENT }),
+      });
+      expect(res.status).toBe(200);
+      const out = (await res.json()) as { url: string; state: string };
+      return { ...out, auth: new URL(out.url) };
+    };
+
+    it("signs in to Google through the gateway's loopback callback, without a cookie", async () => {
+      tokenReply = {
+        refresh_token: "rt-web",
+        scope:
+          "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters",
+      };
+      const { call } = await pair();
+      const { auth, state } = await start(call);
+      const redirect = auth.searchParams.get("redirect_uri") as string;
+      expect(redirect).toBe(`${base}/api/oauth/google/callback`);
+      expect(auth.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(await (await call(`/api/oauth/google/status/${state}`)).json()).toEqual({
+        status: "pending",
+      });
+      // Google redirects the browser: a plain GET, no session cookie.
+      const page = await fetch(`${redirect}?state=${state}&code=c-1`);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toMatch(/text\/html/);
+      expect(await page.text()).toMatch(/Google is connected/);
+      expect(tokenForms[0]?.get("redirect_uri")).toBe(redirect);
+      expect(
+        vault
+          .list()
+          .map((s) => s.id)
+          .sort(),
+      ).toEqual([
+        "google-client-id",
+        "google-client-secret",
+        "google-project-id",
+        "google-refresh-token",
+      ]);
+      expect(await (await call(`/api/oauth/google/status/${state}`)).json()).toEqual({
+        status: "done",
+      });
+      // Single use.
+      expect((await fetch(`${redirect}?state=${state}&code=c-1`)).status).toBe(400);
+      expect(tokenForms).toHaveLength(1);
+      expect(JSON.stringify(logs)).not.toContain("rt-web");
+    });
+
+    it("refuses forged states, other devices, signed-out devices, and escapes Google's error", async () => {
+      tokenReply = { refresh_token: "rt" };
+      const a = await pair("Phone");
+      const b = await pair("Laptop");
+      const { state } = await start(a.call);
+      const cb = `${base}/api/oauth/google/callback`;
+      expect((await fetch(`${cb}?state=forged&code=x`)).status).toBe(400);
+      expect((await b.call(`/api/oauth/google/status/${state}`)).status).toBe(404);
+      const other = await b.call("/api/oauth/google/finish", {
+        method: "POST",
+        body: JSON.stringify({
+          url: `http://127.0.0.1:1/api/oauth/google/callback?state=${state}&code=x`,
+        }),
+      });
+      expect(other.status).toBe(400);
+      // The device that started it is unpaired: the callback no longer accepts it.
+      await a.call("/api/logout", { method: "POST" });
+      const gone = await fetch(`${cb}?state=${state}&code=x`);
+      expect(await gone.text()).toMatch(/signed out/);
+      const evil = await fetch(
+        `${cb}?state=forged&error=${encodeURIComponent("<script>x</script>")}`,
+      );
+      expect(await evil.text()).not.toContain("<script>");
+      expect(tokenForms).toHaveLength(0);
+      expect(vault.list()).toEqual([]);
+      // Needs a session and CSRF like every other change.
+      expect(
+        (
+          await fetch(`${base}/api/oauth/google/start`, {
+            method: "POST",
+            headers: { cookie: b.cookie, origin: base, "content-type": "application/json" },
+            body: JSON.stringify({ client: CLIENT }),
+          })
+        ).status,
+      ).toBe(403);
+      const web = await b.call("/api/oauth/google/start", {
+        method: "POST",
+        body: JSON.stringify({ client: '{"web":{}}' }),
+      });
+      expect(web.status).toBe(400);
+      expect(((await web.json()) as { error: string }).error).toMatch(/Desktop app/);
+    });
+
+    it("finishes from a pasted address (another device), then revokes", async () => {
+      tokenReply = {
+        refresh_token: "rt-2",
+        scope:
+          "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters",
+      };
+      const { call } = await pair();
+      const { state } = await start(call);
+      const bad = await call("/api/oauth/google/finish", {
+        method: "POST",
+        body: JSON.stringify({ url: "not an address" }),
+      });
+      expect(bad.status).toBe(400);
+      const ok = await call("/api/oauth/google/finish", {
+        method: "POST",
+        body: JSON.stringify({
+          url: ` http://127.0.0.1:7420/api/oauth/google/callback?state=${state}&code=c-2&scope=x `,
+        }),
+      });
+      expect(ok.status).toBe(200);
+      expect(tokenForms[0]?.get("code")).toBe("c-2");
+      expect(vault.status("google-refresh-token").set).toBe(true);
+
+      // Revoking GA4 deletes the shared Google ids (Search Console uses them too).
+      const revoke = await call("/api/integrations/ga4/secrets", { method: "DELETE" });
+      expect(((await revoke.json()) as { deleted: string[] }).deleted.sort()).toEqual([
+        "google-client-id",
+        "google-client-secret",
+        "google-project-id",
+        "google-refresh-token",
+      ]);
+      expect(vault.list()).toEqual([]);
+      vault.set("meta-access-token", "token-value-123", "test");
+      await call("/api/integrations/meta/secrets", { method: "DELETE" });
+      expect(vault.status("meta-access-token").set).toBe(false);
+      expect((await call("/api/integrations/blender/secrets", { method: "DELETE" })).status).toBe(
+        404,
+      );
+      expect((await call("/api/integrations/nope/secrets", { method: "DELETE" })).status).toBe(404);
+    });
+
+    it("gives a local app to the chosen agents and removes it from all", async () => {
+      mkdirSync(join(agentsDir, "artist"));
+      writeFileSync(
+        join(agentsDir, "artist", "agent.yaml"),
+        "id: artist\nname: Artist\nrole: r\nworkspace: shared\nmodels:\n  default: cli-claude/sonnet\nmcp: [unity] # 3D\n",
+      );
+      const { call } = await pair();
+      const put = (id: string, agents: unknown) =>
+        call(`/api/integrations/${id}/agents`, {
+          method: "PUT",
+          body: JSON.stringify({ agents }),
+        });
+      expect((await put("blender", ["boss", "artist"])).status).toBe(200);
+      expect(readFileSync(join(agentsDir, "artist", "agent.yaml"), "utf8")).toContain(
+        "mcp: [unity, blender] # 3D",
+      );
+      expect(readFileSync(join(agentsDir, "boss", "agent.yaml"), "utf8")).toContain(
+        "mcp: [blender]",
+      );
+      expect((await put("blender", [])).status).toBe(200);
+      expect(readFileSync(join(agentsDir, "artist", "agent.yaml"), "utf8")).toContain(
+        "mcp: [unity] # 3D",
+      );
+      expect((await put("blender", ["ghost"])).status).toBe(400);
+      // Integrations with credentials are not handed out here.
+      expect((await put("ga4", ["boss"])).status).toBe(400);
+      expect((await put("blender", "boss")).status).toBe(400);
+    });
   });
 });

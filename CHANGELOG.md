@@ -36,6 +36,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Agents → Edit opens the same form as New agent, filled in: name, role, workspace, scope
+  (AGENT.md), workflow roles, models, tools, folders, shell, network, delegation and budget.
+  Settings the form does not show (integrations, publishing) are kept.
 - Appearance keeps one background per mode (warm light, graphite dark); only the accent colours
   are chosen. Adding a secret in the vault asks just for its id and value.
 - Phones: a bottom tab bar (Chat, Kanban, Agents, Monitors, More) and a "More" sheet with the
@@ -65,6 +68,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - Skills: short how-tos your agents follow (Skills page in the sidebar and in the phone's More menu). Agents see each skill's name and description and read the full text when they need it. After a task that took several attempts or a correction from you, an agent can propose a new skill or a change; you get it in the chat with Approve / Reject, changes shown as before and after. Per workspace you can let new skills be saved automatically; changes always wait for you. Send a link in chat ("found a good skill, build it in") and it is built in directly, or proposed as a change to a similar skill you already have. On the Skills page you can also add, edit, switch off, delete and import skills from a link yourself. Two starter skills ship: writing the final report in plain language, and a self-check before reporting done.
 
+- Settings → Integrations can set up everything that needed the terminal before: **Add sign-in**
+  connects Google (choose the Desktop-app client JSON, then sign in in a new tab; from a phone or
+  another computer paste the address of the page Google ends on) or takes a token for Meta and
+  other shared services; **Revoke** removes a sign-in after a confirmation. **Add app** chooses
+  which agents may use Blender or Unity and shows whether the program is installed; **Edit** and
+  **Remove** on each row. The CLI commands keep working.
+
+- Kanban: a "New card" button (top right) to make a card by hand: title, description, and
+  optionally an agent, a project and the column. With "Start now" the agent begins right away;
+  otherwise the card shows "Not started" and no agent touches it until you press Start in the
+  card (pick an agent there if it has none). Every card gets its own chat, where results,
+  questions and approvals appear.
 - Kanban: opens on "All" workspaces with the assignee on every card; all columns fit the screen.
   A click (or Enter) opens a card: edit title and description, move it, keep sub-items and your
   own comments (the agent sees them next time), or delete it after a confirmation.

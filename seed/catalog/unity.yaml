@@ -8,6 +8,7 @@ command: uvx
 args: ["--from", "mcpforunityserver==10.3.0", "mcp-for-unity", "--transport", "stdio"]
 env:
   DISABLE_TELEMETRY: "true"
+install: Install uv (https://docs.astral.sh/uv/) so `uvx` is on the PATH, then add the package com.coplaydev.unity-mcp in Unity's Package Manager.
 hosts: [127.0.0.1]
 tools:
   read:
