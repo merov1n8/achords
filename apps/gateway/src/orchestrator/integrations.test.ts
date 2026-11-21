@@ -20,6 +20,7 @@ import {
 import { createProject, loadCatalog } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Ensured } from "../apps.ts";
 import {
   createMcpTickets,
   createRunTokens,
@@ -53,6 +54,9 @@ describe("integrations in runs (ADR-0034)", () => {
   let runTokens: ReturnType<typeof createRunTokens>;
   /** Vault ids that are set; undefined: every id resolves. */
   let vaultIds: Set<string> | undefined;
+  /** ADR-0054: what the app fake answers, and the apps it was asked for (name, working folder). */
+  let appResult: Ensured;
+  let ensured: [string, string][];
 
   const agent = (id: string, extra: string, tools = "[Read]") => {
     mkdirSync(join(home, "agents", id), { recursive: true });
@@ -72,7 +76,7 @@ describe("integrations in runs (ADR-0034)", () => {
     );
     writeFileSync(
       join(catalogDir, "blender.yaml"),
-      `id: blender\nname: Blender\ncommand: uvx\nargs: ["blender-mcp==1.0.0"]\ntools:\n  read: [get_scene_info]\n  write: [execute_blender_code]\n`,
+      `id: blender\nname: Blender\ncommand: uvx\nargs: ["blender-mcp==1.0.0"]\napp: { name: Blender, open: ["-g", "-a", "Blender"] }\ntools:\n  read: [get_scene_info]\n  write: [execute_blender_code]\n`,
     );
     writeFileSync(
       join(catalogDir, "ga.yaml"),
@@ -100,6 +104,8 @@ describe("integrations in runs (ADR-0034)", () => {
     callText = "draft 42 created";
     triage = undefined;
     vaultIds = undefined;
+    appResult = { ok: true, opened: false };
+    ensured = [];
     runTokens = createRunTokens();
     tickets = createMcpTickets();
     const p: ModelProvider = {
@@ -116,6 +122,12 @@ describe("integrations in runs (ADR-0034)", () => {
     orch = createOrchestrator({
       db,
       home,
+      apps: {
+        ensure: async (app, workdir) => {
+          ensured.push([app.name, workdir]);
+          return appResult;
+        },
+      },
       providers: {
         "cli-claude": p,
         "cli-codex": { ...p, id: "cli-codex" },
@@ -637,6 +649,54 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(seen[0]?.req.prompt).toMatch(
       /Not available in this run: site \(needs the project's wordpress account\)/,
     );
+  });
+
+  describe("apps on this Mac opened by achords (ADR-0054)", () => {
+    it("opens the app before the run and tells the agent in one line", async () => {
+      appResult = { ok: true, opened: true };
+      const task = await give("artist");
+      expect(task.status).toBe("done");
+      expect(ensured).toEqual([["Blender", join(home, "agents", "artist", "work")]]);
+      expect(Object.keys(JSON.parse(seen[0]?.config ?? "{}").mcpServers)).toContain("blender");
+      expect(seen[0]?.req.prompt).toMatch(/achords opened Blender on this Mac for this run/);
+    });
+
+    it("an app already running is used as is, without a note", async () => {
+      await give("artist");
+      expect(ensured).toHaveLength(1);
+      expect(seen[0]?.req.prompt).not.toMatch(/achords opened/);
+    });
+
+    it("an app that cannot be opened leaves the run without that integration", async () => {
+      appResult = { ok: false, reason: "could not be opened" };
+      const task = await give("maker", "acme");
+      expect(task.status).toBe("done");
+      const servers = Object.keys(JSON.parse(seen[0]?.config ?? "{}").mcpServers);
+      expect(servers).not.toContain("blender");
+      expect(servers).toContain("wp");
+      expect(seen[0]?.req.prompt).toMatch(
+        /Not available in this run: Blender \(could not be opened\)/,
+      );
+    });
+
+    it("opens nothing for a run in a container, which cannot reach this Mac's apps", async () => {
+      agent("boxed", 'mcp: [blender]\nnetwork:\n  allow: ["*"]');
+      orch.syncAgents();
+      await give("boxed");
+      expect(ensured).toEqual([]);
+    });
+
+    it("names the apps that queued, running or waiting tasks still need", async () => {
+      const thread = createThread(db, {});
+      const r = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: "artist", title: "Model a cat", instructions: "go" },
+      );
+      if (!r.ok) throw new Error(r.reason);
+      expect([...orch.appsInUse()]).toEqual(["Blender"]);
+      for (let i = 0; i < 5 && (await orch.workOnce()); i++);
+      expect([...orch.appsInUse()]).toEqual([]);
+    });
   });
 
   describe("several WordPress sites per project (ADR-0047)", () => {

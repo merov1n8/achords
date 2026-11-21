@@ -168,6 +168,23 @@ describe("catalog entries with builtin servers and credential files", () => {
       write('id: g\nname: G\ncommand: uvx\nfiles:\n  F:\n    token: "vault:Bad"\n')(),
     ).toThrow(/invalid vault reference/);
   });
+
+  it("names a local app to open in the background, with plain names only (ADR-0054)", () => {
+    const app = (yaml: string) => write(`id: b\nname: B\ncommand: uvx\napp:\n${yaml}`)().get("b");
+    expect(
+      app('  name: Blender\n  open: ["-g", "-a", "Blender"]\n  ready: { port: 9876 }\n')?.app,
+    ).toEqual({
+      name: "Blender",
+      open: ["-g", "-a", "Blender"],
+      ready: { port: 9876, timeout_s: 90 },
+    });
+    expect(() => app('  name: Blender\n  open: ["-a", "Blender"]\n')).toThrow(/include -g/);
+    expect(() => app('  name: U\n  open: ["-a", "U", "--args", "-g"]\n')).toThrow(/include -g/);
+    expect(() => app('  name: "B\\" & do"\n  open: ["-g", "-a", "B"]\n')).toThrow();
+    expect(() => app('  name: U\n  open: ["-g", "-a", "U"]\n  requires: ../x\n')).toThrow(
+      /relative path/,
+    );
+  });
 });
 
 describe("project scope of shared accounts (ADR-0036)", () => {

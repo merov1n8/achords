@@ -55,6 +55,17 @@ describe("shipped integration catalog", () => {
     expect(secretRefs(catalog.get("unity") as never)).toEqual([]);
   });
 
+  it("names the local apps achords opens for a run (ADR-0054)", () => {
+    expect(catalog.get("blender")?.app).toMatchObject({ name: "Blender", ready: { port: 9876 } });
+    const unity = catalog.get("unity")?.app;
+    expect(unity?.open).toContain("{workdir}");
+    expect(unity?.requires).toBe("ProjectSettings/ProjectVersion.txt");
+    expect([...catalog.values()].filter((e) => e.app).map((e) => e.id)).toEqual([
+      "blender",
+      "unity",
+    ]);
+  });
+
   it("limits the shared Google accounts to the project's own targets (ADR-0036)", () => {
     expect(catalog.get("ga4")?.scope?.args).toEqual(["property_id"]);
     expect(catalog.get("search-console")?.scope?.args).toEqual(["site_url", "site_urls"]);
