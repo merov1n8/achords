@@ -37,7 +37,9 @@ pnpm achords secret list                    # ids, last 4 chars (12+ char values
 pnpm achords secret rm telegram.bot-token
 ```
 
-The API listens on `http://127.0.0.1:7420` (`ACHORDS_PORT` to change). Five wrong pairing codes within 15 minutes lock pairing and invalidate all open codes; create a new one afterwards. Safari may refuse the `Secure` session cookie on plain `http://localhost`; use Chrome/Firefox locally or the Tailscale HTTPS URL. Paired devices can be listed and revoked (`GET/DELETE /api/devices`, web UI in step 7).
+The API listens on `http://127.0.0.1:7420` (`ACHORDS_PORT` to change). Five wrong pairing codes within 15 minutes lock pairing and invalidate all open codes; create a new one afterwards. Safari may refuse the `Secure` session cookie on plain `http://localhost`; use Chrome/Firefox locally or the Tailscale HTTPS URL.
+
+From a phone or another computer (Tailscale): install Tailscale on this Mac and on the device and sign in to the same account; in the Tailscale admin console turn on MagicDNS and HTTPS certificates (DNS page); then run `tailscale serve --bg 7420` once on this Mac. The web UI is at `https://<machine>.<tailnet>.ts.net` (shown by `tailscale status`; it only changes if the machine or tailnet is renamed). The gateway accepts that host name automatically (log: "web: also reachable as …"); pair the new device with a code as usual. Nothing is opened to the internet. Paired devices can be listed and revoked (`GET/DELETE /api/devices`, web UI in step 7).
 
 On macOS the vault's master key is in the login Keychain (item `achords` / `master-key`). `ACHORDS_KEYSTORE=file` uses `$ACHORDS_HOME/master.key` (0600) instead, e.g. on headless hosts.
 
