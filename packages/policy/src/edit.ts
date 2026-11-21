@@ -44,6 +44,45 @@ export function updateManifestName(path: string, name: string): void {
   editManifest(path, (doc) => doc.setIn(["name"], name.trim()));
 }
 
+/** Everything the web form edits; the id stays, fields the form does not show are kept. */
+export type AgentFields = Omit<NewAgent, "id" | "description"> & { doc: string };
+
+/**
+ * Saves the web form for an existing agent: agent.yaml keeps its comments and every field the
+ * form does not cover (mcp, publish mode, …); AGENT.md is replaced. Validated before writing.
+ */
+export function updateAgent(agentsDir: string, id: string, f: AgentFields): void {
+  if (!ID.test(id)) throw new Error("id: lowercase letters, digits and dashes");
+  const dir = join(agentsDir, id);
+  const list = (doc: Document, path: string[], items: string[]) => {
+    const old = doc.getIn(path, true) as { flow?: boolean } | undefined;
+    doc.setIn(path, doc.createNode([...items], { flow: old ? old.flow === true : true }));
+  };
+  editManifest(join(dir, "agent.yaml"), (doc) => {
+    doc.setIn(["name"], f.name.trim());
+    doc.setIn(["role"], f.role.trim());
+    doc.setIn(["workspace"], f.workspace.trim());
+    if (f.roles?.length) list(doc, ["roles"], f.roles);
+    else doc.deleteIn(["roles"]);
+    doc.setIn(["models", "default"], f.models.default);
+    list(doc, ["models", "allowed"], f.models.allowed);
+    list(doc, ["tools"], f.tools ?? []);
+    list(doc, ["fs", "read"], f.fs?.read ?? []);
+    list(doc, ["fs", "write"], f.fs?.write ?? []);
+    // Absent shell = no shell at all (deny by default).
+    if (f.shell) list(doc, ["shell", "allow"], f.shell.allow);
+    else doc.deleteIn(["shell"]);
+    list(doc, ["network", "allow"], f.network?.allow ?? []);
+    list(doc, ["delegation", "can_delegate_to"], f.delegation?.can_delegate_to ?? []);
+    list(doc, ["delegation", "accepts_from"], f.delegation?.accepts_from ?? []);
+    if (f.budget?.per_run_usd) doc.setIn(["budget", "per_run_usd"], f.budget.per_run_usd);
+    else doc.deleteIn(["budget"]);
+  });
+  const tmp = join(dir, `AGENT.md.tmp-${process.pid}`);
+  writeFileSync(tmp, f.doc.endsWith("\n") ? f.doc : `${f.doc}\n`);
+  renameSync(tmp, join(dir, "AGENT.md"));
+}
+
 export interface NewAgent {
   id: string;
   name: string;
