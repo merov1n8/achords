@@ -131,12 +131,31 @@ describe("catalog entries with builtin servers and credential files", () => {
     return () => loadCatalog(seed, owner);
   };
 
-  it("needs exactly one of command and builtin", () => {
-    expect(() => write("id: x\nname: X\ntools:\n  read: [a]\n")()).toThrow(/command or builtin/);
-    expect(() => write("id: x\nname: X\ncommand: npx\nbuiltin: wordpress\n")()).toThrow(
-      /command or builtin/,
-    );
+  it("needs exactly one of command, builtin and url", () => {
+    const one = /one of command, builtin or url/;
+    expect(() => write("id: x\nname: X\ntools:\n  read: [a]\n")()).toThrow(one);
+    expect(() => write("id: x\nname: X\ncommand: npx\nbuiltin: wordpress\n")()).toThrow(one);
+    expect(() =>
+      write("id: x\nname: X\ncommand: npx\nurl: https://a.com/mcp\nhosts: [a.com]\n")(),
+    ).toThrow(one);
     expect(write("id: x\nname: X\nbuiltin: wordpress\n")().get("x")?.builtin).toBe("wordpress");
+  });
+
+  it("takes a remote server on an https url of a listed host, its key as a secret", () => {
+    const remote =
+      'id: r\nname: R\nurl: https://mcp.a.com/mcp\nhosts: [mcp.a.com]\nauthorization: { scheme: Key, secret: "vault:a-key" }\n';
+    const entry = write(remote)().get("r");
+    if (!entry) throw new Error("missing");
+    expect(secretRefs(entry)).toEqual(["vault:a-key"]);
+    expect(ownerSecrets(entry)).toEqual(["a-key"]);
+    expect(() => write(remote.replace("hosts: [mcp.a.com]", "hosts: [a.com]"))()).toThrow(
+      /host listed in hosts/,
+    );
+    expect(() => write(remote.replace("https:", "http:"))()).toThrow(/host listed in hosts/);
+    expect(() => write(remote.replace("vault:a-key", "plain"))()).toThrow();
+    expect(() =>
+      write('id: r\nname: R\ncommand: npx\nauthorization: { scheme: Key, secret: "vault:k" }\n')(),
+    ).toThrow(/only for a url/);
   });
 
   it("counts vault references inside credential files as secrets", () => {

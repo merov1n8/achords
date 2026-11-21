@@ -1,0 +1,31 @@
+# fal.ai's hosted MCP server (Streamable HTTP, no program to install): reached by the launcher
+# over HTTPS (ADR-0050) with the API key as `Authorization: Key <key>`. Image, video, audio and
+# 3D models. Running or submitting a model, uploading a file and cancelling a job are write
+# tools, so the owner sees each call (publishing review or auto, ADR-0037); searching models,
+# schemas, prices and docs and reading a job's status or result are read tools.
+# achords secret set fal-api-key   (fal.ai/dashboard/keys; the whole key_id:key_secret)
+id: fal
+name: fal.ai
+description: Image, video and audio models (generation needs the owner's approval or report).
+url: https://mcp.fal.ai/mcp
+hosts: [mcp.fal.ai]
+authorization:
+  scheme: Key
+  secret: "vault:fal-api-key"
+tools:
+  read:
+    - search_models
+    - get_model_schema
+    - get_pricing
+    - recommend_model
+    - search_docs
+    - check_job
+    - get_job_result
+  write:
+    - run_model
+    - submit_job
+    - cancel_job
+    - upload_file
+# Connection test (web Integrations page).
+test:
+  tool: search_models

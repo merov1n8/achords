@@ -206,6 +206,35 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(redeemed[1]).toBeUndefined();
   });
 
+  it("fills {workdir} with the run's folder and resolves a remote server's key (ADR-0050)", async () => {
+    const catalogDir = join(home, "catalog");
+    writeFileSync(
+      join(catalogDir, "voice.yaml"),
+      `id: voice\nname: Voice\ncommand: uvx\nargs: ["voice==1.0.0"]\nenv:\n  KEY: "vault:voice-key"\n  OUT: "{workdir}"\ntools:\n  write: [speak]\n`,
+    );
+    writeFileSync(
+      join(catalogDir, "gen.yaml"),
+      `id: gen\nname: Gen\nurl: https://mcp.gen.example/mcp\nhosts: [mcp.gen.example]\nauthorization: { scheme: Key, secret: "vault:gen-key" }\ntools:\n  write: [run_model]\n`,
+    );
+    agent("producer", "mcp: [voice, gen]");
+    orch.syncAgents();
+    const launches: McpLaunch[] = [];
+    const original = tickets.issue.bind(tickets);
+    tickets.issue = (launch) => {
+      launches.push(launch);
+      return original(launch);
+    };
+    await give("producer", "acme");
+    const cwd = seen[0]?.req.cwd;
+    expect(cwd).toBe(join(home, "projects", "acme", "files"));
+    const voice = launches.find((l) => l.command === "uvx");
+    expect([voice?.env.OUT, voice?.cwd]).toEqual([cwd, cwd]);
+    expect(launches.find((l) => l.remote)?.remote).toEqual({
+      url: "https://mcp.gen.example/mcp",
+      headers: { authorization: `Key ${SECRET}` },
+    });
+  });
+
   it("refuses secrets next to a shell and unknown integrations", async () => {
     const shelly = await give("shelly", "acme");
     expect(shelly.status).toBe("failed");
@@ -252,6 +281,7 @@ describe("integrations in runs (ADR-0034)", () => {
       args: ["--disable-warning=ExperimentalWarning", "/x/wordpress.ts"],
       env: { WP_APP_PASSWORD: SECRET },
       files: { CREDS: { type: "authorized_user", refresh_token: SECRET } },
+      cwd: join(home, "projects", "acme", "files"),
       // ADR-0038: results of client accounts are marked as third-party data.
       untrusted: "WordPress",
     });
@@ -421,6 +451,8 @@ describe("integrations in runs (ADR-0034)", () => {
         args: { title: "Spring sale", content: "<p>Hi</p>" },
       });
       expect(called[0]?.launch.env.WP_PASSWORD).toBe(SECRET);
+      // It runs in the folder of the run that asked.
+      expect(called[0]?.launch.cwd).toBe(seen[0]?.req.cwd);
       expect(resolved.at(-1)).toEqual(["vault:wp-acme", "owner-approved:agent:marketer/mcp:wp"]);
       expect(listMessages(db, task.threadId as string).at(-1)?.content).toBe("draft 42 created");
     });

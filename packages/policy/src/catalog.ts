@@ -10,7 +10,8 @@ const VAULT_REF = /^vault:[a-z0-9{][a-z0-9_.{}-]*$/;
 // MCP tool names as the CLI exposes them: mcp__<server>__<tool>.
 const TOOL = /^[A-Za-z0-9_-]{1,64}$/;
 const ENV = /^[A-Z_][A-Z0-9_]*$/;
-// Literal or `vault:<id>`; `{project}` in a vault id is the task's project.
+// Literal or `vault:<id>`; `{project}` in a vault id is the task's project. `{workdir}` in a
+// literal is the run's working folder (also writable by the agent).
 const value = z.string();
 
 /** One integration (ADR-0034): an MCP server, its credentials and the tools agents may use. */
@@ -19,9 +20,16 @@ export const catalogEntrySchema = z
     id: z.string().regex(ID),
     name: z.string().min(1),
     description: z.string().default(""),
-    // An ecosystem server (command + pinned package) or one shipped with achords (`builtin`).
+    // An ecosystem server (command + pinned package), one shipped with achords (`builtin`) or a
+    // remote server over Streamable HTTP (`url`, its host listed in `hosts`).
     command: z.string().min(1).optional(),
     builtin: z.enum(["wordpress"]).optional(),
+    url: z.string().url().optional(),
+    // Remote servers: the Authorization header, `<scheme> <secret>`.
+    authorization: z
+      .object({ scheme: z.string().regex(/^[A-Za-z]+$/), secret: z.string().regex(VAULT_REF) })
+      .strict()
+      .optional(),
     args: z.array(z.string()).default([]),
     env: z.record(z.string().regex(ENV), value).default({}),
     // Servers that read credentials from a file: the env var gets the path of a private JSON
@@ -81,8 +89,21 @@ export const catalogEntrySchema = z
   })
   .strict()
   .superRefine((e, ctx) => {
-    if (!e.command === !e.builtin) {
-      ctx.addIssue({ code: "custom", path: ["command"], message: "set either command or builtin" });
+    if ([e.command, e.builtin, e.url].filter(Boolean).length !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["command"],
+        message: "set one of command, builtin or url",
+      });
+    }
+    if (e.url) {
+      const u = new URL(e.url);
+      if (u.protocol !== "https:" || !e.hosts.includes(u.hostname)) {
+        ctx.addIssue({ code: "custom", path: ["url"], message: "https on a host listed in hosts" });
+      }
+    }
+    if (e.authorization && !e.url) {
+      ctx.addIssue({ code: "custom", path: ["authorization"], message: "only for a url" });
     }
     const check = (v: string, path: string[]) => {
       if (v.startsWith("vault:") && !VAULT_REF.test(v)) {
@@ -150,6 +171,7 @@ export function secretRefs(entry: CatalogEntry, project?: string): string[] {
     ...Object.values(entry.env),
     ...Object.values(entry.files).flatMap((f) => Object.values(f)),
     ...Object.values(entry.sites?.secrets ?? {}),
+    ...(entry.authorization ? [entry.authorization.secret] : []),
   ];
   return values
     .filter((v) => v.startsWith("vault:"))
