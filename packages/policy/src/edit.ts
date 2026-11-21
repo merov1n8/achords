@@ -82,6 +82,8 @@ export function updateAgent(agentsDir: string, id: string, f: AgentFields): void
     list(doc, ["delegation", "accepts_from"], f.delegation?.accepts_from ?? []);
     if (f.budget?.per_run_usd) doc.setIn(["budget", "per_run_usd"], f.budget.per_run_usd);
     else doc.deleteIn(["budget"]);
+    if (f.effort) doc.setIn(["effort"], f.effort);
+    else doc.deleteIn(["effort"]);
   });
   const tmp = join(dir, `AGENT.md.tmp-${process.pid}`);
   writeFileSync(tmp, f.doc.endsWith("\n") ? f.doc : `${f.doc}\n`);
@@ -101,6 +103,7 @@ export interface NewAgent {
   shell?: { allow: string[] };
   network?: { allow: string[] };
   delegation?: { can_delegate_to?: string[]; accepts_from?: string[] };
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
   budget?: { per_run_usd?: number };
   /** Scope paragraph for AGENT.md. */
   description: string;
@@ -127,6 +130,7 @@ export function createAgentFiles(agentsDir: string, a: NewAgent): { id: string }
     ...(a.network?.allow.length ? { network: a.network } : {}),
     ...(a.delegation ? { delegation: a.delegation } : {}),
     ...(a.budget?.per_run_usd ? { budget: a.budget } : {}),
+    ...(a.effort ? { effort: a.effort } : {}),
   };
   const text = stringify(manifest, { flowCollectionPadding: false });
   parseManifest(text, `${a.id}/agent.yaml`); // throws with field paths if invalid

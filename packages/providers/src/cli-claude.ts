@@ -60,6 +60,7 @@ export function buildArgs(req: RunRequest): string[] {
   if (req.appendSystemPrompt) args.push("--append-system-prompt", req.appendSystemPrompt);
   if (req.maxTurns !== undefined) args.push("--max-turns", String(req.maxTurns));
   if (req.maxBudgetUsd !== undefined) args.push("--max-budget-usd", String(req.maxBudgetUsd));
+  if (req.effort) args.push("--effort", req.effort);
   return args;
 }
 

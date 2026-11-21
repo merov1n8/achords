@@ -289,8 +289,8 @@ function EditProject(props: {
           integrations: { ...toLists(rows), ...siteLists(current.integrations ?? {}) },
         },
       });
-      setStatus({ ok: true, text: t("projects.saved") });
       props.onSaved();
+      props.onClose();
     } catch (err) {
       setStatus({ ok: false, text: (err as Error).message });
     }
