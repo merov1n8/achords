@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { upsertAgent } from "./agents.ts";
 import { openCoreDatabase } from "./db/database.ts";
 import { finishRun, startRun } from "./runs.ts";
-import { listUsageWindows, recordUsageWindows, spendSince } from "./usage.ts";
+import {
+  apiSpendSince,
+  listUsageWindows,
+  recordUsageWindows,
+  spendBy,
+  spendSince,
+} from "./usage.ts";
 
 describe("usage meters (step 6)", () => {
   it("keeps the latest state of each subscription window per provider", () => {
@@ -52,5 +59,49 @@ describe("usage meters (step 6)", () => {
     finishRun(db, c.id, "succeeded", {}, 160);
     expect(spendSince(db, 100)).toBe(0.5);
     expect(spendSince(db, 0)).toBe(0.75);
+  });
+});
+
+describe("spend by provider, agent and project (Phase 4)", () => {
+  it("separates API money from subscription estimates and counts unpriced runs", () => {
+    const db = openCoreDatabase(":memory:");
+    for (const id of ["a", "b"]) upsertAgent(db, { id, name: id, role: id, workspace: "w" });
+    const finish = (
+      provider: string,
+      billing: "api" | "subscription",
+      cost: number | undefined,
+      agentId = "a",
+    ) => {
+      const r = startRun(db, { provider, agentId, billing }, 10);
+      finishRun(
+        db,
+        r.id,
+        "succeeded",
+        {
+          ...(cost !== undefined ? { costUsd: cost } : {}),
+          tokens: { input: 100, output: 10, cached: 0 },
+        },
+        20,
+      );
+    };
+    finish("cli-claude", "api", 0.5);
+    finish("cli-claude", "api", 0.25, "b");
+    finish("cli-claude", "subscription", 2);
+    finish("cli-codex", "api", undefined);
+    expect(apiSpendSince(db, "cli-claude", 0)).toBe(0.75);
+    expect(apiSpendSince(db, "cli-claude", 21)).toBe(0);
+    const byProvider = spendBy(db, 0, "provider");
+    expect(byProvider).toContainEqual({
+      key: "cli-codex",
+      billing: "api",
+      usd: 0,
+      unpriced: 1,
+      inputTokens: 100,
+      outputTokens: 10,
+    });
+    expect(
+      byProvider.find((r) => r.key === "cli-claude" && r.billing === "subscription")?.usd,
+    ).toBe(2);
+    expect(spendBy(db, 0, "agent").find((r) => r.key === "b")?.usd).toBe(0.25);
   });
 });

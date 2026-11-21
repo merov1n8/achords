@@ -34,6 +34,7 @@ import {
   type ScheduleInput,
   setSetting,
   setThreadProject,
+  spendBy,
   spendSince,
   updateMonitor,
   updateSchedule,
@@ -111,6 +112,11 @@ export interface ApiDeps {
   billing?: {
     list: () => { provider: string; label: string; mode: string; keyId: string; keySet: boolean }[];
     setMode: (provider: string, mode: "subscription" | "api") => void;
+    budgets: () => Record<
+      string,
+      { day: number; month: number; spentDay: number; spentMonth: number }
+    >;
+    setBudget: (provider: string, period: "day" | "month", usd: number) => void;
   };
   /** Auto-update from main (owner decision 2026-11-21). */
   update?: {
@@ -473,7 +479,25 @@ export function createApiHandler(deps: ApiDeps) {
       () => {
         const midnight = new Date();
         midnight.setHours(0, 0, 0, 0);
-        return { windows: listUsageWindows(db), spentTodayUsd: spendSince(db, midnight.getTime()) };
+        const month = new Date(midnight);
+        month.setDate(1);
+        return {
+          windows: listUsageWindows(db),
+          spentTodayUsd: spendSince(db, midnight.getTime()),
+          // Phase 4: per provider, agent and project; API money apart from subscription estimates.
+          spend: {
+            today: {
+              provider: spendBy(db, midnight.getTime(), "provider"),
+              agent: spendBy(db, midnight.getTime(), "agent"),
+              project: spendBy(db, midnight.getTime(), "project"),
+            },
+            month: {
+              provider: spendBy(db, month.getTime(), "provider"),
+              agent: spendBy(db, month.getTime(), "agent"),
+              project: spendBy(db, month.getTime(), "project"),
+            },
+          },
+        };
       },
     ],
     // Live run progress (step 5b), polled by the web's bottom bar.
@@ -679,6 +703,31 @@ export function createApiHandler(deps: ApiDeps) {
         }
         attempt(() => deps.billing?.setMode(params[0] as string, mode));
         return deps.billing.list();
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/budgets$/,
+      () => {
+        if (!deps.billing) throw new HttpError(404, "not available");
+        return deps.billing.budgets();
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/budgets\/([a-z0-9-]{1,32})$/,
+      async ({ params, body }) => {
+        if (!deps.billing) throw new HttpError(404, "not available");
+        const b = await body();
+        for (const period of ["day", "month"] as const) {
+          if (b[period] === undefined) continue;
+          const usd = Number(b[period]);
+          if (!Number.isFinite(usd) || usd < 0 || usd > 100_000) {
+            throw new HttpError(400, `${period} must be a number of dollars (0 = no limit)`);
+          }
+          attempt(() => deps.billing?.setBudget(params[0] as string, period, usd));
+        }
+        return deps.billing.budgets();
       },
     ],
     // Updates: status, the auto switch, and a manual check.
