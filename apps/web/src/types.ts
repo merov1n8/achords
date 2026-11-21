@@ -40,6 +40,9 @@ export interface Task {
   parentId: string | null;
   /** Kanban column (workflow); null = shown inside its root task's card. */
   column: string | null;
+  project: string | null;
+  /** Made by hand and not started yet: no agent works on it until the owner starts it. */
+  parked: boolean;
   error: string | null;
   createdAt: number;
   updatedAt: number;
