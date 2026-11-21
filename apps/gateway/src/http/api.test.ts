@@ -44,6 +44,7 @@ describe("HTTP API", () => {
   let agentsDir: string;
   let runDir: string;
   let projectsDir: string;
+  let budgetDay = 0;
   const heard: number[] = [];
 
   beforeEach(async () => {
@@ -127,6 +128,16 @@ describe("HTTP API", () => {
             return request.agent === "nope"
               ? { ok: false, reason: "no agent nope" }
               : { ok: true, taskId: "child-1" };
+          },
+        },
+        billing: {
+          list: () => [],
+          setMode: () => {},
+          budgets: () => ({
+            "cli-claude": { day: budgetDay, month: 0, spentDay: 1.5, spentMonth: 3 },
+          }),
+          setBudget: (_p, period, usd) => {
+            if (period === "day") budgetDay = usd;
           },
         },
         runTokens: tokens,
@@ -423,6 +434,19 @@ describe("HTTP API", () => {
       body: JSON.stringify({ integrations: { "Bad Key": ["x"] } }),
     });
     expect(bad.status).toBe(400);
+  });
+
+  it("budgets: read and set per provider, numbers only (Phase 4)", async () => {
+    const { call } = await pair();
+    const put = await call("/api/budgets/cli-claude", { method: "PUT", body: '{"day": 5}' });
+    expect(await put.json()).toMatchObject({ "cli-claude": { day: 5, spentDay: 1.5 } });
+    expect(
+      (await call("/api/budgets/cli-claude", { method: "PUT", body: '{"day": -1}' })).status,
+    ).toBe(400);
+    const usage = (await (await call("/api/usage")).json()) as {
+      spend: { today: { provider: unknown[] } };
+    };
+    expect(Array.isArray(usage.spend.today.provider)).toBe(true);
   });
 
   it("vault is write-only over HTTP", async () => {
@@ -841,11 +865,12 @@ describe("HTTP API", () => {
     ]);
     const run = startRun(db, { provider: "cli-claude" });
     finishRun(db, run.id, "succeeded", { costUsd: 0.3 });
-    expect(await (await call("/api/usage")).json()).toEqual({
+    expect(await (await call("/api/usage")).json()).toMatchObject({
       windows: [
         expect.objectContaining({ provider: "cli-claude", kind: "five_hour", utilization: 0.42 }),
       ],
       spentTodayUsd: 0.3,
+      spend: { today: { provider: [{ key: "cli-claude", billing: "subscription", usd: 0.3 }] } },
     });
   });
 

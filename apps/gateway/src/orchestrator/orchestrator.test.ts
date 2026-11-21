@@ -152,6 +152,51 @@ describe("orchestrator", () => {
     );
   });
 
+  it("prices token-only runs, records API billing, and holds API work over budget (Phase 4)", async () => {
+    let blocked: string | undefined;
+    const fake = fakeProvider(() =>
+      result({
+        text: "done",
+        usage: {
+          inputTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: null,
+        },
+      }),
+    );
+    const orch = createOrchestrator({
+      db,
+      home,
+      providers: { "cli-claude": fake.provider },
+      billing: () => ({ mode: "api", env: { ANTHROPIC_API_KEY: "k" } }),
+      price: (model, u) => (model === "cli-claude/sonnet" ? u.inputTokens / 1000 : null),
+      budget: () => blocked,
+    });
+    orch.syncAgents();
+    const t = createThread(db, {});
+    orch.delegate(
+      { from: "boss", threadId: t.id },
+      { agent: "web-dev", title: "a", instructions: "go" },
+    );
+    await orch.workOnce();
+    const run = db.prepare("SELECT billing, cost_usd, input_tokens FROM runs").get();
+    expect(run).toMatchObject({ billing: "api", cost_usd: 1, input_tokens: 1000 });
+    blocked = "Claude API budget for today is used up";
+    const r = orch.delegate(
+      { from: "boss", threadId: t.id },
+      { agent: "web-dev", title: "b", instructions: "go" },
+    );
+    await orch.workOnce();
+    expect(fake.calls).toHaveLength(1); // not run
+    const task = db
+      .prepare("SELECT status, error FROM tasks WHERE id = ?")
+      .get(r.ok ? r.taskId : "");
+    expect(task?.status).toBe("queued");
+    expect(String(task?.error)).toMatch(/budget for today is used up/);
+  });
+
   it("@agent goes straight to that agent, without the boss", async () => {
     const { orch, calls } = make(() => result({ text: "kész" }));
     const t = createThread(db, {});

@@ -49,3 +49,53 @@ export function spendSince(db: Db, since: number): number {
     .get(since);
   return Number(row?.total ?? 0);
 }
+
+export interface SpendRow {
+  key: string;
+  billing: string;
+  usd: number;
+  /** Runs without a known cost (no price for the model): counted in tokens only. */
+  unpriced: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * Spend since a time, grouped by provider, agent or the task's project (Phase 4). Subscription
+ * runs are listed apart: their cost is what the CLI estimates, not money spent.
+ */
+export function spendBy(db: Db, since: number, by: "provider" | "agent" | "project"): SpendRow[] {
+  const key =
+    by === "provider"
+      ? "r.provider"
+      : by === "agent"
+        ? "COALESCE(r.agent_id, '-')"
+        : "COALESCE(t.project, '-')";
+  return db
+    .prepare(
+      `SELECT ${key} AS key, r.billing AS billing, COALESCE(SUM(r.cost_usd), 0) AS usd,
+         SUM(CASE WHEN r.cost_usd IS NULL THEN 1 ELSE 0 END) AS unpriced,
+         COALESCE(SUM(r.input_tokens), 0) AS input_tokens, COALESCE(SUM(r.output_tokens), 0) AS output_tokens
+       FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+       WHERE r.ended_at >= ? GROUP BY 1, 2 ORDER BY usd DESC`,
+    )
+    .all(since)
+    .map((r) => ({
+      key: String(r.key),
+      billing: String(r.billing),
+      usd: Number(r.usd),
+      unpriced: Number(r.unpriced),
+      inputTokens: Number(r.input_tokens),
+      outputTokens: Number(r.output_tokens),
+    }));
+}
+
+/** API money spent on one provider since a time (budgets). */
+export function apiSpendSince(db: Db, provider: string, since: number): number {
+  const row = db
+    .prepare(
+      "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM runs WHERE provider = ? AND billing = 'api' AND ended_at >= ?",
+    )
+    .get(provider, since);
+  return Number(row?.total ?? 0);
+}

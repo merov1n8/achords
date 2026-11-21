@@ -96,7 +96,7 @@ import {
   secretRefs,
   type Workflow,
 } from "@achords/policy";
-import type { ModelProvider, RunRequest } from "@achords/providers";
+import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/providers";
 import { z } from "zod";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
 import { describeCall, describeResult } from "./publish-text.ts";
@@ -130,6 +130,7 @@ const HISTORY = 20;
 const MAX_POST = 4000;
 const MEMORY_HITS = 5;
 const DEFER_MS = 60_000;
+const BUDGET_DEFER_MS = 30 * 60_000;
 const SUMMARY_CHARS = 1500;
 
 const listChange = z
@@ -178,6 +179,10 @@ export interface OrchestratorDeps {
    * mode is chosen but its key is missing; the run fails with that reason.
    */
   billing?: (provider: string) => { mode: "subscription" | "api"; env?: Record<string, string> };
+  /** Phase 4: cost from tokens for CLIs that report none (price list), or null. */
+  price?: (model: string, usage: Usage) => number | null;
+  /** Phase 4: why API work on this provider must wait (budget used up), or undefined. */
+  budget?: (provider: string) => string | undefined;
   /** Applied to everything posted to threads (ADR-0012). */
   redact?: (text: string) => string;
   /** Long-term memory (ADR-0008); optional so the hub works without it. */
@@ -497,6 +502,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return workflowFor(workspaceOf(task));
   };
   const projectSpace = (p: Project) => `${p.workspace}/${p.slug}`;
+  /** Cost and tokens of a finished run for the spend meters (Phase 4). */
+  const spendInfo = (provider: string, model: string, res: RunResult) => {
+    const cost = res.usage.costUsd ?? deps.price?.(`${provider}/${model}`, res.usage) ?? null;
+    return {
+      ...(cost !== null ? { costUsd: cost } : {}),
+      tokens: {
+        input: res.usage.inputTokens,
+        output: res.usage.outputTokens,
+        cached: res.usage.cacheReadTokens,
+      },
+    };
+  };
   /**
    * The only way a project widens a run: an agent of the project's workspace works in its
    * files/ folder (cwd and write root). Agents of other workspaces get the text, not the folder.
@@ -1415,9 +1432,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
 
         const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
+        const bossBudget = req.billing === "api" ? deps.budget?.(provider.id) : undefined;
+        if (bossBudget) throw new Error(bossBudget);
         // Structured output is an internal tool call, so allow a few turns.
         // Recorded like any run: cost, quota windows, `achords kill`, the live bar.
-        const bossRun = startRun(db, { provider: provider.id, model: req.model, agentId: boss.id });
+        const bossRun = startRun(db, {
+          provider: provider.id,
+          model: req.model,
+          agentId: boss.id,
+          billing: req.billing ?? "subscription",
+        });
         const res = await provider
           .run({
             ...req,
@@ -1432,7 +1456,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           });
         finishRun(db, bossRun.id, res.ok ? "succeeded" : "failed", {
           ...(res.error ? { error: res.error } : {}),
-          ...(res.usage.costUsd !== null ? { costUsd: res.usage.costUsd } : {}),
+          ...spendInfo(provider.id, req.model, res),
         });
         recordUsage(provider.id, res.windows);
         if (res.stopReason === "unavailable") {
@@ -1835,11 +1859,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       built.req.appendSystemPrompt =
         `${built.req.appendSystemPrompt ?? ""}\n\n${PROGRESS_HINT}`.trim();
     }
+    // API budget used up (Phase 4): the work waits, it does not fail.
+    const overBudget = built.req.billing === "api" ? deps.budget?.(built.provider.id) : undefined;
+    if (overBudget) {
+      hubRun?.revoke();
+      if (hubRun) rmSync(hubRun.file, { force: true });
+      defer(db, task.id, WORKER_ID, overBudget, BUDGET_DEFER_MS);
+      return;
+    }
     const run = startRun(db, {
       provider: built.provider.id,
       model: built.req.model,
       taskId: task.id,
       agentId: manifest.id,
+      billing: built.req.billing ?? "subscription",
     });
     const keepAlive = setInterval(
       () => extendLease(db, task.id, WORKER_ID, LEASE_MS),
@@ -1858,11 +1891,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         res.ok ? "succeeded" : res.stopReason === "cancelled" ? "cancelled" : "failed",
         {
           ...(res.error ? { error: res.error } : {}),
-          ...(res.usage.costUsd !== null ? { costUsd: res.usage.costUsd } : {}),
+          ...spendInfo(built.provider.id, built.req.model, res),
         },
       );
       recordUsage(built.provider.id, res.windows);
-      addSpend(db, rootId, res.usage.costUsd ?? 0);
+      addSpend(db, rootId, spendInfo(built.provider.id, built.req.model, res).costUsd ?? 0);
       if (res.stopReason === "cancelled" && signal?.aborted) {
         // Planned stop: not the task's fault. Back to the queue with where it was, no attempt lost.
         requeueInterrupted(db, task.id, WORKER_ID, resumeNote(runProgressItems(db, run.id)));

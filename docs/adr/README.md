@@ -45,3 +45,4 @@
 - [ADR-0043: Auto-update from the public main branch](0043-auto-update-from-main.md)
 - [ADR-0044: Subscription or API key per provider, through the official CLIs](0044-subscription-or-api-per-provider.md)
 - [ADR-0045: Google Gemini through the gemini CLI (stage 1)](0045-gemini-through-gemini-cli.md)
+- [ADR-0046: Spend meters and API budgets](0046-spend-meters-and-api-budgets.md)

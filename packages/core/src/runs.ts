@@ -36,13 +36,15 @@ export function startRun(
     agentId?: string;
     pid?: number;
     pgid?: number;
+    /** Phase 4: "api" when the run is billed to an API key. */
+    billing?: "subscription" | "api";
   },
   now = Date.now(),
 ): Run {
   const row = db
     .prepare(
-      `INSERT INTO runs (id, task_id, agent_id, provider, model, pid, pgid, started_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO runs (id, task_id, agent_id, provider, model, pid, pgid, started_at, billing)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
@@ -53,6 +55,7 @@ export function startRun(
       input.pid ?? null,
       input.pgid ?? null,
       now,
+      input.billing ?? "subscription",
     );
   return toRun(row as Record<string, unknown>);
 }
@@ -74,15 +77,31 @@ export function finishRun(
   db: Db,
   id: string,
   status: Exclude<RunStatus, "running">,
-  info: { exitCode?: number; error?: string; costUsd?: number },
+  info: {
+    exitCode?: number;
+    error?: string;
+    costUsd?: number;
+    tokens?: { input: number; output: number; cached: number };
+  },
   now = Date.now(),
 ): boolean {
   const r = db
     .prepare(
-      `UPDATE runs SET status = ?, exit_code = ?, error = ?, cost_usd = ?, ended_at = ?
+      `UPDATE runs SET status = ?, exit_code = ?, error = ?, cost_usd = ?, ended_at = ?,
+         input_tokens = ?, output_tokens = ?, cached_tokens = ?
        WHERE id = ? AND status = 'running'`,
     )
-    .run(status, info.exitCode ?? null, info.error ?? null, info.costUsd ?? null, now, id);
+    .run(
+      status,
+      info.exitCode ?? null,
+      info.error ?? null,
+      info.costUsd ?? null,
+      now,
+      info.tokens?.input ?? null,
+      info.tokens?.output ?? null,
+      info.tokens?.cached ?? null,
+      id,
+    );
   return r.changes === 1;
 }
 
