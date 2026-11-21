@@ -294,6 +294,22 @@ describe("cli-claude adapter", () => {
       }
     });
 
+    it("stops the container when its client is killed from outside (per-chat Stop)", async () => {
+      process.env.FAKE_CONTAINER_RECORD = calls();
+      try {
+        let pid = 0;
+        const running = boxed("hang").run(req({ container: box(), onSpawn: (p) => (pid = p) }));
+        await waitFor(() => pid > 0);
+        // What stopThread does: signal the run's process group, not the provider.
+        process.kill(-pid, "SIGTERM");
+        await running;
+        await waitFor(() => recorded().some((a) => a[0] === "kill"));
+        expect(recorded().find((a) => a[0] === "kill")).toEqual(["kill", "achords-run-test"]);
+      } finally {
+        delete process.env.FAKE_CONTAINER_RECORD;
+      }
+    });
+
     it("refuses a folder the mount syntax cannot carry", async () => {
       const res = await boxed().run(
         req({ container: box({ mounts: [{ path: "/a,b", readonly: false }] }) }),

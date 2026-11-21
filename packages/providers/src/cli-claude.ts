@@ -225,6 +225,10 @@ function runOnce(
       } catch {
         // group already empty
       }
+      // The VM outlives its `container run` client if that was killed from outside (per-chat
+      // Stop signals the process group): stop it by name. A finished --rm container is gone,
+      // and killing a missing one is harmless.
+      if (box && !stop) stopContainer(box);
       if (stop) {
         finish({
           ok: false,
