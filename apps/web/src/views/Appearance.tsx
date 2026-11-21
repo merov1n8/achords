@@ -2,8 +2,6 @@ import { useState } from "preact/hooks";
 import { t } from "../i18n.ts";
 import {
   ACCENTS,
-  DARK_BASES,
-  LIGHT_BASES,
   type Appearance as Look,
   loadAppearance,
   saveAppearance,
@@ -18,32 +16,13 @@ export function Appearance() {
     saveAppearance(v);
   };
   const themes: [ThemeChoice, string[]][] = [
-    ["system", ["paper", "graphite"]],
-    ["light", ["paper"]],
+    ["system", ["warm", "graphite"]],
+    ["light", ["warm"]],
     ["dark", ["graphite"]],
   ];
-  const bases = (mode: "light" | "dark") => {
-    const key = mode === "light" ? "lightBase" : "darkBase";
-    const list: string[] = mode === "light" ? LIGHT_BASES : DARK_BASES;
+  const accents = (mode: "light" | "dark") => {
     return (
       <>
-        <h2 class="gap-top">{t(`appearance.${mode}Base`)}</h2>
-        <div class="choices">
-          {list.map((id) => (
-            <button
-              key={id}
-              type="button"
-              class={`choice ${a[key] === id ? "sel" : ""}`}
-              onClick={() => set({ [key]: id })}
-              aria-pressed={a[key] === id}
-            >
-              <span class="preview">
-                <span class={`base-${id}`} />
-              </span>
-              <strong>{t(`appearance.base.${id}`)}</strong>
-            </button>
-          ))}
-        </div>
         <h2 class="gap-top">{t(`appearance.${mode}Accent`)}</h2>
         <div class="row wrap">
           {ACCENTS.map((id) => {
@@ -89,8 +68,8 @@ export function Appearance() {
           </button>
         ))}
       </div>
-      {bases("light")}
-      {bases("dark")}
+      {accents("light")}
+      {accents("dark")}
     </>
   );
 }

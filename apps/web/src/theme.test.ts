@@ -3,17 +3,16 @@ import { appearanceAttrs, parseAppearance, resolveTheme } from "./theme.ts";
 
 const DEFAULTS = {
   theme: "system",
-  lightBase: "warm",
-  darkBase: "graphite",
   lightAccent: "violet",
   darkAccent: "teal",
 };
 
 describe("appearance", () => {
-  it("defaults to the system mode, warm/violet and graphite/teal", () => {
+  it("defaults to the system mode, violet (light) and teal (dark)", () => {
     expect(parseAppearance(null)).toEqual(DEFAULTS);
     expect(parseAppearance("garbage")).toEqual(DEFAULTS);
-    expect(parseAppearance('{"theme":"neon","lightBase":"x","darkAccent":"red"}')).toEqual(
+    // Backgrounds are fixed now; an old stored choice is simply ignored.
+    expect(parseAppearance('{"theme":"neon","lightBase":"slate","darkAccent":"red"}')).toEqual(
       DEFAULTS,
     );
   });
@@ -30,8 +29,6 @@ describe("appearance", () => {
   it("keeps a full new shape", () => {
     const a = {
       theme: "light",
-      lightBase: "slate",
-      darkBase: "void",
       lightAccent: "rose",
       darkAccent: "amber",
     };

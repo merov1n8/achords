@@ -1,3 +1,4 @@
+import { Pin } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
@@ -134,7 +135,7 @@ export function AllChats(props: { project?: string | undefined }) {
                   </td>
                   <td>
                     <a href={`#/chat/${th.id}`}>
-                      {th.pinned ? "📌 " : ""}
+                      {th.pinned && <Pin class="icon pin" aria-label={t("chats.pinned")} />}
                       {th.title ?? t("chat.untitled")}
                     </a>
                   </td>
