@@ -30,6 +30,7 @@ import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
 import { Rooms } from "./views/Rooms.tsx";
 import { Schedules } from "./views/Schedules.tsx";
+import { Updates } from "./views/Updates.tsx";
 import { Usage } from "./views/Usage.tsx";
 import { Vault } from "./views/Vault.tsx";
 
@@ -110,6 +111,7 @@ export function App() {
           {section === "chats" && <AllChats key={sub ?? ""} project={sub} />}
           {section === "settings" && sub === "vault" && <Vault />}
           {section === "settings" && sub === "integrations" && <Integrations />}
+          {section === "settings" && sub === "updates" && <Updates />}
           {section === "settings" && sub === "rooms" && <Rooms />}
           {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
           {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
@@ -202,6 +204,7 @@ function Sidebar(props: {
         )}
         {subLink("#/settings/integrations", t("nav.integrations"), sub === "integrations")}
         {subLink("#/settings/vault", t("nav.vault"), sub === "vault")}
+        {subLink("#/settings/updates", t("nav.updates"), sub === "updates")}
         {subLink("#/settings/devices", t("nav.devices"), sub === "devices")}
         {subLink("#/settings/rooms", t("nav.rooms"), sub === "rooms")}
       </Group>

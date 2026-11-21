@@ -27,6 +27,7 @@ After=network-online.target
 ExecStart=${[i.nodePath, "--disable-warning=ExperimentalWarning", i.gatewayEntry].map(q).join(" ")}
 Environment=${q(`ACHORDS_HOME=${i.home}`)}
 Environment=${q(`PATH=${i.path}`)}
+Environment=ACHORDS_SERVICE=1
 Restart=on-failure
 RestartSec=10
 

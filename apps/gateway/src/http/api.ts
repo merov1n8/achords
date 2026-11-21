@@ -107,6 +107,12 @@ export interface ApiDeps {
   /** Local speech to text for web voice notes (ADR-0014) and its scratch folder. */
   transcriber?: Transcriber;
   runDir?: string;
+  /** Auto-update from main (owner decision 2026-11-21). */
+  update?: {
+    status: () => Promise<Record<string, unknown>>;
+    setAuto: (on: boolean) => void;
+    checkNow: () => Promise<unknown>;
+  };
   /** $ACHORDS_HOME (own accounts file, ADR-0042). */
   home?: string;
   /** Projects ($ACHORDS_HOME/projects, ADR-0031). */
@@ -648,6 +654,32 @@ export function createApiHandler(deps: ApiDeps) {
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
     ["GET", /^\/api\/integrations$/, () => deps.integrations?.() ?? []],
+    // Updates: status, the auto switch, and a manual check.
+    [
+      "GET",
+      /^\/api\/update$/,
+      async () => {
+        if (!deps.update) throw new HttpError(404, "updates are not available");
+        return deps.update.status();
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/update$/,
+      async ({ body }) => {
+        if (!deps.update) throw new HttpError(404, "updates are not available");
+        deps.update.setAuto((await body()).auto === true);
+        return deps.update.status();
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/update\/check$/,
+      async () => {
+        if (!deps.update) throw new HttpError(404, "updates are not available");
+        return { result: await deps.update.checkNow() };
+      },
+    ],
     // The owner's own accounts (ADR-0042): for work without a client project.
     ["GET", /^\/api\/accounts$/, () => ({ integrations: loadOwnAccounts(homeOrThrow()) })],
     [

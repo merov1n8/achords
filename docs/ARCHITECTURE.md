@@ -90,7 +90,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 
 Single interface `ModelProvider { run(task, tools, limits) }` with adapters:
 
-- `cli-claude`, `cli-codex`: invoke the official binaries only. Never read, extract or proxy OAuth tokens. `cli-codex` (ADR-0040): sandbox read-only or workspace-write from the run's tools, network only with owner-granted full access; no achords MCP tools yet.
+- `cli-claude`, `cli-codex`: invoke the official binaries only. Never read, extract or proxy OAuth tokens. `cli-codex` (ADR-0040): a permissions profile (home denied except the run's folders), network only with owner-granted full access, achords MCP tools and credential-free integrations with tokens kept off the command line.
 - CLI runs are isolated from the user's own CLI config: no MCP servers or connectors, no user/project settings or hooks, only the manifest's tools; prompt on stdin; own process group (ADR-0024).
 - `api-anthropic`, `api-openai`, `api-google`, `api-openrouter`.
 - `local-openai-compatible`: Ollama (default, MLX engine on Apple Silicon), `mlx-lm` server optional. Manifest models `local/<name>`; `keep_alive` frees RAM when idle; structured output via `response_format`. Text only for now: a run that needs tools is refused, never run without them. `packages/platform` recommends a model by RAM (24 GB → `qwen3:8b`, embeddings `bge-m3`, multilingual).
@@ -201,7 +201,7 @@ Default layout, configurable:
 ### 4.18 Remote access and maintenance
 
 - Remote access via Tailscale; ACL limits devices to the dashboard port.
-- Updates are **pull-based**: signed releases, verified locally, applied after user approval.
+- Updates are **pull-based** (ADR-0043): the service follows the protected public `main` (fast-forward, green CI), installs at an idle moment, self-tests, restarts, and rolls back on any failure; a switch in Settings (default on).
 - Optional opt-in maintenance heartbeat sends only version, health and error codes to the vendor's fleet MCP. No inbound access, no agent control, no customer data. There is no endpoint that allows it.
 
 ### 4.19 Install
