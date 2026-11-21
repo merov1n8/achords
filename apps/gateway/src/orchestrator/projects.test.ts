@@ -123,6 +123,24 @@ describe("projects in runs (ADR-0031)", () => {
     expect(req?.prompt).toContain("Client accounts:\n- instagram: @acme, @acme.shop");
   });
 
+  it("lists the project's git repositories as the only ones to work in", async () => {
+    updateProject(join(home, "projects"), "acme", {
+      integrations: {
+        repository: ["https://github.com/acme/booking", "https://gitlab.com/acme/theme"],
+        instagram: ["@acme"],
+      },
+    });
+    give("web-dev", "acme");
+    await drain();
+    const prompt = calls[0]?.req.prompt ?? "";
+    expect(prompt).toContain(
+      "Git repositories of this project (work only in these):\n- https://github.com/acme/booking\n- https://gitlab.com/acme/theme",
+    );
+    expect(prompt).toContain(`clone them into ${join(home, "projects", "acme", "files")}`);
+    expect(prompt).toContain("Client accounts:\n- instagram: @acme");
+    expect(prompt).not.toContain("- repository:");
+  });
+
   it("an agent of another workspace gets the text but not the folder", async () => {
     give("writer", "acme");
     await drain();

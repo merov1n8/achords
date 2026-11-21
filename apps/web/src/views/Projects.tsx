@@ -177,6 +177,7 @@ export const CHANNELS = [
   { id: "x", label: "X" },
   { id: "pinterest", label: "Pinterest" },
   { id: "website", label: t("projects.channel.website") },
+  { id: "repository", label: t("projects.channel.repository") },
 ];
 
 // Channels with their own editor (several logins each, ADR-0047): kept out of the account rows,

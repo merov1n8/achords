@@ -637,9 +637,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       : m;
   const projectBlock = (p: Project) => {
     const accounts = Object.entries(p.integrations)
+      .filter(([channel]) => channel !== "repository")
       .map(([channel, values]) => `- ${channel}: ${values.join(", ")}`)
       .join("\n");
-    return `Project: ${p.name} (${p.slug}, workspace ${p.workspace})\n${accounts ? `Client accounts:\n${accounts}\n` : ""}${p.doc.trim()}\n\n`;
+    // Projects are unrelated: the listed repositories are the only code an agent works on.
+    const repos = p.integrations.repository ?? [];
+    const repoText = repos.length
+      ? `Git repositories of this project (work only in these):\n${repos.map((r) => `- ${r}`).join("\n")}\nIf one is not on disk yet, clone them into ${p.filesDir}. Never clone, change or push any other repository for this project.\n`
+      : "";
+    return `Project: ${p.name} (${p.slug}, workspace ${p.workspace})\n${repoText}${accounts ? `Client accounts:\n${accounts}\n` : ""}${p.doc.trim()}\n\n`;
   };
   // A card made by hand without an agent belongs to its project's workspace.
   const workspaceOf = (task: Pick<Task, "assigneeAgentId" | "project">) =>
