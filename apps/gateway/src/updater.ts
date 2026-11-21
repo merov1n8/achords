@@ -10,6 +10,7 @@ export const AUTO_KEY = "update.auto"; // "0" = off; default on
 export const LAST_KEY = "update.last"; // JSON {at, ok, text}
 export const PENDING_KEY = "update.pending"; // JSON {prev, next, summary}: restart in progress
 export const READY_KEY = "update.ready"; // JSON {sha, summary}: found, waiting for idle
+export const FAILED_KEY = "update.failed"; // sha whose update failed: not retried by itself
 export const CHECK_EVERY_MS = 60 * 60_000;
 /** Exit code that asks launchd for a restart (KeepAlive respawns non-zero exits only). */
 export const UPDATE_EXIT = 75;
@@ -33,6 +34,8 @@ export interface UpdaterDeps {
   now?: () => number;
   /** Commit the running gateway was started from (the checkout may have moved since). */
   running?: string | undefined;
+  /** Gateway log (diagnosis only; never sent to the owner). */
+  log?: (line: string) => void;
 }
 
 export type CheckResult =
@@ -133,6 +136,10 @@ export async function applyUpdate(
     if (r.code !== 0) {
       const step =
         `${cmd.split("/").at(-1)} ${args.find((a) => !a.startsWith("-") && a !== deps.repo) ?? ""}`.trim();
+      deps.log?.(`update: ${step} failed (exit ${r.code}):\n${r.out.trim().split("\n").slice(-20).join("\n")}`);
+      // Once per commit: idle ticks come every few seconds, and the same commit would fail again.
+      setSetting(deps.db, READY_KEY, "");
+      setSetting(deps.db, FAILED_KEY, sha);
       await rollback(deps, prev);
       const text = `update to ${sha.slice(0, 7)} failed at "${step}"; stayed on ${prev.slice(0, 7)}`;
       record(deps, false, text);
@@ -142,6 +149,7 @@ export async function applyUpdate(
   }
   setSetting(deps.db, PENDING_KEY, JSON.stringify({ prev, next: sha, summary }));
   setSetting(deps.db, READY_KEY, "");
+  setSetting(deps.db, FAILED_KEY, "");
   deps.exit(UPDATE_EXIT);
   return { ok: true, text: `updated to ${sha.slice(0, 7)}` };
 }
@@ -181,7 +189,8 @@ export async function updateTick(
     setSetting(deps.db, "update.next_check", String(now + CHECK_EVERY_MS));
     result = await checkForUpdate(deps);
     setSetting(deps.db, "update.check", JSON.stringify({ at: now, ...result }));
-    if (result.status === "available") {
+    // A commit that already failed is retried only on "Check now" (or when a newer one lands).
+    if (result.status === "available" && (force || getSetting(deps.db, FAILED_KEY) !== result.sha)) {
       setSetting(deps.db, READY_KEY, JSON.stringify({ sha: result.sha, summary: result.summary }));
     }
   }
