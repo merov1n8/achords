@@ -38,6 +38,7 @@ describe("HTTP API", () => {
   const decisions: { id: string; approve: boolean }[] = [];
   const moves: unknown[] = [];
   const rooms: unknown[] = [];
+  const cards: unknown[] = [];
   let synced = 0;
   const tokens = createRunTokens();
   const mcpTickets = createMcpTickets();
@@ -139,6 +140,23 @@ describe("HTTP API", () => {
           logPublish: (from, report) => {
             questions.push({ from, question: `log: ${report.tool}` });
             return { ok: true, text: "logged" };
+          },
+          createCard: (input) => {
+            cards.push(input);
+            if (input.agent === "nobody") {
+              return { ok: false, reason: "There is no agent called nobody." };
+            }
+            if (input.project === "ghost") {
+              return { ok: false, reason: "There is no project called ghost." };
+            }
+            const task = enqueue(db, { title: input.title, parked: !input.start });
+            return { ok: true, taskId: task.id };
+          },
+          startCard: (taskId, agent) => {
+            cards.push({ start: taskId, agent });
+            return taskId === "started"
+              ? { ok: false, reason: "This card has already started." }
+              : { ok: true };
           },
           delegate: (from, request) => {
             delegations.push({ from, request });
@@ -828,6 +846,64 @@ describe("HTTP API", () => {
     expect((await call("/api/tasks/nope")).status).toBe(404);
   });
 
+  it("kanban: the owner creates a card by hand and starts it later", async () => {
+    const { call, cookie } = await pair();
+    cards.length = 0;
+    const res = await call("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Write the FAQ",
+        description: "",
+        agent: "dev",
+        project: "acme",
+        column: "backlog",
+        start: false,
+      }),
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ title: "Write the FAQ", parked: true });
+    // Empty optional fields are left out; the orchestrator gets only what was chosen.
+    expect(cards).toEqual([
+      { title: "Write the FAQ", agent: "dev", project: "acme", column: "backlog", start: false },
+    ]);
+    for (const [body, error] of [
+      [{}, /title/],
+      [{ title: "x".repeat(201) }, /title/],
+      [{ title: "x", description: "d".repeat(20_001) }, /description/],
+      [{ title: "x", agent: 5 }, /agent/],
+      [{ title: "x", start: "yes" }, /start/],
+      [{ title: "x", agent: "nobody" }, /^There is no agent called nobody\.$/],
+      [{ title: "x", project: "ghost" }, /^There is no project called ghost\.$/],
+    ] as const) {
+      const bad = await call("/api/tasks", { method: "POST", body: JSON.stringify(body) });
+      expect(bad.status).toBe(400);
+      expect(((await bad.json()) as { error: string }).error).toMatch(error);
+    }
+    // Owner session with CSRF only.
+    const noCsrf = await fetch(`${base}/api/tasks`, {
+      method: "POST",
+      headers: { cookie, origin: base, "content-type": "application/json" },
+      body: '{"title":"x"}',
+    });
+    expect(noCsrf.status).toBe(403);
+
+    const card = enqueue(db, { title: "later", parked: true });
+    const start = await call(`/api/tasks/${card.id}/start`, {
+      method: "POST",
+      body: '{"agent":"dev"}',
+    });
+    expect(await start.json()).toEqual({ ok: true });
+    expect(cards.at(-1)).toEqual({ start: card.id, agent: "dev" });
+    expect((await call("/api/tasks/nope/start", { method: "POST", body: "{}" })).status).toBe(404);
+    const started = enqueue(db, { title: "s" });
+    db.prepare("UPDATE tasks SET id = 'started' WHERE id = ?").run(started.id);
+    const again = await call("/api/tasks/started/start", { method: "POST", body: "{}" });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toBe(
+      "This card has already started.",
+    );
+  });
+
   it("kanban: the owner deletes a card unless it is running", async () => {
     const { call } = await pair();
     const card = enqueue(db, { title: "card" });
@@ -974,6 +1050,33 @@ describe("HTTP API", () => {
     });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toMatch(/absolute/);
+
+    // Edit uses the same form, pre-filled from GET, and keeps what the form does not show.
+    const detail = (await (await call("/api/agents/qa")).json()) as Record<string, unknown>;
+    expect(detail).toMatchObject({
+      role: "qa",
+      roles: ["qa"],
+      tools: ["Read"],
+      fs: { read: [], write: [] },
+      doc: expect.stringContaining("Reviews web work."),
+    });
+    const { id: _id, description: _d, ...rest } = form;
+    const put = (body: unknown) =>
+      call("/api/agents/qa", { method: "PUT", body: JSON.stringify(body) });
+    expect(
+      (await put({ ...rest, role: "reviewer", doc: "# Tester\n\nChecks pages." })).status,
+    ).toBe(200);
+    expect(readFileSync(join(agentsDir, "qa", "agent.yaml"), "utf8")).toContain("role: reviewer");
+    expect(readFileSync(join(agentsDir, "qa", "AGENT.md"), "utf8")).toContain("Checks pages.");
+    expect((await put({ ...rest, doc: "x", fs: { write: ["relative"] } })).status).toBe(400);
+    expect(
+      (
+        await call("/api/agents/nope", {
+          method: "PUT",
+          body: JSON.stringify({ ...rest, doc: "x" }),
+        })
+      ).status,
+    ).toBe(404);
   });
 
   it("agent rooms: agents open them with their run token; the owner reads them (ADR-0032)", async () => {

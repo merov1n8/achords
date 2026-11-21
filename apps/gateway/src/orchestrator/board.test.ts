@@ -6,6 +6,7 @@ import {
   addComment,
   createThread,
   getTask,
+  getThread,
   listMessages,
   listMoves,
   liveProgress,
@@ -13,6 +14,7 @@ import {
   setDraining,
   type Task,
 } from "@achords/core";
+import { createProject } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRunTokens } from "../mcp/tokens.ts";
@@ -281,6 +283,105 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
     expect(orch.runAction(`move:approve:${id}`)).toEqual({
       ok: false,
       message: expect.stringMatching(/no pending/i),
+    });
+  });
+  describe("cards made by hand", () => {
+    it("a card that is not started gets its own chat and is never worked on", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const r = orch.createCard({
+        title: "Write the FAQ",
+        description: "five questions",
+        agent: "dev",
+      });
+      if (!r.ok) throw new Error(r.reason);
+      const task = getTask(db, r.taskId) as Task;
+      expect(task).toMatchObject({ parked: true, column: "backlog", assigneeAgentId: "dev" });
+      expect(getThread(db, task.threadId as string)?.title).toBe("Write the FAQ");
+      expect(listMessages(db, task.threadId as string).length).toBeGreaterThan(0);
+      await drain();
+      expect(calls).toEqual([]);
+      expect(listMoves(db, r.taskId).map((m) => [m.from, m.to, m.actor])).toEqual([
+        [null, "backlog", "owner"],
+      ]);
+    });
+
+    it("Start un-parks it, moves it to the start column (logged) and the agent works on it", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const r = orch.createCard({ title: "Write the FAQ" });
+      if (!r.ok) throw new Error(r.reason);
+      expect(orch.startCard(r.taskId)).toEqual({
+        ok: false,
+        reason: expect.stringMatching(/agent/),
+      });
+      expect(orch.startCard(r.taskId, "dev")).toEqual({ ok: true });
+      expect(getTask(db, r.taskId)).toMatchObject({ parked: false, assigneeAgentId: "dev" });
+      expect(listMoves(db, r.taskId).map((m) => [m.from, m.to, m.actor])).toEqual([
+        [null, "backlog", "owner"],
+        ["backlog", "in_progress", "owner"],
+      ]);
+      expect(orch.startCard(r.taskId, "dev")).toEqual({
+        ok: false,
+        reason: expect.stringMatching(/already/),
+      });
+      await drain();
+      expect(calls.map((c) => c.task.id)).toEqual([r.taskId]);
+      expect(column(r.taskId)).toBe("review");
+    });
+
+    it("Start now hands it to the agent at once, through the same path as a chat message", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const r = orch.createCard({ title: "Fix login", agent: "dev", column: "todo", start: true });
+      if (!r.ok) throw new Error(r.reason);
+      expect(getTask(db, r.taskId)).toMatchObject({ parked: false, column: "in_progress" });
+      await drain();
+      expect(calls.map((c) => c.task.id)).toEqual([r.taskId]);
+    });
+
+    it("a card without an agent follows its project's workspace and workflow", () => {
+      setup([["dev", "roles: [dev]"]]);
+      createProject(join(home, "projects"), { slug: "acme", name: "Acme", workspace: "clients" });
+      writeFileSync(
+        join(home, "workflows", "clients.yaml"),
+        "columns: [ideas, doing, done]\nstart: doing\nfinish: done\ntransitions: []\n",
+      );
+      const r = orch.createCard({ title: "Logo", project: "acme" });
+      if (!r.ok) throw new Error(r.reason);
+      const task = getTask(db, r.taskId) as Task;
+      expect(task).toMatchObject({ column: "ideas", project: "acme" });
+      expect(getThread(db, task.threadId as string)?.project).toBe("acme");
+    });
+
+    it("refuses an unknown agent or column, and Start now without an agent", () => {
+      setup([["dev", "roles: [dev]"]]);
+      expect(orch.createCard({ title: "x", agent: "nobody" })).toEqual({
+        ok: false,
+        reason: expect.stringMatching(/no agent called nobody/i),
+      });
+      expect(orch.createCard({ title: "x", project: "ghost" })).toEqual({
+        ok: false,
+        reason: "There is no project called ghost.",
+      });
+      expect(orch.createCard({ title: "x", column: "nowhere" })).toEqual({
+        ok: false,
+        reason: expect.stringMatching(/column/i),
+      });
+      expect(orch.createCard({ title: "x", start: true })).toEqual({
+        ok: false,
+        reason: expect.stringMatching(/agent/i),
+      });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM threads").get()?.n).toBe(0);
+    });
+
+    it("moving a parked card into review does not start a QA run", async () => {
+      setup([
+        ["dev", "roles: [dev]"],
+        ["qa", "roles: [qa]"],
+      ]);
+      const r = orch.createCard({ title: "x", agent: "dev" });
+      if (!r.ok) throw new Error(r.reason);
+      expect(orch.ownerMove(r.taskId, "backlog", "review")).toMatchObject({ ok: true });
+      await drain();
+      expect(calls).toEqual([]);
     });
   });
 });

@@ -28,6 +28,7 @@ export {
 export * from "./check.ts";
 export {
   AGENT_LIST_FIELDS,
+  type AgentFields,
   type AgentListField,
   type AgentPatch,
   createAgentFiles,
@@ -35,6 +36,7 @@ export {
   type NewAgent,
   patchManifestText,
   setIntegrationAgents,
+  updateAgent,
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";
