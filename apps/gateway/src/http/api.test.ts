@@ -664,6 +664,81 @@ describe("HTTP API", () => {
     });
   });
 
+  it("kanban: the owner edits a card, its checklist and comments; the detail has them", async () => {
+    const { call } = await pair();
+    const card = enqueue(db, { title: "card", description: "d" });
+    const path = `/api/tasks/${card.id}`;
+    const json = (r: Response) => r.json() as Promise<Record<string, unknown>>;
+    logs.length = 0;
+
+    const edited = await call(path, {
+      method: "PATCH",
+      body: '{"title":"new","description":null}',
+    });
+    expect(await json(edited)).toMatchObject({ title: "new", description: null });
+    expect(logs.some((l) => l.includes(`owner edited task ${card.id}`))).toBe(true);
+    expect((await call(path, { method: "PATCH", body: '{"title":""}' })).status).toBe(400);
+    const long = JSON.stringify({ title: "x".repeat(201) });
+    expect((await call(path, { method: "PATCH", body: long })).status).toBe(400);
+    expect((await call("/api/tasks/nope", { method: "PATCH", body: '{"title":"x"}' })).status).toBe(
+      404,
+    );
+
+    const item = await json(
+      await call(`${path}/checklist`, { method: "POST", body: '{"text":"step"}' }),
+    );
+    expect(item).toMatchObject({ text: "step", done: false });
+    const ticked = await call(`${path}/checklist/${item.id}`, {
+      method: "PATCH",
+      body: '{"done":true,"text":"step 1"}',
+    });
+    expect(await json(ticked)).toMatchObject({ text: "step 1", done: true });
+    expect(
+      (await call(`${path}/checklist/999`, { method: "PATCH", body: '{"done":true}' })).status,
+    ).toBe(404);
+    const second = await json(
+      await call(`${path}/checklist`, { method: "POST", body: '{"text":"gone"}' }),
+    );
+    expect((await call(`${path}/checklist/${second.id}`, { method: "DELETE" })).status).toBe(200);
+
+    const comment = await json(
+      await call(`${path}/comments`, { method: "POST", body: '{"text":"note"}' }),
+    );
+    const other = await json(
+      await call(`${path}/comments`, { method: "POST", body: '{"text":"drop"}' }),
+    );
+    expect((await call(`${path}/comments/${other.id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await call(`${path}/comments/${other.id}`, { method: "DELETE" })).status).toBe(404);
+
+    const detail = await json(await call(path));
+    expect(detail).toMatchObject({
+      title: "new",
+      checklist: [{ text: "step 1", done: true }],
+      comments: [{ id: comment.id, text: "note" }],
+    });
+    // The board list stays light.
+    const list = (await (await call("/api/tasks")).json()) as Record<string, unknown>[];
+    expect(list[0]).not.toHaveProperty("checklist");
+    expect((await call("/api/tasks/nope")).status).toBe(404);
+  });
+
+  it("kanban: the owner deletes a card unless it is running", async () => {
+    const { call } = await pair();
+    const card = enqueue(db, { title: "card" });
+    const running = enqueue(db, { title: "busy" });
+    db.prepare("UPDATE tasks SET status = 'claimed', claimed_by = 'w' WHERE id = ?").run(
+      running.id,
+    );
+    logs.length = 0;
+    const refused = await call(`/api/tasks/${running.id}`, { method: "DELETE" });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/running; stop it first/);
+    const ok = await call(`/api/tasks/${card.id}`, { method: "DELETE" });
+    expect(await ok.json()).toEqual({ ok: true, deleted: 1 });
+    expect(logs.some((l) => l.includes(`owner deleted task ${card.id}`))).toBe(true);
+    expect((await call(`/api/tasks/${card.id}`, { method: "DELETE" })).status).toBe(404);
+  });
+
   it("kanban: the owner moves cards (stale views refused); agents move only via their run token", async () => {
     const { call } = await pair();
     const ok = await call("/api/tasks/t1/move", {
