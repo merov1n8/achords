@@ -8,6 +8,7 @@ export {
   allowedIntegrationTools,
   type CallScope,
   type Catalog,
+  type CatalogApp,
   type CatalogEntry,
   catalogEntrySchema,
   grantedIntegrations,

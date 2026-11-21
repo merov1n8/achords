@@ -16,3 +16,9 @@ tools:
 # Connection test (web Integrations page).
 test:
   tool: get_scene_info
+# ADR-0054: achords opens Blender in the background for a run when it is not running and quits it
+# again once no active task needs it. Ready when the add-on listens (it starts its socket itself).
+app:
+  name: Blender
+  open: ["-g", "-a", "Blender"]
+  ready: { port: 9876, timeout_s: 60 }

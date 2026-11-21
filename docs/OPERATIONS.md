@@ -101,6 +101,19 @@ it. This writes their `agent.yaml` `mcp` list (validated first, comments kept); 
 the agents, **Remove** takes the app from every agent. Terminal alternative: add the id to `mcp:`
 in `~/.achords/agents/<id>/agent.yaml`.
 
+achords opens the app in the background when a run needs it and it is not running, waits until
+it answers (Blender: up to 1 minute; Unity: up to 3 minutes) and quits it again 3 minutes after
+the last task that needs it has finished. It never closes an app you opened yourself. Every open
+and close is in the gateway log (`apps: …`). Agents need no shell command to open the apps.
+
+- Blender: install the add-on once (`uvx mcp-for-blender install-addon`, then enable it in
+  Blender's preferences); its socket (port 9876) starts with Blender.
+- Unity: the Editor opens the agent's working folder (its first own folder) when that folder is a
+  Unity project (has `ProjectSettings/ProjectVersion.txt`); otherwise nothing is opened and the
+  run goes on without Unity. With several Editor versions installed, copy
+  `seed/catalog/unity.yaml` to `~/.achords/catalog/unity.yaml` and put the full path of the right
+  `Unity.app` after `-a`.
+
 ## Agents with any website: Apple containers
 
 An agent with `*` in its network list (Agents → Edit → Network) runs in an Apple container: a

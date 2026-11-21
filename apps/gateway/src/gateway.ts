@@ -18,6 +18,7 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
+import { macApps } from "@achords/platform";
 import {
   costOf,
   integrationStatus,
@@ -29,6 +30,7 @@ import {
 } from "@achords/policy";
 import { CODEX_API_KEY_ENV, cliClaude, cliCodex, cliGemini, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
+import { createApps } from "./apps.ts";
 import { containerHost } from "./container.ts";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
@@ -80,6 +82,7 @@ const DEFAULT_PORT = 7420;
 const TELEGRAM_TOKEN_ID = "telegram.bot-token";
 const POLL_BACKOFF_MAX_MS = 60_000;
 const BACKFILL_EVERY_TICKS = 60;
+const APPS_EVERY_TICKS = 10;
 
 const log = (msg: string) => console.log(`${new Date().toISOString()} gateway: ${msg}`);
 
@@ -256,7 +259,10 @@ export function runGateway(home: string): Promise<number> {
     })
     .catch(() => {});
 
+  // ADR-0054: apps integrations need (Blender, Unity) are opened and closed by achords. macOS only.
+  const apps = process.platform === "darwin" ? createApps({ control: macApps(), log }) : undefined;
   const orchestrator = createOrchestrator({
+    ...(apps ? { apps } : {}),
     billing,
     container: {
       prepare: () => containers.prepare(),
@@ -360,6 +366,7 @@ export function runGateway(home: string): Promise<number> {
     let working: Promise<unknown> | undefined;
     let delivering = false;
     let monitoring = false;
+    let sweepingApps = false;
     let updating = false;
     let ticks = 0;
     const cancel = new AbortController();
@@ -429,6 +436,15 @@ export function runGateway(home: string): Promise<number> {
           .catch((err) => log(`monitor error: ${(err as Error).message}`))
           .finally(() => {
             monitoring = false;
+          });
+      }
+      if (apps && !sweepingApps && ticks % APPS_EVERY_TICKS === 0) {
+        sweepingApps = true;
+        apps
+          .sweep(() => orchestrator.appsInUse())
+          .catch((err) => log(`apps error: ${(err as Error).message}`))
+          .finally(() => {
+            sweepingApps = false;
           });
       }
       if (!working) {

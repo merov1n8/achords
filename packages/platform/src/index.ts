@@ -1,6 +1,7 @@
 // Platform layer: hardware detection and local model recommendations (ADR-0015).
 export const PACKAGE_NAME = "@achords/platform";
 
+export { type AppControl, macApps } from "./apps.ts";
 export {
   findContainerBin,
   IMAGE_REPO,

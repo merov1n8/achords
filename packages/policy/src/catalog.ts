@@ -10,6 +10,8 @@ const VAULT_REF = /^vault:[a-z0-9{][a-z0-9_.{}-]*$/;
 // MCP tool names as the CLI exposes them: mcp__<server>__<tool>.
 const TOOL = /^[A-Za-z0-9_-]{1,64}$/;
 const ENV = /^[A-Z_][A-Z0-9_]*$/;
+// macOS app and process names: passed as argv only, never into a script.
+const APP = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 // Literal or `vault:<id>`; `{project}` in a vault id is the task's project. `{workdir}` in a
 // literal is the run's working folder (also writable by the agent).
 const value = z.string();
@@ -86,6 +88,29 @@ export const catalogEntrySchema = z
       })
       .strict()
       .optional(),
+    // ADR-0054: the app on this Mac the server talks to (Blender, Unity Editor). achords opens it
+    // for a run when it is not running and quits it once no active task needs it.
+    app: z
+      .object({
+        name: z.string().regex(APP),
+        // Arguments of macOS `open`, fixed here; `{workdir}` is the run's working folder.
+        open: z.array(z.string().min(1)).min(1),
+        // Process name for the running check (default: name).
+        process: z.string().regex(APP).optional(),
+        // A file the working folder must contain before the app is opened for it, e.g. the
+        // Unity project marker; without it nothing is opened.
+        requires: z.string().min(1).optional(),
+        // Ready once something listens on this local port (the add-on or bridge socket).
+        ready: z
+          .object({
+            port: z.number().int().min(1).max(65535),
+            timeout_s: z.number().int().min(1).max(300).default(90),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((e, ctx) => {
@@ -101,6 +126,14 @@ export const catalogEntrySchema = z
       if (u.protocol !== "https:" || !e.hosts.includes(u.hostname)) {
         ctx.addIssue({ code: "custom", path: ["url"], message: "https on a host listed in hosts" });
       }
+    }
+    // Opened in the background: the owner's work in the foreground is never interrupted.
+    const end = e.app?.open.indexOf("--args") ?? -1;
+    if (e.app && !e.app.open.slice(0, end < 0 ? undefined : end).includes("-g")) {
+      ctx.addIssue({ code: "custom", path: ["app", "open"], message: "include -g" });
+    }
+    if (e.app?.requires && (e.app.requires.startsWith("/") || e.app.requires.includes(".."))) {
+      ctx.addIssue({ code: "custom", path: ["app", "requires"], message: "a relative path" });
     }
     if (e.authorization && !e.url) {
       ctx.addIssue({ code: "custom", path: ["authorization"], message: "only for a url" });
@@ -127,6 +160,7 @@ export const catalogEntrySchema = z
   });
 
 export type CatalogEntry = z.infer<typeof catalogEntrySchema>;
+export type CatalogApp = NonNullable<CatalogEntry["app"]>;
 export type Catalog = Map<string, CatalogEntry>;
 
 function readDir(dir: string, into: Catalog): void {
