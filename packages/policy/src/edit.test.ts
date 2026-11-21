@@ -208,6 +208,9 @@ describe("setIntegrationAgents", () => {
     const before = ["boss", "artist", "dev"].map(read);
     expect(() => setIntegrationAgents(dir, "blender", ["boss", "dev"])).toThrow(/bogus/);
     expect(["boss", "artist", "dev"].map(read)).toEqual(before);
+  });
+});
+
 describe("updateAgent (web: edit with the same form as create)", () => {
   let dir: string;
   beforeEach(() => {
