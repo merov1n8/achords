@@ -138,6 +138,9 @@ const LEASE_MS = 10 * 60_000;
 const BOSS_TIMEOUT_MS = 3 * 60_000;
 const RUN_TIMEOUT_MS = 30 * 60_000;
 const HISTORY = 20;
+/** Chat context for an agent working for the owner: last messages, each cut to a length. */
+const CHAT_CONTEXT = 16;
+const CHAT_CHARS = 3000;
 const MAX_POST = 4000;
 const MEMORY_HITS = 5;
 const DEFER_MS = 60_000;
@@ -2137,6 +2140,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         .join("");
       // Continuing after a planned stop (`achords stop`): files are on disk, the note says where it was.
       const resume = task.resumeNote ? `\n\n${task.resumeNote}` : "";
+      // Work for the owner (a card, @agent, or the boss handing it over) continues a chat: the
+      // agent sees that chat so far, so a follow-up does not lose what was asked and answered.
+      // Delegated steps get their caller's instructions instead.
+      const chat =
+        !task.parentId && task.threadId && !task.roomId
+          ? listMessages(db, task.threadId)
+              .filter((m) => m.visibility === "normal" && m.createdAt <= task.createdAt)
+              .slice(-CHAT_CONTEXT)
+              .map((m) => {
+                const who = m.role === "user" ? "owner" : (m.author ?? m.role);
+                const text =
+                  m.content.length > CHAT_CHARS ? `${m.content.slice(0, CHAT_CHARS)} …` : m.content;
+                return `${who}: ${text}`;
+              })
+          : [];
+      const chatBlock = chat.length
+        ? `Conversation in this chat so far (latest last; the task below is what to do now):\n${chat.join("\n\n")}\n\n`
+        : "";
       const scopes = launches
         .filter((l) => l.launch.scope)
         .map((l) => `${l.id}: ${l.launch.scope?.allowed.join(", ")}`);
@@ -2175,7 +2196,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.

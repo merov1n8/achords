@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createThread, getTask, openCoreDatabase, type Task } from "@achords/core";
+import { appendMessage, createThread, getTask, openCoreDatabase, type Task } from "@achords/core";
 import type { Memory } from "@achords/memory";
 import { createProject, updateProject } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
@@ -121,6 +121,48 @@ describe("projects in runs (ADR-0031)", () => {
     expect(req?.cwd).toBe(join(home, "projects", "acme", "files"));
     expect(req?.prompt).toContain("Never touch the live shop.");
     expect(req?.prompt).toContain("Client accounts:\n- instagram: @acme, @acme.shop");
+  });
+
+  it("an agent working for the owner sees the chat so far (follow-ups keep their context)", async () => {
+    const thread = createThread(db, { project: "acme" });
+    appendMessage(db, {
+      threadId: thread.id,
+      role: "user",
+      channel: "web",
+      content: "Plan the club system. Tier 0 is the old 11% discount.",
+    });
+    appendMessage(db, {
+      threadId: thread.id,
+      role: "agent",
+      author: "web-dev",
+      channel: "web",
+      content: "Done: plan written. Open question: where is the 11% stored?",
+    });
+    appendMessage(db, {
+      threadId: thread.id,
+      role: "agent",
+      author: "trace",
+      channel: "web",
+      content: "tool noise",
+      visibility: "trace",
+    });
+    const r = orch.delegate(
+      { from: "boss", threadId: thread.id },
+      { agent: "web-dev", title: "Answer", instructions: "It is in the price surcharge." },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    await drain();
+    const prompt = calls[0]?.req.prompt ?? "";
+    expect(prompt).toContain("Conversation in this chat so far");
+    expect(prompt).toContain("owner: Plan the club system. Tier 0 is the old 11% discount.");
+    expect(prompt).toContain(
+      "web-dev: Done: plan written. Open question: where is the 11% stored?",
+    );
+    expect(prompt).not.toContain("tool noise");
+    // The task itself still comes last and wins.
+    expect(prompt.indexOf("Conversation in this chat so far")).toBeLessThan(
+      prompt.indexOf("# Task: Answer"),
+    );
   });
 
   it("lists the project's git repositories as the only ones to work in", async () => {

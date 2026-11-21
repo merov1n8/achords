@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Agents asked again what the owner had already answered: an agent working for the owner (a
+  card, @agent, or work handed over by the boss) only saw its one instruction. It now also sees
+  the chat so far (last messages, shortened), like the boss.
 - Forms in modals (e.g. Projects → Edit) closed when a text selection started in a field and the
   mouse was released outside the modal; only a real click on the backdrop closes them now.
 - Pinned chats show the pin icon of the app instead of an emoji.
