@@ -2,7 +2,6 @@
   "app.loading": "Loading…",
   "app.unreachable": "Cannot reach the gateway.",
   "nav.main": "Main navigation",
-  "nav.menu": "Menu",
   "nav.chat": "Chat",
   "nav.kanban": "Kanban",
   "nav.agents": "Agents",
@@ -600,5 +599,7 @@
   "chats.deleteConfirm": "\"{title}\" and all its messages will be deleted. This cannot be undone.",
   "rooms.transcript": "Discussion: {topic}",
   "devices.revokeTitle": "Revoke device?",
-  "devices.revokeConfirm": "\"{device}\" will be signed out and needs a new pairing code to come back."
+  "devices.revokeConfirm": "\"{device}\" will be signed out and needs a new pairing code to come back.",
+  "nav.more": "More",
+  "kanban.columns": "Columns"
 }
