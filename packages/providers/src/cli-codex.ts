@@ -115,6 +115,8 @@ export function codexMcp(req: RunRequest): { args: string[]; env: Record<string,
 }
 
 const KILL_GRACE_MS = 3000;
+/** API mode: the variable our provider entry reads (ACHORDS_*: hidden from the agent's shell). */
+export const CODEX_API_KEY_ENV = "ACHORDS_OPENAI_API_KEY";
 const STDERR_LIMIT = 4000;
 const WRITERS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]);
 
@@ -145,6 +147,21 @@ export function codexArgs(
     req.cwd,
     "-c",
     'approval_policy="never"',
+    // API mode: our own provider entry reads the key from the run's environment; the ChatGPT
+    // login of the codex CLI is not touched (Phase 4).
+    ...(req.billing === "api"
+      ? [
+          "-c",
+          'model_provider="achords-openai"',
+          "-c",
+          `model_providers.achords-openai=${toml({
+            name: "OpenAI API (achords)",
+            base_url: "https://api.openai.com/v1",
+            env_key: CODEX_API_KEY_ENV,
+            wire_api: "responses",
+          })}`,
+        ]
+      : []),
     "-c",
     'default_permissions="achords"',
     "-c",

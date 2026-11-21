@@ -107,6 +107,11 @@ export interface ApiDeps {
   /** Local speech to text for web voice notes (ADR-0014) and its scratch folder. */
   transcriber?: Transcriber;
   runDir?: string;
+  /** Phase 4: subscription or API key per provider. */
+  billing?: {
+    list: () => { provider: string; label: string; mode: string; keyId: string; keySet: boolean }[];
+    setMode: (provider: string, mode: "subscription" | "api") => void;
+  };
   /** Auto-update from main (owner decision 2026-11-21). */
   update?: {
     status: () => Promise<Record<string, unknown>>;
@@ -654,6 +659,28 @@ export function createApiHandler(deps: ApiDeps) {
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
     ["GET", /^\/api\/integrations$/, () => deps.integrations?.() ?? []],
+    // Model access (Phase 4): subscription or API key per provider; keys go through the vault.
+    [
+      "GET",
+      /^\/api\/billing$/,
+      () => {
+        if (!deps.billing) throw new HttpError(404, "not available");
+        return deps.billing.list();
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/billing\/([a-z0-9-]{1,32})$/,
+      async ({ params, body }) => {
+        if (!deps.billing) throw new HttpError(404, "not available");
+        const mode = (await body()).mode;
+        if (mode !== "subscription" && mode !== "api") {
+          throw new HttpError(400, "mode must be subscription or api");
+        }
+        attempt(() => deps.billing?.setMode(params[0] as string, mode));
+        return deps.billing.list();
+      },
+    ],
     // Updates: status, the auto switch, and a manual check.
     [
       "GET",

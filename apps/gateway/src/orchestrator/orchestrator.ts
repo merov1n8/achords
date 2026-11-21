@@ -173,6 +173,11 @@ export interface OrchestratorDeps {
   home: string;
   /** Keyed by the provider part of a manifest model id, e.g. "cli-claude". */
   providers: Record<string, ModelProvider>;
+  /**
+   * Phase 4: subscription or API key per provider ("cli-claude", "cli-codex", …). Throws when API
+   * mode is chosen but its key is missing; the run fails with that reason.
+   */
+  billing?: (provider: string) => { mode: "subscription" | "api"; env?: Record<string, string> };
   /** Applied to everything posted to threads (ADR-0012). */
   redact?: (text: string) => string;
   /** Long-term memory (ADR-0008); optional so the hub works without it. */
@@ -409,6 +414,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const slash = model.indexOf("/");
     const provider = deps.providers[model.slice(0, slash)];
     if (!provider) throw new Error(`no provider for ${model}`);
+    const pay = deps.billing?.(model.slice(0, slash));
 
     const roots = [...m.fs.write, ...m.fs.read].map(expandHome);
     const cwd = roots[0] ?? join(agentsDir, m.id, "work");
@@ -434,6 +440,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ...(roots.length > 1 ? { addDirs: roots.slice(1) } : {}),
       ...(system ? { appendSystemPrompt: system } : {}),
       ...(m.budget.per_run_usd ? { maxBudgetUsd: m.budget.per_run_usd } : {}),
+      ...(pay ? { billing: pay.mode, ...(pay.env ? { env: pay.env } : {}) } : {}),
     };
     return { provider, req };
   };

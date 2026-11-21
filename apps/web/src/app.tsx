@@ -25,6 +25,7 @@ import { Devices } from "./views/Devices.tsx";
 import { Integrations } from "./views/Integrations.tsx";
 import { Kanban } from "./views/Kanban.tsx";
 import { LiveBar } from "./views/LiveBar.tsx";
+import { ModelAccess } from "./views/ModelAccess.tsx";
 import { Monitors } from "./views/Monitors.tsx";
 import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
@@ -112,6 +113,7 @@ export function App() {
           {section === "settings" && sub === "vault" && <Vault />}
           {section === "settings" && sub === "integrations" && <Integrations />}
           {section === "settings" && sub === "updates" && <Updates />}
+          {section === "settings" && sub === "access" && <ModelAccess />}
           {section === "settings" && sub === "rooms" && <Rooms />}
           {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
           {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
@@ -203,6 +205,7 @@ function Sidebar(props: {
           section === "settings" && (sub === "appearance" || !sub),
         )}
         {subLink("#/settings/integrations", t("nav.integrations"), sub === "integrations")}
+        {subLink("#/settings/access", t("nav.modelAccess"), sub === "access")}
         {subLink("#/settings/vault", t("nav.vault"), sub === "vault")}
         {subLink("#/settings/updates", t("nav.updates"), sub === "updates")}
         {subLink("#/settings/devices", t("nav.devices"), sub === "devices")}

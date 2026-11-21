@@ -21,6 +21,7 @@ process.stdin.on("end", () => {
         stdin,
         cwd: process.cwd(),
         injected: process.env.ACHORDS_TEST_SECRET ?? null,
+        anthropicKey: process.env.ANTHROPIC_API_KEY ?? null,
       }),
     );
   }

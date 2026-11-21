@@ -120,6 +120,38 @@ describe("orchestrator", () => {
     expect(calls[0]?.appendSystemPrompt).toContain("ask");
   });
 
+  it("subscription or API key per provider; a missing key fails with where to set it (Phase 4)", async () => {
+    let mode: "subscription" | "api" = "subscription";
+    let key: string | undefined = "sk-test";
+    const fake = fakeProvider(() => result({ structured: { action: "answer", message: "ok" } }));
+    const orch = createOrchestrator({
+      db,
+      home,
+      providers: { "cli-claude": fake.provider },
+      billing: (provider) => {
+        expect(provider).toBe("cli-claude");
+        if (mode === "subscription") return { mode };
+        if (!key)
+          throw new Error("API mode for Claude needs its API key (Settings → Model access)");
+        return { mode, env: { ANTHROPIC_API_KEY: key } };
+      },
+    });
+    orch.syncAgents();
+    const t = createThread(db, {});
+    await orch.handleMessage(t.id, "hi", "web");
+    expect(fake.calls[0]?.billing).toBe("subscription");
+    expect(fake.calls[0]?.env).toBeUndefined();
+    mode = "api";
+    await orch.handleMessage(t.id, "hi", "web");
+    expect(fake.calls[1]).toMatchObject({ billing: "api", env: { ANTHROPIC_API_KEY: "sk-test" } });
+    key = undefined;
+    await orch.handleMessage(t.id, "hi", "web");
+    expect(fake.calls).toHaveLength(2);
+    expect(listMessages(db, t.id).at(-1)?.content).toMatch(
+      /needs its API key \(Settings → Model access\)/,
+    );
+  });
+
   it("@agent goes straight to that agent, without the boss", async () => {
     const { orch, calls } = make(() => result({ text: "kész" }));
     const t = createThread(db, {});
