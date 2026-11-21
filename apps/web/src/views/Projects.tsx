@@ -1,7 +1,7 @@
 import { Plus, Trash2 } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
-import { Modal } from "../components/Modal.tsx";
+import { Confirm, Modal } from "../components/Modal.tsx";
 import { Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
@@ -12,6 +12,7 @@ export function Projects() {
   const agents = usePoll(() => api<Agent[]>("/api/agents"), 60000);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<string>();
+  const [removed, setRemoved] = useState<string>();
   return (
     <>
       <div class="page-head">
@@ -65,7 +66,20 @@ export function Projects() {
           workspaces={[...new Set((agents.data ?? []).map((a) => a.workspace))]}
           onClose={() => setEditing(undefined)}
           onSaved={projects.refresh}
+          onDeleted={(movedTo) => {
+            setEditing(undefined);
+            setRemoved(movedTo);
+            projects.refresh();
+          }}
         />
+      )}
+      {removed && (
+        <Modal title={t("projects.removedTitle")} onClose={() => setRemoved(undefined)}>
+          <p>{t("projects.removedText")}</p>
+          <p>
+            <code class="select-all">{removed}</code>
+          </p>
+        </Modal>
       )}
       {creating && (
         <NewProject
@@ -252,8 +266,10 @@ function EditProject(props: {
   workspaces: string[];
   onClose: () => void;
   onSaved: () => void;
+  onDeleted: (movedTo: string) => void;
 }) {
   const [f, setF] = useState<{ name: string; workspace: string; doc: string; rows: Row[] }>();
+  const [deleting, setDeleting] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string }>();
   useEffect(() => {
     api<{
@@ -302,7 +318,11 @@ function EditProject(props: {
       onClose={props.onClose}
       footer={
         <>
-          {status && <span class={`grow ${status.ok ? "muted" : "error"}`}>{status.text}</span>}
+          <button type="button" class="btn danger" onClick={() => setDeleting(true)} disabled={!f}>
+            <Trash2 class="icon" />
+            {t("projects.delete")}
+          </button>
+          <span class={`grow ${status?.ok ? "muted" : "error"}`}>{status?.text}</span>
           <button type="button" class="btn ghost" onClick={props.onClose}>
             {t("common.close")}
           </button>
@@ -312,6 +332,21 @@ function EditProject(props: {
         </>
       }
     >
+      {deleting && (
+        <Confirm
+          title={t("projects.deleteTitle", { name: f?.name ?? props.slug })}
+          message={t("projects.deleteConfirm")}
+          confirmLabel={t("projects.delete")}
+          danger
+          onConfirm={async () => {
+            const r = await api<{ movedTo: string }>(`/api/projects/${props.slug}`, {
+              method: "DELETE",
+            });
+            props.onDeleted(r.movedTo);
+          }}
+          onClose={() => setDeleting(false)}
+        />
+      )}
       {!f ? (
         !status && <p class="muted">{t("app.loading")}</p>
       ) : (
