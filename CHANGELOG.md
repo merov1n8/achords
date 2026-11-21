@@ -36,6 +36,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Agents → Edit opens the same form as New agent, filled in: name, role, workspace, scope
+  (AGENT.md), workflow roles, models, tools, folders, shell, network, delegation and budget.
+  Settings the form does not show (integrations, publishing) are kept.
 - Appearance keeps one background per mode (warm light, graphite dark); only the accent colours
   are chosen. Adding a secret in the vault asks just for its id and value.
 - Phones: a bottom tab bar (Chat, Kanban, Agents, Monitors, More) and a "More" sheet with the
