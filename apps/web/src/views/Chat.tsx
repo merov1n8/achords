@@ -1,4 +1,4 @@
-import { ChevronLeft, Info, LoaderCircle, Mic, Send, Square } from "lucide-preact";
+import { ChevronLeft, Info, LoaderCircle, Mic, Pencil, Send, Square } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { formatUsd, mention, type ThreadSummary } from "../chat.ts";
@@ -351,7 +351,8 @@ function TitleEdit(props: {
           setEditing(true);
         }}
       >
-        {title || t("chat.untitled")}
+        <span class="grow-text">{title || t("chat.untitled")}</span>
+        <Pencil class="icon pencil" aria-hidden="true" />
       </button>
     );
   }
@@ -363,6 +364,7 @@ function TitleEdit(props: {
       maxLength={200}
       value={value}
       aria-label={t("chat.rename")}
+      placeholder={t("chat.titlePlaceholder")}
       onInput={(e) => setValue(e.currentTarget.value)}
       onBlur={save}
       onKeyDown={(e) => {
