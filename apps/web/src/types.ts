@@ -111,15 +111,25 @@ export interface Monitor {
   lastChangeAt: number | null;
 }
 
-/** GET /api/skills (ADR-0049). */
+/** GET /api/skills (ADR-0049, ADR-0053). */
 export interface Skill {
+  /** The scope: shared, a workspace or agents/<agent-id>. */
   workspace: string;
   name: string;
   description: string;
   enabled: boolean;
   source?: string;
   updated?: string;
+  /** Empty in the list for folder skills; GET /api/skills/<scope>/<name> has it. */
   body: string;
+  path: string;
+  /** A SKILL.md folder installed by the owner: switched on or off here, edited in its folder. */
+  folder: boolean;
+}
+
+export interface SkillDetail extends Skill {
+  files: string[];
+  more: number;
 }
 
 export interface SkillProposal {
@@ -138,6 +148,8 @@ export interface SkillProposal {
 export interface SkillsPage {
   skills: Skill[];
   workspaces: string[];
+  /** Agent ids: each has its own scope agents/<id>. */
+  agents: string[];
   modes: Record<string, "review" | "auto">;
   proposals: SkillProposal[];
 }

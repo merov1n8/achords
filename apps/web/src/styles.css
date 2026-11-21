@@ -1416,6 +1416,15 @@ main.flush > .livebar {
   cursor: pointer;
   list-style: none;
 }
+/* Skills page (ADR-0053): one collapsible group per scope. */
+.skill-group {
+  margin-top: 12px;
+}
+.skill-group > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 4px 0;
+}
 .sub-pad {
   padding-left: 10px;
 }

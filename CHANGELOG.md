@@ -73,6 +73,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Skill folders and agent skills (ADR-0053): skill packs installed under `skills/` (a folder per skill with `SKILL.md`, scripts and references, nested in category folders) are found automatically, as are single `.md` skills with a name and description in their frontmatter. Skills under `skills/agents/<agent-id>/` are seen only by that agent. Agents get the path of each skill and may read its folder (never write it) and run its scripts with their allowed commands. The Skills page groups skills by Shared, workspace and agent, has a search, switches installed skill folders on or off and shows them read-only.
+
 - Agents with `*` (any website) in their network list run in an Apple container: a small Linux
   virtual machine that sees only the agent's own folders, not the rest of your Mac (ADR-0051).
   On by default; the agent form has a "Run in an Apple container" checkbox under the network list
