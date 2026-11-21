@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Forms in modals (e.g. Projects → Edit) closed when a text selection started in a field and the
+  mouse was released outside the modal; only a real click on the backdrop closes them now.
+- Pinned chats show the pin icon of the app instead of an emoji.
 - Auto-update stopped at "pnpm install" (an undecided build-script setting that pnpm 12 treats as
   an error) and then retried and notified every few seconds. The setting is decided, and a failed
   update is now tried once per commit (again with "Check now" or when a newer commit lands); the
@@ -33,6 +36,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Appearance keeps one background per mode (warm light, graphite dark); only the accent colours
+  are chosen. Adding a secret in the vault asks just for its id and value.
 - Phones: a bottom tab bar (Chat, Kanban, Agents, Monitors, More) and a "More" sheet with the
   other pages and Settings replace the slide-in sidebar; the top bar shows the page title. The
   kanban shows one column at a time with a column switcher.
