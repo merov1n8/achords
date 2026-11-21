@@ -324,6 +324,7 @@
   "integrations.setSecret": "Set",
   "integrations.test": "Test connection",
   "integrations.own": "Your own accounts",
+  "integrations.ownRowsHelp": "One per row; several for the same channel are fine. Use the IDs for Facebook, Instagram and Google Analytics, and the site for Search Console and WordPress.",
   "integrations.ownHelp": "Used by work that has no client project (your own business). The Google and Meta sign-ins are shared by everything; these rows say which of your pages, properties and sites agents may use outside client work. A client project only ever uses its own accounts. Shown as \"own\" in the lists above.",
   "integrations.testing": "Testing…",
   "projects.docHelp": "Client preferences, stack, conventions, don'ts, deploy rules. Every run of this project gets this text. Files stay in Finder.",
