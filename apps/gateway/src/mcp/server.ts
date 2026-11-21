@@ -97,7 +97,7 @@ const TOOLS = [
   {
     name: "skill_read",
     description:
-      "Read the full instructions of a skill listed in your system prompt. Do this before you follow a skill.",
+      "Read the full instructions of a skill listed in your system prompt (for a skill folder also the files beside its SKILL.md). Do this before you follow a skill.",
     input: z.object({ name: text.describe("Skill name from the list") }),
     endpoint: "/api/agent/skill_read",
     done: "",

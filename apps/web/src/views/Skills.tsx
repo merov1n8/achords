@@ -1,16 +1,29 @@
-import { Link, Pencil, Plus, Trash2 } from "lucide-preact";
-import { useId, useState } from "preact/hooks";
+import { Eye, Link, Pencil, Plus, Trash2 } from "lucide-preact";
+import { useEffect, useId, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { Confirm, Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
-import type { Skill, SkillProposal, SkillsPage } from "../types.ts";
+import type { Skill, SkillDetail, SkillProposal, SkillsPage } from "../types.ts";
 
-type Draft = Omit<Skill, "enabled" | "updated">;
+type Draft = Omit<Skill, "enabled" | "updated" | "path" | "folder">;
 
+// The scope may be agents/<id>: its slash stays a path separator.
 const skillPath = (s: { workspace: string; name: string }) =>
-  `/api/skills/${encodeURIComponent(s.workspace)}/${encodeURIComponent(s.name)}`;
+  `/api/skills/${s.workspace.split("/").map(encodeURIComponent).join("/")}/${encodeURIComponent(s.name)}`;
+const AGENT_PREFIX = "agents/";
+const scopeLabel = (scope: string) =>
+  scope === "shared"
+    ? t("skills.groupShared")
+    : scope.startsWith(AGENT_PREFIX)
+      ? t("skills.groupAgent", { id: scope.slice(AGENT_PREFIX.length) })
+      : scope;
+// Shared first, then workspaces, then agents' own scopes.
+const scopeRank = (scope: string) =>
+  scope === "shared" ? 0 : scope.startsWith(AGENT_PREFIX) ? 2 : 1;
+// With this many skills the groups start collapsed (installed packs can bring hundreds).
+const COLLAPSE_FROM = 20;
 const host = (url: string) => {
   try {
     return new URL(url).host;
@@ -25,6 +38,8 @@ export function Skills() {
   const [form, setForm] = useState<{ editing?: Skill; draft?: Draft }>();
   const [importing, setImporting] = useState(false);
   const [confirm, setConfirm] = useState<Skill>();
+  const [viewing, setViewing] = useState<Skill>();
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string>();
   const act = async (fn: () => Promise<unknown>) => {
     setError(undefined);
@@ -36,6 +51,79 @@ export function Skills() {
     }
   };
   const data = page.data;
+  const q = query.trim().toLowerCase();
+  const shown = (data?.skills ?? []).filter(
+    (s) => !q || `${s.name} ${s.description}`.toLowerCase().includes(q),
+  );
+  const groups = [...new Set(shown.map((s) => s.workspace))].sort(
+    (a, b) => scopeRank(a) - scopeRank(b) || a.localeCompare(b),
+  );
+  const collapsed = !q && (data?.skills.length ?? 0) >= COLLAPSE_FROM;
+  const row = (s: Skill) => (
+    <tr key={`${s.workspace}/${s.name}`}>
+      <td>
+        {s.name}
+        <div class="muted small">{s.description}</div>
+        {/* Kind, source and date on one line keep the table narrow on phones. */}
+        <div class="muted small">
+          {s.folder ? t("skills.folder") : t("skills.file")}
+          {s.source && (
+            <>
+              {" · "}
+              <a href={s.source} target="_blank" rel="noopener noreferrer">
+                {host(s.source)}
+              </a>
+            </>
+          )}
+          {s.updated && ` · ${t("skills.updatedOn", { date: s.updated })}`}
+        </div>
+      </td>
+      <td>
+        <input
+          type="checkbox"
+          checked={s.enabled}
+          aria-label={t("schedules.on")}
+          onChange={() =>
+            act(() => api(skillPath(s), { method: "PUT", body: { enabled: !s.enabled } }))
+          }
+        />
+      </td>
+      <td class="actions">
+        {s.folder ? (
+          <button
+            type="button"
+            class="iconbtn"
+            aria-label={t("skills.view")}
+            title={t("skills.view")}
+            onClick={() => setViewing(s)}
+          >
+            <Eye class="icon" />
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              class="iconbtn"
+              aria-label={t("common.edit")}
+              title={t("common.edit")}
+              onClick={() => setForm({ editing: s })}
+            >
+              <Pencil class="icon" />
+            </button>
+            <button
+              type="button"
+              class="iconbtn"
+              aria-label={t("schedules.delete")}
+              title={t("schedules.delete")}
+              onClick={() => setConfirm(s)}
+            >
+              <Trash2 class="icon" />
+            </button>
+          </>
+        )}
+      </td>
+    </tr>
+  );
   return (
     <>
       <div class="page-head">
@@ -66,70 +154,37 @@ export function Skills() {
         {data?.skills.length === 0 ? (
           <p class="muted">{t("skills.empty")}</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>{t("skills.name")}</th>
-                <th>{t("schedules.on")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {data?.skills.map((s) => (
-                <tr key={`${s.workspace}/${s.name}`}>
-                  <td>
-                    {s.name}
-                    <div class="muted small">{s.description}</div>
-                    {/* Workspace, source and date on one line keep the table narrow on phones. */}
-                    <div class="muted small">
-                      {s.workspace}
-                      {s.source && (
-                        <>
-                          {" · "}
-                          <a href={s.source} target="_blank" rel="noopener noreferrer">
-                            {host(s.source)}
-                          </a>
-                        </>
-                      )}
-                      {s.updated && ` · ${t("skills.updatedOn", { date: s.updated })}`}
-                    </div>
-                  </td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={s.enabled}
-                      aria-label={t("schedules.on")}
-                      onChange={() =>
-                        act(() =>
-                          api(skillPath(s), { method: "PUT", body: { enabled: !s.enabled } }),
-                        )
-                      }
-                    />
-                  </td>
-                  <td class="actions">
-                    <button
-                      type="button"
-                      class="iconbtn"
-                      aria-label={t("common.edit")}
-                      title={t("common.edit")}
-                      onClick={() => setForm({ editing: s })}
-                    >
-                      <Pencil class="icon" />
-                    </button>
-                    <button
-                      type="button"
-                      class="iconbtn"
-                      aria-label={t("schedules.delete")}
-                      title={t("schedules.delete")}
-                      onClick={() => setConfirm(s)}
-                    >
-                      <Trash2 class="icon" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            <input
+              class="input small"
+              type="search"
+              placeholder={t("skills.search")}
+              aria-label={t("skills.search")}
+              value={query}
+              onInput={(e) => setQuery(e.currentTarget.value)}
+            />
+            {data && !shown.length && <p class="muted">{t("skills.noMatch")}</p>}
+            {groups.map((scope) => {
+              const list = shown.filter((s) => s.workspace === scope);
+              return (
+                <details key={scope} class="skill-group" open={!collapsed}>
+                  <summary>
+                    {t("skills.group", { scope: scopeLabel(scope), n: list.length })}
+                  </summary>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{t("skills.name")}</th>
+                        <th>{t("schedules.on")}</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>{list.map(row)}</tbody>
+                  </table>
+                </details>
+              );
+            })}
+          </>
         )}
         {error && <p class="error">{error}</p>}
       </div>
@@ -149,6 +204,7 @@ export function Skills() {
           editing={form.editing}
           draft={form.draft}
           workspaces={data.workspaces}
+          agents={data.agents}
           onClose={() => setForm(undefined)}
           onSaved={() => {
             setForm(undefined);
@@ -165,6 +221,7 @@ export function Skills() {
           }}
         />
       )}
+      {viewing && <ViewSkill skill={viewing} onClose={() => setViewing(undefined)} />}
       {confirm && (
         <Confirm
           title={t("skills.deleteTitle")}
@@ -260,6 +317,7 @@ function SkillForm(props: {
   editing?: Skill | undefined;
   draft?: Draft | undefined;
   workspaces: string[];
+  agents: string[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -315,11 +373,13 @@ function SkillForm(props: {
               disabled={!!props.editing}
               onChange={(e) => setF({ ...f, workspace: e.currentTarget.value })}
             >
-              {props.workspaces.map((ws) => (
-                <option key={ws} value={ws}>
-                  {ws}
-                </option>
-              ))}
+              {[...props.workspaces, ...props.agents.map((id) => `${AGENT_PREFIX}${id}`)].map(
+                (scope) => (
+                  <option key={scope} value={scope}>
+                    {scopeLabel(scope)}
+                  </option>
+                ),
+              )}
             </select>
           </label>
           <label class="field">
@@ -415,6 +475,47 @@ function ImportForm(props: {
         </label>
         {error && <p class="error">{error}</p>}
       </form>
+    </Modal>
+  );
+}
+
+/** A skill folder (ADR-0053), read-only: its SKILL.md and the files beside it. */
+function ViewSkill(props: { skill: Skill; onClose: () => void }) {
+  const [detail, setDetail] = useState<SkillDetail>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    api<SkillDetail>(skillPath(props.skill)).then(setDetail, (err: Error) => setError(err.message));
+  }, [props.skill]);
+  return (
+    <Modal
+      wide
+      title={props.skill.name}
+      onClose={props.onClose}
+      footer={
+        <button type="button" class="btn ghost" onClick={props.onClose}>
+          {t("common.close")}
+        </button>
+      }
+    >
+      <p class="muted small">{t("skills.folderHelp", { path: props.skill.path })}</p>
+      <p>{props.skill.description}</p>
+      {error && <p class="error">{error}</p>}
+      {detail && (
+        <>
+          <div class="pre mono">{detail.body}</div>
+          {detail.files.length > 0 && (
+            <>
+              <h3>{t("skills.files")}</h3>
+              <ul class="small mono">
+                {detail.files.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+                {detail.more > 0 && <li>{t("skills.moreFiles", { n: detail.more })}</li>}
+              </ul>
+            </>
+          )}
+        </>
+      )}
     </Modal>
   );
 }

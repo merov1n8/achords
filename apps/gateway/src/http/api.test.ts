@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -1424,6 +1431,49 @@ describe("HTTP API", () => {
     expect((await call("/api/skills/web-clients/owner-report", { method: "DELETE" })).status).toBe(
       404,
     );
+  });
+
+  it("skills: folder skills and agent scopes (ADR-0053): view, switch only, own-agent adds", async () => {
+    upsertAgent(db, { id: "advertiser", name: "Ads", role: "ads", workspace: "marketing" });
+    const { call } = await pair();
+    const folder = join(runDir, "skills", "agents", "advertiser", "claude-ads", "ads-google");
+    mkdirSync(join(folder, "scripts"), { recursive: true });
+    const text = "---\nname: ads-google\ndescription: Google Ads\nlicense: MIT\n---\n\n# Ads\n";
+    writeFileSync(join(folder, "SKILL.md"), text);
+    writeFileSync(join(folder, "scripts", "check.py"), "print(1)");
+    const path = "/api/skills/agents/advertiser/ads-google";
+
+    const list = (await (await call("/api/skills")).json()) as {
+      skills: { workspace: string; name: string; folder: boolean; body: string }[];
+      agents: string[];
+    };
+    expect(list.skills).toMatchObject([
+      { workspace: "agents/advertiser", name: "ads-google", folder: true, body: "" },
+    ]);
+    expect(list.agents).toEqual(["advertiser"]);
+    expect(await (await call(path)).json()).toMatchObject({
+      body: "# Ads",
+      files: ["scripts/check.py"],
+      more: 0,
+    });
+
+    const put = (body: unknown) => call(path, { method: "PUT", body: JSON.stringify(body) });
+    expect((await put({ enabled: false })).status).toBe(200);
+    expect(readFileSync(join(folder, "SKILL.md"), "utf8")).toBe(
+      text.replace("MIT\n---", "MIT\nenabled: false\n---"),
+    );
+    expect((await put({ description: "x", body: "y" })).status).toBe(400);
+    expect((await call(path, { method: "DELETE" })).status).toBe(400);
+
+    const add = (workspace: string) =>
+      call("/api/skills", {
+        method: "POST",
+        body: JSON.stringify({ workspace, name: "brief", description: "Briefs", body: "B." }),
+      });
+    expect((await add("agents/advertiser")).status).toBe(200);
+    expect(existsSync(join(runDir, "skills", "agents", "advertiser", "brief.md"))).toBe(true);
+    expect((await add("agents/nobody")).status).toBe(400);
+    expect((await add("agents")).status).toBe(400);
   });
 
   it("skills: approve and reject go through the message actions; import refuses unsafe links", async () => {

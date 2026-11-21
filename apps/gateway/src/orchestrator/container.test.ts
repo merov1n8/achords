@@ -154,6 +154,24 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     expect(call?.req.appendSystemPrompt).toMatch(/isolated Linux container/);
   });
 
+  it("shares the run's skill folders read-only (ADR-0053), never another agent's", async () => {
+    agent('network: {allow: ["*"]}');
+    for (const scope of ["shared", "agents/web", "agents/other"]) {
+      mkdirSync(join(home, "skills", scope, "pack"), { recursive: true });
+    }
+    const { orch } = start();
+    await orch.workOnce();
+    const mounts = calls[0]?.req.container?.mounts ?? [];
+    expect(mounts).toEqual(
+      expect.arrayContaining([
+        { path: join(home, "skills", "shared"), readonly: true },
+        { path: join(home, "skills", "agents", "web"), readonly: true },
+      ]),
+    );
+    expect(mounts.some((m) => m.path.includes("other"))).toBe(false);
+    expect(mounts.filter((m) => m.path.includes("skills")).every((m) => m.readonly)).toBe(true);
+  });
+
   it('runs on the host when the owner switched the container off, or without "*"', async () => {
     agent('network: {allow: ["*"]}\ncontainer: false');
     const { orch } = start();

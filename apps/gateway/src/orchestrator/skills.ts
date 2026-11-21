@@ -1,6 +1,7 @@
-// Skills in agent runs (ADR-0049): the index in the system prompt, the full text on request, and
-// agent proposals that the owner approves (or that apply at once where the rules allow it).
+// Skills in agent runs (ADR-0049, ADR-0053): the index in the system prompt, the full text on
+// request, and agent proposals that the owner approves (or that apply at once where the rules allow it).
 import { randomBytes } from "node:crypto";
+import { dirname } from "node:path";
 import { appendMessage, clearActions, type Db, getSetting, listMessages } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
@@ -11,6 +12,8 @@ import {
   isSkillWorkspace,
   readSkill,
   type Skill,
+  type SkillWarn,
+  skillFiles,
   skillHash,
   visibleSkills,
   writeSkill,
@@ -19,6 +22,16 @@ import { fetchSkillSource } from "./skill-fetch.ts";
 
 const MAX_POST = 4000;
 const PREVIEW_LINES = 8;
+// The index carries one line per skill; long third-party descriptions are cut.
+const INDEX_DESCRIPTION = 200;
+
+const indexLine = (s: Skill) => {
+  const d =
+    s.description.length > INDEX_DESCRIPTION
+      ? `${s.description.slice(0, INDEX_DESCRIPTION - 1)}…`
+      : s.description;
+  return `- ${s.name}: ${d} (${s.path})`;
+};
 
 export type SkillMode = "review" | "auto";
 export const skillModeKey = (workspace: string) => `skills.mode.${workspace}`;
@@ -76,9 +89,17 @@ export function createSkillFlow(deps: {
   redact: (s: string) => string;
   /** Tests replace the network. */
   fetchSource?: typeof fetchSkillSource;
+  /** Discovery problems (duplicate names, caps); each distinct message is passed on once. */
+  warn?: SkillWarn;
 }) {
   const { db, dir, redact } = deps;
   const fetchSource = deps.fetchSource ?? fetchSkillSource;
+  const warned = new Set<string>();
+  const warn: SkillWarn = (msg) => {
+    if (warned.has(msg)) return;
+    warned.add(msg);
+    (deps.warn ?? ((m) => console.warn(`${new Date().toISOString()} gateway: ${m}`)))(msg);
+  };
 
   /** The owner wrote this very link in the thread: the import is the owner's own request. */
   const ownerLinked = (threadId: string | null, url: string) => {
@@ -114,23 +135,30 @@ export function createSkillFlow(deps: {
 
   return {
     /** System prompt section: the index of visible skills and the self-learning rule. */
-    promptBlock(workspace: string): string {
-      const skills = visibleSkills(dir, workspace);
+    promptBlock(workspace: string, agentId?: string): string {
+      const skills = visibleSkills(dir, workspace, agentId, warn);
       const index = skills.length
-        ? `Skills (owner-approved how-tos; read one in full with skill_read before you follow it):\n${skills.map((s) => `- ${s.name}: ${s.description}`).join("\n")}\n\n`
+        ? `Skills (owner-approved how-tos). Before you use one, read its file in full with the Read tool or skill_read. Files next to a SKILL.md (scripts, references, assets) are part of that skill; open them when it says so and run its scripts only with commands you are allowed.\n${skills.map(indexLine).join("\n")}\n\n`
         : "";
       return `${index}After a task that needed several attempts, a workaround or the owner's correction, propose one short reusable skill (or a patch to an existing one) with skill_propose. Never put secrets, client data or one-off details in a skill.`;
     },
 
-    read(workspace: string, name: string): Out {
-      const s = findSkill(dir, workspace, name);
+    read(workspace: string, name: string, agentId?: string): Out {
+      const s = findSkill(dir, workspace, name, agentId);
       if (!s?.enabled) return { ok: false, reason: `no skill ${name}` };
-      return { ok: true, text: `Skill "${s.name}" (owner-approved instructions):\n\n${s.body}` };
+      const text = `Skill "${s.name}" (owner-approved instructions):\n\n${s.body}`;
+      if (!s.folder) return { ok: true, text };
+      const { files, more } = skillFiles(s);
+      const list = files.length
+        ? `\n\nFiles in this skill's folder ${dirname(s.path)} (open them with Read when the skill refers to them):\n${files.map((f) => `- ${f}`).join("\n")}${more ? `\n- … and ${more} more` : ""}`
+        : "";
+      return { ok: true, text: `${text}${list}` };
     },
 
     async fetch(
       workspace: string,
       url: string,
+      agentId?: string,
     ): Promise<{ ok: true; text: string; untrusted: string } | { ok: false; reason: string }> {
       let page: { url: string; text: string };
       try {
@@ -138,7 +166,10 @@ export function createSkillFlow(deps: {
       } catch (err) {
         return { ok: false, reason: (err as Error).message };
       }
-      const close = closestSkills(visibleSkills(dir, workspace), page.text.slice(0, 4000));
+      const close = closestSkills(
+        visibleSkills(dir, workspace, agentId, warn),
+        page.text.slice(0, 4000),
+      );
       const list = close.length
         ? `Closest existing skills (read them with skill_read before deciding):\n${close.map((s) => `- ${s.name}: ${s.description}`).join("\n")}`
         : "No similar skill exists yet.";
@@ -161,9 +192,16 @@ export function createSkillFlow(deps: {
       const body = redact(req.body.trim());
       if (!description || !body) return { ok: false, reason: "description and body are required" };
       // A name that already exists is a change to that skill, never a silent overwrite.
-      const target = findSkill(dir, caller.workspace, req.replaces ?? req.name);
+      const target = findSkill(dir, caller.workspace, req.replaces ?? req.name, caller.agentId);
       if (req.replaces && !target)
         return { ok: false, reason: `no skill ${req.replaces} to replace` };
+      // Skill folders are the owner's installs: changed in their folder, never through a proposal.
+      if (target?.folder) {
+        return {
+          ok: false,
+          reason: `${target.name} is a skill folder the owner installed; it cannot be changed with skill_propose (propose a new skill under another name instead)`,
+        };
+      }
       const workspace = target?.workspace ?? caller.workspace;
       if (target && target.name !== req.name && readSkill(dir, workspace, req.name)) {
         return { ok: false, reason: `a skill named ${req.name} already exists` };
