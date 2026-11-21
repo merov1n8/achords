@@ -44,7 +44,6 @@ export function Agents() {
         <table>
           <thead>
             <tr>
-              <th>{t("agents.id")}</th>
               <th>{t("agents.name")}</th>
               <th>{t("agents.role")}</th>
               <th>{t("agents.workspace")}</th>
@@ -55,9 +54,9 @@ export function Agents() {
             {agents.data?.map((a) => (
               <tr key={a.id}>
                 <td>
-                  <code>{a.id}</code>
+                  <div class="agent-name">{a.name}</div>
+                  <div class="muted small">@{a.id}</div>
                 </td>
-                <td>{a.name}</td>
                 <td>{a.role}</td>
                 <td>{a.workspace}</td>
                 <td class="actions">

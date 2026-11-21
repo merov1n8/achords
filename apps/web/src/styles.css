@@ -1734,3 +1734,6 @@ td.actions > * {
   margin-right: 4px;
   vertical-align: -2px;
 }
+.agent-name {
+  font-weight: 500;
+}
