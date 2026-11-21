@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   AuthError,
   addChecklistItem,
@@ -64,6 +64,7 @@ import {
   OWN,
   saveOwnAccounts,
   siteStatus,
+  updateAgent,
   updateManifestModels,
   updateManifestName,
   updateProject,
@@ -945,14 +946,25 @@ export function createApiHandler(deps: ApiDeps) {
       "GET",
       /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})$/,
       async ({ params }) => {
-        const m = loadManifest(manifestPath(params[0] as string));
+        const path = manifestPath(params[0] as string);
+        const m = loadManifest(path);
         const local = (await deps.localModels?.().catch(() => [])) ?? [];
+        const docPath = join(dirname(path), "AGENT.md");
         return {
           id: m.id,
           name: m.name,
           role: m.role,
           workspace: m.workspace,
           models: m.models,
+          // The same fields as the create form, for editing.
+          roles: m.roles,
+          tools: m.tools,
+          fs: m.fs,
+          ...(m.shell ? { shell: m.shell } : {}),
+          network: m.network,
+          delegation: m.delegation,
+          ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
+          doc: existsSync(docPath) ? readFileSync(docPath, "utf8") : "",
           // Aliases always run the newest model of a family; local models as pulled.
           suggestions: [
             ...CLAUDE_ALIASES,
@@ -983,37 +995,10 @@ export function createApiHandler(deps: ApiDeps) {
       async ({ res, body }) => {
         if (!deps.agentsDir) throw new HttpError(404, "no agents folder");
         const b = await body();
-        const list = (v: unknown, field: string) => (v === undefined ? [] : strList(v, field));
-        const obj = (v: unknown) =>
-          v && typeof v === "object" ? (v as Record<string, unknown>) : {};
-        const models = obj(b.models);
-        const fs = obj(b.fs);
-        const perRun = Number(obj(b.budget).per_run_usd ?? 0);
         try {
           const made = createAgentFiles(deps.agentsDir, {
             id: str(b.id, "id", 64),
-            name: str(b.name, "name", 100),
-            role: str(b.role, "role", 100),
-            workspace: str(b.workspace, "workspace", 64),
-            roles: list(b.roles, "roles"),
-            models: {
-              default: str(models.default, "models.default", 200),
-              allowed: list(models.allowed, "models.allowed"),
-            },
-            tools: list(b.tools, "tools"),
-            fs: { read: list(fs.read, "fs.read"), write: list(fs.write, "fs.write") },
-            ...(b.shell !== undefined
-              ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
-              : {}),
-            network: { allow: list(obj(b.network).allow, "network.allow") },
-            delegation: {
-              can_delegate_to: list(
-                obj(b.delegation).can_delegate_to,
-                "delegation.can_delegate_to",
-              ),
-              accepts_from: list(obj(b.delegation).accepts_from, "delegation.accepts_from"),
-            },
-            ...(perRun > 0 ? { budget: { per_run_usd: perRun } } : {}),
+            ...agentForm(b),
             description: str(b.description, "description", 5000),
           });
           deps.orchestrator.syncAgents(); // mirror into the DB, seed a new workspace's workflow
@@ -1024,6 +1009,27 @@ export function createApiHandler(deps: ApiDeps) {
           const msg = (err as Error).message;
           throw new HttpError(/already exists/.test(msg) ? 409 : 400, msg);
         }
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        manifestPath(id); // 404 for an unknown agent
+        const b = await body();
+        try {
+          updateAgent(deps.agentsDir ?? "", id, {
+            ...agentForm(b),
+            doc: str(b.doc, "doc", 50_000),
+          });
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(400, (err as Error).message);
+        }
+        deps.orchestrator.syncAgents(); // name/workspace show in the list right away
+        log(`agent edited in the web UI: ${id}`);
+        return { ok: true };
       },
     ],
     [
@@ -1207,6 +1213,35 @@ export function createApiHandler(deps: ApiDeps) {
     return deps.projectsDir;
   };
 
+  /** The agent form (create and edit share it); validated again by the manifest schema. */
+  const agentForm = (b: Record<string, unknown>) => {
+    const list = (v: unknown, field: string) => (v === undefined ? [] : strList(v, field));
+    const obj = (v: unknown) => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+    const models = obj(b.models);
+    const fs = obj(b.fs);
+    const perRun = Number(obj(b.budget).per_run_usd ?? 0);
+    return {
+      name: str(b.name, "name", 100),
+      role: str(b.role, "role", 100),
+      workspace: str(b.workspace, "workspace", 64),
+      roles: list(b.roles, "roles"),
+      models: {
+        default: str(models.default, "models.default", 200),
+        allowed: list(models.allowed, "models.allowed"),
+      },
+      tools: list(b.tools, "tools"),
+      fs: { read: list(fs.read, "fs.read"), write: list(fs.write, "fs.write") },
+      ...(b.shell !== undefined
+        ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
+        : {}),
+      network: { allow: list(obj(b.network).allow, "network.allow") },
+      delegation: {
+        can_delegate_to: list(obj(b.delegation).can_delegate_to, "delegation.can_delegate_to"),
+        accepts_from: list(obj(b.delegation).accepts_from, "delegation.accepts_from"),
+      },
+      ...(perRun > 0 ? { budget: { per_run_usd: perRun } } : {}),
+    };
+  };
   const manifestPath = (id: string) => {
     const path = join(deps.agentsDir ?? "", id, "agent.yaml");
     if (!deps.agentsDir || !existsSync(path)) throw new HttpError(404, "no such agent");
