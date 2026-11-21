@@ -5,33 +5,14 @@ import { Confirm, Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
-import type { IntegrationStatus, SecretStatus } from "../types.ts";
-
-const OTHER = "";
-
-/** What the integrations still miss: offered first when adding a secret. */
-function suggestions(list: IntegrationStatus[]): { id: string; label: string }[] {
-  const out = new Map<string, string>();
-  for (const s of list) {
-    // Google comes from the sign-in (achords connect google), not typed values.
-    for (const id of s.missingSecrets.filter((x) => !x.startsWith("google-"))) out.set(id, s.name);
-    for (const site of s.sites) {
-      for (const id of site.missing) out.set(id, `${s.name}: ${site.url}`);
-    }
-  }
-  return [...out].map(([id, label]) => ({ id, label }));
-}
+import type { SecretStatus } from "../types.ts";
 
 /** Write-only: values can be set or replaced, never shown (ADR-0012). */
 export function Vault() {
   const secrets = usePoll(() => api<SecretStatus[]>("/api/vault"), 10000);
-  const integrations = usePoll(() => api<IntegrationStatus[]>("/api/integrations"), 30000);
   const [editing, setEditing] = useState<{ id?: string }>();
   const [deleting, setDeleting] = useState<string>();
-  const refresh = () => {
-    secrets.refresh();
-    integrations.refresh();
-  };
+  const refresh = () => secrets.refresh();
   return (
     <>
       <div class="page-head">
@@ -84,7 +65,6 @@ export function Vault() {
       {editing && (
         <SetSecret
           {...(editing.id ? { id: editing.id } : {})}
-          suggested={suggestions(integrations.data ?? [])}
           onClose={() => setEditing(undefined)}
           onSaved={() => {
             setEditing(undefined);
@@ -109,18 +89,12 @@ export function Vault() {
   );
 }
 
-/** Add (choose what it is for, or type an id) or replace one secret. */
-function SetSecret(props: {
-  id?: string;
-  suggested: { id: string; label: string }[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [choice, setChoice] = useState(props.id ?? props.suggested[0]?.id ?? OTHER);
+/** Add (by id) or replace one secret. Integrations ask for their own secrets where they are set up. */
+function SetSecret(props: { id?: string; onClose: () => void; onSaved: () => void }) {
   const [typed, setTyped] = useState("");
   const [value, setValue] = useState("");
   const [error, setError] = useState<string>();
-  const id = props.id ?? (choice === OTHER ? typed.trim() : choice);
+  const id = props.id ?? typed.trim();
   const save = async (e: Event) => {
     e.preventDefault();
     setError(undefined);
@@ -149,22 +123,6 @@ function SetSecret(props: {
       <form id="set-secret" onSubmit={save} autocomplete="off">
         {!props.id && (
           <label class="field">
-            {t("vault.for")}
-            <select class="input" value={choice} onChange={(e) => setChoice(e.currentTarget.value)}>
-              {props.suggested.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label} ({s.id})
-                </option>
-              ))}
-              <option value={OTHER}>{t("vault.other")}</option>
-            </select>
-            {props.suggested.length === 0 && (
-              <span class="muted small">{t("vault.nothingMissing")}</span>
-            )}
-          </label>
-        )}
-        {!props.id && choice === OTHER && (
-          <label class="field">
             {t("vault.id")}
             <input
               class="input"
@@ -174,6 +132,7 @@ function SetSecret(props: {
               pattern="[a-z0-9][a-z0-9._\-]{0,63}"
               required
             />
+            <span class="muted small">{t("vault.idHelp")}</span>
           </label>
         )}
         <label class="field">

@@ -2,6 +2,7 @@ import { X } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { t } from "../i18n.ts";
+import { useBackdropClose } from "./backdrop.ts";
 
 /**
  * A modal on the native <dialog>: focus stays inside, Escape and a click on the backdrop close
@@ -15,6 +16,7 @@ export function Modal(props: {
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const backdrop = useBackdropClose(ref, props.onClose);
   const titleId = useId();
   useEffect(() => {
     const d = ref.current;
@@ -22,15 +24,12 @@ export function Modal(props: {
     return () => d?.close();
   }, []);
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: the backdrop click mirrors Escape, which the native dialog handles
     <dialog
       ref={ref}
       class={`modal ${props.wide ? "wide" : ""}`}
       aria-labelledby={titleId}
       onClose={props.onClose}
-      onClick={(e) => {
-        if (e.target === ref.current) props.onClose();
-      }}
+      {...backdrop}
     >
       <header class="modal-h">
         <h2 id={titleId}>{props.title}</h2>
