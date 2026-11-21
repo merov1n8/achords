@@ -70,6 +70,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Agents with `*` (any website) in their network list run in an Apple container: a small Linux
+  virtual machine that sees only the agent's own folders, not the rest of your Mac (ADR-0051).
+  On by default; the agent form has a "Run in an Apple container" checkbox under the network list
+  with a warning when switched off. Needs Apple's `container` tool (`brew install container`)
+  and, for Claude on the subscription, a token from `claude setup-token` in Settings → Model
+  access → Claude → "Token for container runs". Claude models only for now. The image builds by
+  itself on first use or with `achords container build`; `achords kill` stops running
+  containers too.
+
 - Skills: short how-tos your agents follow (Skills page in the sidebar and in the phone's More menu). Agents see each skill's name and description and read the full text when they need it. After a task that took several attempts or a correction from you, an agent can propose a new skill or a change; you get it in the chat with Approve / Reject, changes shown as before and after. Per workspace you can let new skills be saved automatically; changes always wait for you. Send a link in chat ("found a good skill, build it in") and it is built in directly, or proposed as a change to a similar skill you already have. On the Skills page you can also add, edit, switch off, delete and import skills from a link yourself. Two starter skills ship: writing the final report in plain language, and a self-check before reporting done.
 
 - Settings → Integrations can set up everything that needed the terminal before: **Add sign-in**

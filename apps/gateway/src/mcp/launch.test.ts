@@ -88,6 +88,18 @@ describe("integration launcher (ADR-0034)", () => {
     expect(r.code).toBe(3);
   });
 
+  it("waits for a hub that starts listening a moment later (container runs, ADR-0051)", async () => {
+    const { port } = hub.address() as AddressInfo;
+    await new Promise((r) => hub.close(r));
+    const running = launch("good");
+    await new Promise((r) => setTimeout(r, 600));
+    expect(auths).toEqual([]);
+    await new Promise<void>((r) => hub.listen(port, "127.0.0.1", r));
+    const r = await running;
+    expect(auths).toEqual(["Bearer good"]);
+    expect(r.out.split("|")[0]).toBe("s3cret");
+  });
+
   it("exits without starting anything when the ticket is refused", async () => {
     const r = await launch("used");
     expect(r.code).toBe(1);

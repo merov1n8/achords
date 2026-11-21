@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { isAlive } from "@achords/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cliClaude } from "./cli-claude.ts";
-import type { RunRequest } from "./types.ts";
+import type { ContainerSpec, RunRequest } from "./types.ts";
 
 const FAKE = new URL("./fake-claude.test-helper.mjs", import.meta.url).pathname;
+const FAKE_CONTAINER = new URL("./fake-container.test-helper.mjs", import.meta.url).pathname;
 
 describe("cli-claude adapter", () => {
   let dir: string;
@@ -195,6 +196,111 @@ describe("cli-claude adapter", () => {
     const running = provider("hang").run(req({ signal: ctl.signal }));
     setTimeout(() => ctl.abort(), 300);
     expect(await running).toMatchObject({ ok: false, stopReason: "cancelled" });
+  });
+
+  describe("inside an Apple container (ADR-0051)", () => {
+    const box = (over: Partial<ContainerSpec> = {}): ContainerSpec => ({
+      bin: FAKE_CONTAINER,
+      name: "achords-run-test",
+      image: "achords-agent:abc",
+      mounts: [
+        { path: dir, readonly: false },
+        { path: "/srv/docs", readonly: true },
+      ],
+      ...over,
+    });
+    const boxed = (mode = "ok") =>
+      cliClaude({
+        command: [process.execPath, FAKE],
+        env: {
+          FAKE_CLAUDE_MODE: mode,
+          FAKE_CLAUDE_RECORD: record,
+          FAKE_CONTAINER_RECORD: calls(),
+        },
+      });
+    const calls = () => join(dir, "container.jsonl");
+    const recorded = () =>
+      readFileSync(calls(), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l).argv as string[]);
+
+    it("wraps the unchanged CLI command; secrets go in by name, never on argv", async () => {
+      const res = await boxed().run(
+        req({
+          billing: "api",
+          env: { ANTHROPIC_API_KEY: "sk-ant-secret-value" },
+          container: box(),
+        }),
+      );
+      expect(res).toMatchObject({ ok: true, text: "echo:do the thing" });
+      const [argv] = recorded();
+      const image = argv?.indexOf("achords-agent:abc") ?? -1;
+      expect(argv?.slice(0, image)).toEqual([
+        "run",
+        "--rm",
+        "-i",
+        "--init",
+        "--progress",
+        "none",
+        "--name",
+        "achords-run-test",
+        "--cpus",
+        "4",
+        "--memory",
+        "4G",
+        "--mount",
+        `type=bind,source=${dir},target=${dir}`,
+        "--mount",
+        "type=bind,source=/srv/docs,target=/srv/docs,readonly",
+        "-e",
+        "ANTHROPIC_API_KEY",
+        "-w",
+        dir,
+      ]);
+      // After the image: exactly the command a host run would have used.
+      const seen = JSON.parse(readFileSync(record, "utf8"));
+      expect(argv?.slice(image + 1)).toEqual([process.execPath, FAKE, ...seen.argv]);
+      expect(JSON.stringify(argv)).not.toContain("sk-ant-secret-value");
+      // The VM still gets the value (copied from the client's environment).
+      expect(seen.anthropicKey).toBe("sk-ant-secret-value");
+      expect(seen.stdin).toBe("do the thing");
+    });
+
+    it("passes nothing of the host environment but the run's own variables", async () => {
+      process.env.ACHORDS_TEST_HOST_ONLY = "host";
+      try {
+        await boxed().run(req({ env: { ACHORDS_TEST_SECRET: "tok" }, container: box() }));
+      } finally {
+        delete process.env.ACHORDS_TEST_HOST_ONLY;
+      }
+      const [argv] = recorded();
+      expect(argv?.filter((_, i) => argv[i - 1] === "-e")).toEqual(["ACHORDS_TEST_SECRET"]);
+      expect(JSON.parse(readFileSync(record, "utf8")).injected).toBe("tok");
+    });
+
+    it("stops the container by name on cancel", async () => {
+      // `container kill` runs with the gateway's own environment.
+      process.env.FAKE_CONTAINER_RECORD = calls();
+      try {
+        const ctl = new AbortController();
+        const running = boxed("hang").run(req({ signal: ctl.signal, container: box() }));
+        setTimeout(() => ctl.abort(), 500);
+        expect(await running).toMatchObject({ ok: false, stopReason: "cancelled" });
+        await waitFor(() => recorded().some((a) => a[0] === "kill"));
+        expect(recorded().find((a) => a[0] === "kill")).toEqual(["kill", "achords-run-test"]);
+      } finally {
+        delete process.env.FAKE_CONTAINER_RECORD;
+      }
+    });
+
+    it("refuses a folder the mount syntax cannot carry", async () => {
+      const res = await boxed().run(
+        req({ container: box({ mounts: [{ path: "/a,b", readonly: false }] }) }),
+      );
+      expect(res).toMatchObject({ ok: false, stopReason: "error" });
+      expect(res.error).toMatch(/cannot share the folder \/a,b/);
+    });
   });
 
   it("fails cleanly when the binary is missing", async () => {

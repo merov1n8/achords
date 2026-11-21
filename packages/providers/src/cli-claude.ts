@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { containerRunArgs, stopContainer } from "./container.ts";
 import type {
   ModelProvider,
   RunProgress,
@@ -128,7 +129,26 @@ function runOnce(
     const env: NodeJS.ProcessEnv = { ...process.env, ...opts.env, ...req.env };
     // Subscription runs never pick up an API key that happens to be in the environment.
     if (req.billing !== "api") delete env.ANTHROPIC_API_KEY;
-    const child = spawn(bin, args, {
+    // ADR-0051: the same command inside a VM; only the run's own variables go in, by name.
+    const box = req.container;
+    let command: [string, string[]];
+    try {
+      command = box
+        ? [box.bin, containerRunArgs(box, req.cwd, Object.keys(req.env ?? {}), [bin, ...args])]
+        : [bin, args];
+    } catch (err) {
+      resolve({
+        ok: false,
+        stopReason: "error",
+        text: "",
+        error: (err as Error).message,
+        usage: emptyUsage(),
+        windows,
+        durationMs: 0,
+      });
+      return;
+    }
+    const child = spawn(command[0], command[1], {
       cwd: req.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -155,6 +175,7 @@ function runOnce(
         }
       };
       signalGroup("SIGTERM");
+      if (box) stopContainer(box);
       setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS).unref();
     };
     const onAbort = () => killGroup("cancelled");

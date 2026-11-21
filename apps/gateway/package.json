@@ -12,6 +12,7 @@
     "@achords/core": "workspace:*",
     "@achords/i18n": "workspace:*",
     "@achords/memory": "workspace:*",
+    "@achords/platform": "workspace:*",
     "@achords/policy": "workspace:*",
     "@achords/providers": "workspace:*",
     "@achords/secrets": "workspace:*",

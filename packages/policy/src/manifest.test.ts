@@ -35,6 +35,19 @@ describe("parseManifest", () => {
     expect(m.models.allowed).toEqual(["local/x"]);
   });
 
+  it("runs agents with the open web in a container unless the owner switches it off", () => {
+    const base = "id: a\nname: A\nrole: r\nworkspace: w\nmodels: {default: cli-claude/sonnet}\n";
+    expect(parseManifest(base, "x").container).toBe(false);
+    expect(parseManifest(`${base}network: {allow: [example.com]}\n`, "x").container).toBe(false);
+    expect(parseManifest(`${base}network: {allow: ["*"]}\n`, "x").container).toBe(true);
+    expect(parseManifest(`${base}network: {allow: ["*"]}\ncontainer: false\n`, "x").container).toBe(
+      false,
+    );
+    // Only meaningful with "*": anything else is a mistake that must not pass silently.
+    expect(() => parseManifest(`${base}container: true\n`, "x")).toThrow(/container/);
+    expect(() => parseManifest(`${base}container: false\n`, "x")).toThrow(/container/);
+  });
+
   it("delegation is deny by default and accepts explicit lists", () => {
     const base = "id: a\nname: A\nrole: r\nworkspace: w\nmodels: {default: local/x}\n";
     expect(parseManifest(base, "x").delegation).toEqual({ can_delegate_to: [], accepts_from: [] });

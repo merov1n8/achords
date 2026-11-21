@@ -65,6 +65,9 @@ export const manifestSchema = z
       .object({ allow: z.array(z.string().min(1)).default([]) })
       .strict()
       .default({ allow: [] }),
+    // ADR-0051: with "*" in network.allow the run executes in an Apple container unless the
+    // owner sets false (own risk). Absent = true with "*", false otherwise.
+    container: z.boolean().optional(),
     // Claude --effort (codex reasoning effort, capped at high); absent = the CLI's default.
     effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
     publish_mode: z
@@ -95,9 +98,14 @@ export const manifestSchema = z
       .default({ can_delegate_to: [], accepts_from: [] }),
   })
   .strict()
+  .refine((m) => m.container === undefined || m.network.allow.includes("*"), {
+    path: ["container"],
+    message: 'only with "*" in network.allow (any website)',
+  })
   .transform((m) => ({
     ...m,
     models: { default: m.models.default, allowed: m.models.allowed ?? [m.models.default] },
+    container: m.container ?? m.network.allow.includes("*"),
   }))
   .refine((m) => m.models.allowed.includes(m.models.default), {
     path: ["models", "default"],

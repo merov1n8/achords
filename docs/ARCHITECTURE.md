@@ -107,7 +107,7 @@ Per agent (declared in `agents/<id>/agent.yaml`):
 - `tools` / `mcp`: allow-list; everything else denied.
 - `fs`: readable / writable paths.
 - `shell`: allow-list commands run directly; others require approval.
-- `network`: allowed domains (enforced for containerized agents).
+- `network`: allowed domains; `*` = any website. With `*` the run executes in an Apple container unless `container: false` (owner's own risk; ADR-0051).
 - `publish_mode`: `review | auto`, per channel (marketing).
 - `budget`: token / cost caps per run and per day.
 - `delegation`: `can_delegate_to` / `accepts_from` agent ids, deny by default (ADR-0029).
@@ -197,6 +197,7 @@ Default layout, configurable:
 - Default: allow-list + approval (approvals arrive on Telegram/web).
 - Dev agents: git worktrees, optional dedicated macOS user.
 - Untrusted-input agents (marketing, scraping): container with domain allow-list.
+- Implemented (ADR-0051): agents with `*` in `network.allow` run in an Apple container (`container run`, one lightweight Linux VM per run) unless the owner sets `container: false` (web form checkbox, red warning). The claude arguments stay identical; only the run's folders are shared, at their host paths (writable roots read-write, read roots, the per-run MCP config folder and the hub/launcher code read-only); secrets go in with `-e NAME`, never on argv. Subscription runs sign in with a `claude setup-token` token from the vault (`claude-oauth-token`), API runs with the key. The hub is reached on the container network's host address through a second gateway listener bound to exactly that address (agent API only, subnet-checked, token-authenticated). Image from `seed/container/Dockerfile`, tagged by its hash, built on first need or with `achords container build`. Timeout, cancel, `achords kill` and a restarting gateway stop the VMs by name (`achords-run-<install>-<uuid>`). Claude models only for now; codex and Gemini runs are refused in a container.
 
 ### 4.17 Platform layer
 
@@ -212,8 +213,8 @@ Default layout, configurable:
 ### 4.19 Install
 
 - `achords init`: dependency check, platform detection, provider mode (CLI or API), CLI login handoff, Telegram bot setup, workspace and agent templates, local model pull, service install.
-- `achords doctor`, `achords update`, `achords start|stop|status|kill|resume`. `stop` is a planned stop (e.g. before a restart or moving the machine): the gateway starts nothing new, running work may finish (default up to 10 min, `--wait 30m`), then it stops; work still running is interrupted and requeued with a continuation note (the agent's checklist) without losing an attempt (`--now` skips the wait). `kill` remains the emergency stop. Everything set at install is editable later in the engine room.
-- Emergency stop (`achords kill`) must work even if the gateway is hung: it unloads the launchd/systemd service (so `KeepAlive` cannot restart it), kills every agent run's process group (PIDs recorded in `runs`), pauses the task queue and writes a STOP marker the gateway refuses to start past. `achords resume` clears it (details and manual fallback: `docs/OPERATIONS.md`). Telegram `/stop` from the paired owner chat triggers the same path.
+- `achords doctor`, `achords update`, `achords start|stop|status|kill|resume`. `stop` is a planned stop (e.g. before a restart or moving the machine): the gateway starts nothing new, running work may finish (default up to 10 min, `--wait 30m`), then it stops; work still running is interrupted and requeued with a continuation note (the agent's checklist) without losing an attempt (`--now` skips the wait). `kill` remains the emergency stop. `achords container build` builds the image for container runs (ADR-0051). Everything set at install is editable later in the engine room.
+- Emergency stop (`achords kill`) must work even if the gateway is hung: it unloads the launchd/systemd service (so `KeepAlive` cannot restart it), kills every agent run's process group (PIDs recorded in `runs`) and this install's run containers (ADR-0051), pauses the task queue and writes a STOP marker the gateway refuses to start past. `achords resume` clears it (details and manual fallback: `docs/OPERATIONS.md`). Telegram `/stop` from the paired owner chat triggers the same path.
 
 ### 4.20 Machine migration (export / import)
 

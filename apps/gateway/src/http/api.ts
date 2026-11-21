@@ -144,7 +144,16 @@ export interface ApiDeps {
   runDir?: string;
   /** Phase 4: subscription or API key per provider. */
   billing?: {
-    list: () => { provider: string; label: string; mode: string; keyId: string; keySet: boolean }[];
+    list: () => {
+      provider: string;
+      label: string;
+      mode: string;
+      keyId: string;
+      keySet: boolean;
+      /** ADR-0051: Claude's sign-in for runs in a container (write-only like every secret). */
+      containerTokenId?: string;
+      containerTokenSet?: boolean;
+    }[];
     setMode: (provider: string, mode: "subscription" | "api") => void;
     budgets: () => Record<
       string,
@@ -1226,6 +1235,7 @@ export function createApiHandler(deps: ApiDeps) {
           fs: m.fs,
           ...(m.shell ? { shell: m.shell } : {}),
           network: m.network,
+          ...(m.network.allow.includes("*") ? { container: m.container } : {}),
           delegation: m.delegation,
           ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
           ...(m.effort ? { effort: m.effort } : {}),
@@ -1536,6 +1546,7 @@ export function createApiHandler(deps: ApiDeps) {
         ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
         : {}),
       network: { allow: list(obj(b.network).allow, "network.allow") },
+      ...(typeof b.container === "boolean" ? { container: b.container } : {}),
       delegation: {
         can_delegate_to: list(obj(b.delegation).can_delegate_to, "delegation.can_delegate_to"),
         accepts_from: list(obj(b.delegation).accepts_from, "delegation.accepts_from"),

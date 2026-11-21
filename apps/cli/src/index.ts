@@ -14,6 +14,7 @@ import {
 import { t } from "@achords/i18n";
 import { openHomeVault, parseClientJson } from "@achords/secrets";
 import { connectGoogle } from "./connect-google.ts";
+import { buildImage, killRunContainers } from "./container.ts";
 import { type ControlContext, kill, resume, start, status, stop } from "./control.ts";
 import { runDoctor, systemDoctorEnv } from "./doctor.ts";
 import { runInit } from "./init.ts";
@@ -26,6 +27,7 @@ const USAGE = () => t("cli.usage");
 
 // Dev install: the service runs the gateway straight from this checkout.
 const gatewayEntry = fileURLToPath(new URL("../../gateway/src/main.ts", import.meta.url));
+const containerDir = fileURLToPath(new URL("../../../seed/container/", import.meta.url));
 
 function context(): ControlContext {
   const paths = homePaths(resolveHome());
@@ -46,7 +48,7 @@ function context(): ControlContext {
             path: process.env.PATH ?? "/usr/bin:/bin",
           })
         : unsupportedService;
-  return { paths, service };
+  return { paths, service, killContainers: () => killRunContainers(paths.home) };
 }
 
 // Opening the vault needs the master key; doctor only does that once secrets exist.
@@ -248,6 +250,14 @@ async function run(
     case "resume":
       console.log(resume(ctx));
       return 0;
+    case "container": {
+      if (args[0] !== "build") {
+        console.log(t("cli.container.usage"));
+        return 2;
+      }
+      console.log(t("cli.container.done", { image: buildImage(containerDir) }));
+      return 0;
+    }
     case "status": {
       const s = status(ctx);
       const row = (key: string, value: string | number) =>
