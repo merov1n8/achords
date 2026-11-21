@@ -16,9 +16,13 @@ export {
   loadCatalog,
   type PublishMode,
   publishMode,
+  type SiteStatus,
   scopeRefusal,
   scopeTargets,
   secretRefs,
+  siteCredentials,
+  siteSlug,
+  siteStatus,
 } from "./catalog.ts";
 export * from "./check.ts";
 export {

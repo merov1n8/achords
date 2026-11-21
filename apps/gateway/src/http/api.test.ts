@@ -19,6 +19,7 @@ import {
   startRun,
   upsertAgent,
 } from "@achords/core";
+import { loadCatalog } from "@achords/policy";
 import { openVault, type Vault } from "@achords/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMcpTickets, createRunTokens } from "../mcp/tokens.ts";
@@ -146,6 +147,8 @@ describe("HTTP API", () => {
         projectsDir,
         home: runDir,
         runDir,
+        catalog: () =>
+          loadCatalog(new URL("../../../../seed/catalog/", import.meta.url).pathname, "/none"),
         integrations: () => [
           {
             id: "ga4",
@@ -160,6 +163,8 @@ describe("HTTP API", () => {
             projectsScoped: [],
             ready: false,
             testable: true,
+            sites: [],
+            kind: "account" as const,
           },
         ],
         transcriber: {
@@ -434,6 +439,85 @@ describe("HTTP API", () => {
       body: JSON.stringify({ integrations: { "Bad Key": ["x"] } }),
     });
     expect(bad.status).toBe(400);
+  });
+
+  it("WordPress sites per project: list with credential status, add and remove (ADR-0047)", async () => {
+    const { call } = await pair();
+    await call("/api/projects", {
+      method: "POST",
+      body: '{"slug":"acme","name":"Acme","workspace":"web-clients"}',
+    });
+    const path = "/api/projects/acme/sites/wordpress";
+    expect(await (await call(path)).json()).toEqual({
+      integration: "wordpress",
+      channel: "wordpress",
+      sites: [],
+    });
+    const add = (url: string, at = path) =>
+      call(at, { method: "POST", body: JSON.stringify({ url }) });
+    expect((await add("https://Acme.example/")).status).toBe(201);
+    expect((await add("https://acme.example")).status).toBe(409);
+    for (const bad of [
+      "ftp://x.example",
+      "not a url",
+      "https://u:p@x.example",
+      "https://x.example/?a=1",
+    ]) {
+      expect((await add(bad)).status, bad).toBe(400);
+    }
+    const shop = await add("https://shop.acme.example");
+    // Old single-site ids cover the first site; the others need their own.
+    vault.set("wordpress-user-acme", "editor", "test");
+    vault.set("wordpress-password-acme", "app-password-value-1234", "test");
+    vault.set("wordpress-user-acme-shop-acme-example", "editor", "test");
+    expect(shop.status).toBe(201);
+    const listed = await (await call(path)).text();
+    expect(listed).not.toContain("app-password-value");
+    expect(JSON.parse(listed).sites).toEqual([
+      {
+        url: "https://acme.example",
+        secrets: {
+          user: "wordpress-user-acme-acme-example",
+          password: "wordpress-password-acme-acme-example",
+        },
+        missing: [],
+        legacy: true,
+        ready: true,
+      },
+      {
+        url: "https://shop.acme.example",
+        secrets: {
+          user: "wordpress-user-acme-shop-acme-example",
+          password: "wordpress-password-acme-shop-acme-example",
+        },
+        missing: ["wordpress-password-acme-shop-acme-example"],
+        legacy: false,
+        ready: false,
+      },
+    ]);
+    // Other account lists of the project stay as they were.
+    expect(await (await call("/api/projects/acme")).json()).toMatchObject({
+      integrations: { wordpress: ["https://acme.example", "https://shop.acme.example"] },
+    });
+    const del = await call(`${path}/${encodeURIComponent("https://acme.example")}`, {
+      method: "DELETE",
+    });
+    expect(((await del.json()) as { sites: { url: string }[] }).sites.map((s) => s.url)).toEqual([
+      "https://shop.acme.example",
+    ]);
+    expect(
+      (await call(`${path}/${encodeURIComponent("https://nope.example")}`, { method: "DELETE" }))
+        .status,
+    ).toBe(404);
+    // Own accounts hold sites the same way; unknown projects and integrations without sites don't.
+    expect((await add("https://mine.example", "/api/projects/own/sites/wordpress")).status).toBe(
+      201,
+    );
+    expect(await (await call("/api/accounts")).json()).toEqual({
+      integrations: { wordpress: ["https://mine.example"] },
+    });
+    expect((await call("/api/projects/nope/sites/wordpress")).status).toBe(404);
+    expect((await call("/api/projects/acme/sites/blender")).status).toBe(404);
   });
 
   it("budgets: read and set per provider, numbers only (Phase 4)", async () => {

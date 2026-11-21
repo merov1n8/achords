@@ -1,19 +1,34 @@
 # Builtin server over the WordPress REST API (no plugin needed on the site).
-# Per client project: the site address as the project's "wordpress" account (web: Projects → Edit →
-# Accounts; not a secret, so links in messages stay readable), and in the vault:
-#                     achords secret set wordpress-user-<project>     (the WordPress user name)
-#                     achords secret set wordpress-password-<project> (Users > Profile > Application Passwords)
+# Per client project: its site addresses in the project's "wordpress" account list (web: Projects
+# → Edit → Accounts, or POST /api/projects/<project>/sites/wordpress; not secrets, so links in
+# messages stay readable). A project may have several sites (ADR-0047); each has its own
+# credentials in the vault, <site> being the address without https://, lowercased, other
+# characters as dashes (https://www.acme.example → www-acme-example):
+#   achords secret set wordpress-user-<project>-<site>     (the WordPress user name)
+#   achords secret set wordpress-password-<project>-<site> (Users > Profile > Application Passwords)
+# The older wordpress-user-<project> / wordpress-password-<project> still apply to the first site.
+# A site without credentials is left out of the run; the others work.
 id: wordpress
 name: WordPress
 description: Read posts and pages, create drafts. Publishing only by the owner.
 builtin: wordpress
-env:
-  WP_URL: "{account:wordpress}"
-  WP_USER: "vault:wordpress-user-{project}"
-  WP_APP_PASSWORD: "vault:wordpress-password-{project}"
+sites:
+  channel: wordpress
+  env: WP_SITES
+  secrets:
+    user: "vault:wordpress-user-{project}-{site}"
+    password: "vault:wordpress-password-{project}-{site}"
+  first:
+    user: "vault:wordpress-user-{project}"
+    password: "vault:wordpress-password-{project}"
 tools:
   read: [site_info, list_posts, get_post]
   write: [create_draft]
-# Connection test (web Integrations page).
+# Every call names its site (one of the project's); with one site it may be left out.
+scope:
+  args: [site]
+  optional: true
+# Connection test (web Integrations page): run once per site.
 test:
   tool: site_info
+  args: { site: "{target}" }

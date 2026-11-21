@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -52,6 +53,23 @@ export const catalogEntrySchema = z
         // Project account channels holding the allowed values (default: the entry's id), e.g.
         // [facebook, instagram] for Meta page and Instagram account ids.
         channels: z.array(z.string().regex(ID)).optional(),
+        // The argument may be left out when the project has exactly one target (the server
+        // then uses the only one it was given), e.g. a WordPress site.
+        optional: z.boolean().default(false),
+      })
+      .strict()
+      .optional(),
+    // Several targets with their own credentials (ADR-0047), e.g. a client's WordPress sites:
+    // each address in the project's `channel` list has its own vault ids (`{site}` = slug of
+    // the address). The server gets `env` = JSON [{url, ...secrets}] of the sites whose
+    // credentials are set; the others are left out of the run.
+    sites: z
+      .object({
+        channel: z.string().regex(ID),
+        env: z.string().regex(ENV),
+        secrets: z.record(z.string(), z.string().regex(VAULT_REF)),
+        // Ids from before several sites: used for the first site when its own are not set.
+        first: z.record(z.string(), z.string().regex(VAULT_REF)).optional(),
       })
       .strict()
       .optional(),
@@ -66,6 +84,16 @@ export const catalogEntrySchema = z
         ctx.addIssue({ code: "custom", path, message: "invalid vault reference" });
       }
     };
+    if (e.sites?.first) {
+      const keys = (r: Record<string, string>) => Object.keys(r).sort().join(",");
+      if (keys(e.sites.first) !== keys(e.sites.secrets)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["sites", "first"],
+          message: "same fields as secrets",
+        });
+      }
+    }
     for (const [key, v] of Object.entries(e.env)) check(v, ["env", key]);
     for (const [key, fields] of Object.entries(e.files)) {
       for (const [field, v] of Object.entries(fields)) check(v, ["files", key, field]);
@@ -104,14 +132,19 @@ export function accountRefs(entry: CatalogEntry): string[] {
     ...Object.values(entry.env),
     ...Object.values(entry.files).flatMap((f) => Object.values(f)),
   ];
-  return [...new Set(values.map(accountRef).filter((c): c is string => c !== undefined))];
+  const channels = values.map(accountRef).filter((c): c is string => c !== undefined);
+  return [...new Set([...channels, ...(entry.sites ? [entry.sites.channel] : [])])];
 }
 
-/** Vault ids an entry needs, with `{project}` filled in (or left as is without a project). */
+/**
+ * Vault ids an entry needs, with `{project}` filled in (or left as is without a project).
+ * Per-site ids keep their `{site}`.
+ */
 export function secretRefs(entry: CatalogEntry, project?: string): string[] {
   const values = [
     ...Object.values(entry.env),
     ...Object.values(entry.files).flatMap((f) => Object.values(f)),
+    ...Object.values(entry.sites?.secrets ?? {}),
   ];
   return values
     .filter((v) => v.startsWith("vault:"))
@@ -156,6 +189,8 @@ export interface CallScope {
   strip?: string | undefined;
   /** The project's own values (properties, sites, pages). */
   allowed: string[];
+  /** The argument may be left out in this run (the project has exactly one target). */
+  optional?: boolean | undefined;
 }
 
 /** Why a tool call leaves the project's scope, or undefined when it may pass. */
@@ -174,7 +209,7 @@ export function scopeRefusal(
     values.push(...(Array.isArray(v) ? v : [v]));
   }
   if (!values.length) {
-    return scope.free.includes(tool)
+    return scope.free.includes(tool) || scope.optional
       ? undefined
       : `${tool} is not limited to this project's ${scope.args[0]}; use a tool that takes one`;
   }
@@ -206,6 +241,13 @@ export interface IntegrationStatus {
   ready: boolean;
   /** Has a connection test (one read call). */
   testable: boolean;
+  /** Entries with several sites (ADR-0047): every project site and the vault ids it lacks. */
+  sites: { project: string; url: string; ready: boolean; missing: string[] }[];
+  /**
+   * For grouping on the web page: one owner-wide sign-in shared by all work ("account"),
+   * credentials per client ("client"), or nothing to sign in to ("local").
+   */
+  kind: "account" | "client" | "local";
 }
 
 /** What an integration still needs: program on the service PATH, vault secrets, project setup. */
@@ -224,13 +266,28 @@ export function integrationStatus(
     const accounts = accountRefs(entry);
     const perProject = refs.some((r) => r.includes("{project}")) || accounts.length > 0;
     const missingSecrets = refs
-      .filter((r) => !r.includes("{project}"))
+      .filter((r) => !r.includes("{project}") && !r.includes("{site}"))
       .map(vaultId)
       .filter((id) => !hasSecret(id));
+    const sites = entry.sites
+      ? projectList.flatMap((p) =>
+          siteStatus(
+            entry,
+            p.slug,
+            p.integrations[entry.sites?.channel ?? ""] ?? [],
+            hasSecret,
+          ).map((s) => ({ project: p.slug, url: s.url, ready: s.ready, missing: s.missing })),
+        )
+      : [];
     const projectsReady = perProject
       ? projectList
-          .filter((p) => secretRefs(entry, p.slug).every((r) => hasSecret(vaultId(r))))
+          .filter((p) =>
+            secretRefs(entry, p.slug)
+              .filter((r) => !r.includes("{site}"))
+              .every((r) => hasSecret(vaultId(r))),
+          )
           .filter((p) => accounts.every((c) => p.integrations[c]?.length))
+          .filter((p) => !entry.sites || sites.some((s) => s.project === p.slug && s.ready))
           .map((p) => p.slug)
       : [];
     const projectsScoped = entry.scope
@@ -249,6 +306,8 @@ export function integrationStatus(
       scoped: entry.scope !== undefined,
       projectsScoped,
       testable: entry.test !== undefined,
+      sites,
+      kind: entry.sites || perProject ? "client" : refs.length > 0 ? "account" : "local",
       ready:
         commandFound &&
         missingSecrets.length === 0 &&
@@ -279,5 +338,77 @@ export function scopeTargets(
   entry: CatalogEntry,
   accounts: Record<string, string[]> | undefined,
 ): string[] {
-  return (entry.scope?.channels ?? [entry.id]).flatMap((c) => accounts?.[c] ?? []);
+  return (entry.scope?.channels ?? [entry.sites?.channel ?? entry.id]).flatMap(
+    (c) => accounts?.[c] ?? [],
+  );
+}
+
+/** `{site}` in a per-site vault id: the address without scheme, lowercased, dashes elsewhere. */
+export function siteSlug(url: string): string {
+  return url
+    .replace(/^[a-z]+:\/\//i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Vault ids are at most 64 characters; a longer one is cut and keeps a hash of the whole id.
+const fitId = (id: string) =>
+  id.length <= 64
+    ? id
+    : `${id.slice(0, 55).replace(/-+$/, "")}-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
+
+/**
+ * Vault ids (field → id) one site may use, in the order they are tried: its own, then for the
+ * first site (`index` 0) the ids from before several sites.
+ */
+export function siteCredentials(
+  entry: CatalogEntry,
+  project: string,
+  url: string,
+  index: number,
+): Record<string, string>[] {
+  if (!entry.sites) return [];
+  const ids = (refs: Record<string, string>) =>
+    Object.fromEntries(
+      Object.entries(refs).map(([field, ref]) => [
+        field,
+        fitId(
+          ref
+            .slice("vault:".length)
+            .replaceAll("{project}", project)
+            .replaceAll("{site}", siteSlug(url)),
+        ),
+      ]),
+    );
+  const { secrets, first } = entry.sites;
+  return [ids(secrets), ...(index === 0 && first ? [ids(first)] : [])];
+}
+
+export interface SiteStatus {
+  url: string;
+  /** Vault ids to set for this site (field → id). */
+  secrets: Record<string, string>;
+  /** Ids of `secrets` not set yet (empty once the site is ready). */
+  missing: string[];
+  /** Ready through the ids from before several sites (first site only). */
+  legacy: boolean;
+  ready: boolean;
+}
+
+/** Per site of a project: which credentials are set (never their values). */
+export function siteStatus(
+  entry: CatalogEntry,
+  project: string,
+  urls: string[],
+  hasSecret: (id: string) => boolean,
+): SiteStatus[] {
+  return urls.map((url, i) => {
+    const [own = {}, legacy] = siteCredentials(entry, project, url, i);
+    const ownMissing = Object.values(own).filter((id) => !hasSecret(id));
+    const viaLegacy =
+      ownMissing.length > 0 && legacy !== undefined && Object.values(legacy).every(hasSecret);
+    const ready = ownMissing.length === 0 || viaLegacy;
+    return { url, secrets: own, missing: ready ? [] : ownMissing, legacy: viaLegacy, ready };
+  });
 }
