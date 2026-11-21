@@ -145,6 +145,17 @@ describe("cli-claude adapter", () => {
     expect(process.env.ACHORDS_TEST_SECRET).toBeUndefined();
   });
 
+  it("uses an API key only in API mode, never a stray one on a subscription (Phase 4)", async () => {
+    const key = { ANTHROPIC_API_KEY: "sk-ant-test" };
+    await cliClaude({
+      command: [process.execPath, FAKE],
+      env: { ...key, FAKE_CLAUDE_RECORD: record },
+    }).run(req());
+    expect(JSON.parse(readFileSync(record, "utf8")).anthropicKey).toBeNull();
+    await provider().run(req({ billing: "api", env: key }));
+    expect(JSON.parse(readFileSync(record, "utf8")).anthropicKey).toBe("sk-ant-test");
+  });
+
   it("maps CLI-reported errors and crashes to failed results", async () => {
     const err = await provider("error").run(req());
     expect(err).toMatchObject({ ok: false, stopReason: "error" });

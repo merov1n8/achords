@@ -24,6 +24,11 @@ export interface RunRequest {
   signal?: AbortSignal;
   /** Extra environment for the child only (broker-injected credentials). */
   env?: Record<string, string>;
+  /**
+   * Phase 4: who pays. "api" runs on the API key in `env` (the CLI's own login stays untouched);
+   * default "subscription" runs on the CLI's login and never on a stray key.
+   */
+  billing?: "subscription" | "api";
   /** Called with the child PID (= its process group id) so it can be recorded for `achords kill`. */
   onSpawn?: (pid: number) => void;
   /** The agent's own checklist changed (done of total, the step in progress). */

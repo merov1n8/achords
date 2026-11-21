@@ -43,3 +43,4 @@
 - [ADR-0041: Owner-approved changes to existing agents](0041-owner-approved-agent-changes.md)
 - [ADR-0042: The owner's own accounts for work without a client project](0042-own-accounts.md)
 - [ADR-0043: Auto-update from the public main branch](0043-auto-update-from-main.md)
+- [ADR-0044: Subscription or API key per provider, through the official CLIs](0044-subscription-or-api-per-provider.md)

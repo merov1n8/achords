@@ -23,7 +23,7 @@ import {
   loadProjects,
   ownProject,
 } from "@achords/policy";
-import { cliClaude, cliCodex, localOpenAI } from "@achords/providers";
+import { CODEX_API_KEY_ENV, cliClaude, cliCodex, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
@@ -53,6 +53,13 @@ const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
 const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
 const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
+// Phase 4 providers: vault key and the variable each official CLI reads in API mode.
+export const BILLING: Record<string, { label: string; key: string; env: string }> = {
+  "cli-claude": { label: "Claude", key: "anthropic-api-key", env: "ANTHROPIC_API_KEY" },
+  "cli-codex": { label: "OpenAI", key: "openai-api-key", env: CODEX_API_KEY_ENV },
+  "cli-gemini": { label: "Google Gemini", key: "gemini-api-key", env: "GEMINI_API_KEY" },
+};
+
 // launchd names the job in XPC_SERVICE_NAME, our systemd unit sets ACHORDS_SERVICE: only the
 // installed service auto-updates (never tests, CI or a gateway started by hand).
 const AS_SERVICE =
@@ -171,7 +178,22 @@ export function runGateway(home: string): Promise<number> {
   };
   let stopForUpdate: ((code: number) => Promise<void>) | undefined;
 
+  // Phase 4: subscription or API key per provider; the key goes only to that run's CLI.
+  const billing = (provider: string) => {
+    const p = BILLING[provider];
+    if (!p || getSetting(db, `billing.${provider}`) !== "api")
+      return { mode: "subscription" as const };
+    if (!existsSync(paths.vaultDb) || !getVault().status(p.key).set) {
+      throw new Error(`API mode for ${p.label} needs its API key (Settings → Model access)`);
+    }
+    return {
+      mode: "api" as const,
+      env: { [p.env]: getVault().resolve(p.key, `provider:${provider}`) },
+    };
+  };
+
   const orchestrator = createOrchestrator({
+    billing,
     db,
     home,
     hub,
@@ -350,6 +372,20 @@ export function runGateway(home: string): Promise<number> {
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
           home,
+          billing: {
+            list: () =>
+              Object.entries(BILLING).map(([provider, p]) => ({
+                provider,
+                label: p.label,
+                mode: getSetting(db, `billing.${provider}`) === "api" ? "api" : "subscription",
+                keyId: p.key,
+                keySet: existsSync(paths.vaultDb) && getVault().status(p.key).set,
+              })),
+            setMode: (provider, mode) => {
+              if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
+              setSetting(db, `billing.${provider}`, mode);
+            },
+          },
           update: {
             status: async () => {
               const parse = (key: string) => {
