@@ -227,7 +227,7 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
     <div key={th.id} class="threadrow">
       <div class="row">
         <a class={`sub grow ${th.id === props.activeId ? "active" : ""}`} href={`#/chat/${th.id}`}>
-          {th.pinned ? "📌 " : ""}
+          {th.pinned && <Pin class="icon pin" aria-label={t("chats.pinned")} />}
           {th.title ?? t("chat.untitled")}
         </a>
         <ThreadMenu thread={th} onChange={threads.refresh} />

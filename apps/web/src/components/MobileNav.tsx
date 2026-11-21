@@ -14,6 +14,7 @@ import {
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { t } from "../i18n.ts";
+import { useBackdropClose } from "./backdrop.ts";
 import { Mark } from "./Mark.tsx";
 
 // Phones (< 768px): a sticky top bar, a bottom tab bar with four sections + More, and a bottom
@@ -163,6 +164,7 @@ export function MoreSheet(props: {
   device?: string | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const backdrop = useBackdropClose(ref, props.onClose);
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
@@ -176,15 +178,12 @@ export function MoreSheet(props: {
     </a>
   );
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: the backdrop click mirrors Escape, which the native dialog handles
     <dialog
       ref={ref}
       class="more-sheet"
       aria-label={t("nav.more")}
       onClose={props.onClose}
-      onClick={(e) => {
-        if (e.target === ref.current) props.onClose();
-      }}
+      {...backdrop}
     >
       <span class="grabber" />
       <div class="grid">
