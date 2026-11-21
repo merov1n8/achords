@@ -154,7 +154,7 @@ function Conversation(props: {
               {t("nav.chat")}
               <span aria-hidden="true"> / </span>
             </span>
-            {thread?.title ?? t("chat.untitled")}
+            <TitleEdit threadId={threadId} title={thread?.title ?? ""} onError={setError} />
           </h1>
           {s && (
             <div class="status muted small">
@@ -193,11 +193,17 @@ function Conversation(props: {
       )}
       <div class="messages">
         {list.map((m) => (
-          <div key={m.id} class={`msg ${m.role}`}>
-            <div class="meta">
-              {m.role === "user" ? t("chat.you") : (m.author ?? m.role)} · {m.channel} ·{" "}
-              {ago(m.createdAt)}
-            </div>
+          <div
+            key={m.id}
+            class={`msg ${m.role}`}
+            title={m.role === "user" ? `${m.channel} · ${ago(m.createdAt)}` : undefined}
+          >
+            {/* Your own bubble shows only the text (design); the time is in its tooltip. */}
+            {m.role !== "user" && (
+              <div class="meta">
+                {m.author ?? m.role} · {m.channel} · {ago(m.createdAt)}
+              </div>
+            )}
             <div class="content">{m.content}</div>
             {m.actions && (
               <div class="actions">
@@ -310,5 +316,62 @@ function ProjectPicker(props: {
         ))}
       </select>
     </label>
+  );
+}
+
+/** The chat title in the header: click to rename in place (Enter saves, Escape cancels). */
+function TitleEdit(props: {
+  threadId: string;
+  title: string;
+  onError: (m: string | undefined) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(props.title);
+  const [shown, setShown] = useState<string>();
+  const title = shown ?? props.title;
+  const save = async () => {
+    setEditing(false);
+    const next = value.trim();
+    if (!next || next === title) return;
+    try {
+      await api(`/api/threads/${props.threadId}`, { method: "PUT", body: { title: next } });
+      setShown(next);
+    } catch (err) {
+      props.onError((err as Error).message);
+    }
+  };
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        class="title-edit"
+        title={t("chat.renameHint")}
+        onClick={() => {
+          setValue(title);
+          setEditing(true);
+        }}
+      >
+        {title || t("chat.untitled")}
+      </button>
+    );
+  }
+  return (
+    <input
+      class="input title-input"
+      // biome-ignore lint/a11y/noAutofocus: the owner just clicked the title to edit it
+      autoFocus
+      maxLength={200}
+      value={value}
+      aria-label={t("chat.rename")}
+      onInput={(e) => setValue(e.currentTarget.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          setValue(title);
+          setEditing(false);
+        }
+      }}
+    />
   );
 }

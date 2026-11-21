@@ -17,6 +17,7 @@ import {
   type Db,
   enqueue,
   finishRun,
+  getSetting,
   getThread,
   listMessages,
   openCoreDatabase,
@@ -559,8 +560,10 @@ describe("HTTP API", () => {
     expect(await ids("")).not.toContain(b.id);
     expect(await ids("?archived=1")).toEqual([b.id]);
     expect((await put("nope", { pinned: true })).status).toBe(404);
+    // The Telegram chat can be deleted too: Telegram starts a fresh chat with its next message.
     setSetting(db, "telegram.thread_id", a.id);
-    expect((await call(`/api/threads/${a.id}`, { method: "DELETE" })).status).toBe(409);
+    expect((await call(`/api/threads/${a.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(getSetting(db, "telegram.thread_id")).toBe("");
     expect((await call(`/api/threads/${b.id}`, { method: "DELETE" })).status).toBe(200);
     expect(await ids("?archived=1")).toEqual([]);
   });

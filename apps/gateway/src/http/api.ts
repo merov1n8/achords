@@ -421,11 +421,9 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/threads\/([\w-]{1,64})$/,
       ({ params }) => {
         const id = params[0] as string;
-        // Telegram writes into this one; it can be archived, not deleted.
-        if (getSetting(db, "telegram.thread_id") === id) {
-          throw new HttpError(409, "this is the Telegram chat; archive it instead");
-        }
         if (!deleteThread(db, id)) throw new HttpError(404, "no such chat");
+        // Telegram wrote into this one: its next message starts a fresh chat.
+        if (getSetting(db, "telegram.thread_id") === id) setSetting(db, "telegram.thread_id", "");
         log(`chat deleted in the web UI: ${id}`);
         return { ok: true };
       },
