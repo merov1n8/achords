@@ -107,7 +107,7 @@ function OwnAccounts(props: { onSaved: () => void }) {
     <form class="panel gap-top" onSubmit={save}>
       <h2>{t("integrations.own")}</h2>
       <p class="muted small">{t("integrations.ownHelp")}</p>
-      <Accounts rows={rows} onChange={setRows} />
+      <Accounts rows={rows} onChange={setRows} help={t("integrations.ownRowsHelp")} />
       <WordPressConnection slug="own" />
       <button type="submit" class="btn primary">
         {t("common.save")}
