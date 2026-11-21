@@ -9,7 +9,9 @@ import { createInterface } from "node:readline";
 import { type CallScope, scopeRefusal } from "@achords/policy";
 
 const HUB = process.env.ACHORDS_HUB_URL ?? "";
-const TICKET = process.env.ACHORDS_MCP_TICKET ?? "";
+// Under codex each launcher's ticket has its own name, given in ACHORDS_MCP_TICKET_VAR (ADR-0040).
+const TICKET_VAR = process.env.ACHORDS_MCP_TICKET_VAR ?? "";
+const TICKET = process.env.ACHORDS_MCP_TICKET ?? process.env[TICKET_VAR] ?? "";
 
 const res = await fetch(`${HUB}/api/agent/mcp-env`, {
   method: "POST",
@@ -46,7 +48,13 @@ const cleanup = () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 };
 
-const { ACHORDS_MCP_TICKET: _t, ACHORDS_HUB_URL: _h, ...inherited } = process.env;
+const {
+  ACHORDS_MCP_TICKET: _t,
+  ACHORDS_HUB_URL: _h,
+  ACHORDS_MCP_TICKET_VAR: _v,
+  ...inherited
+} = process.env;
+if (TICKET_VAR) delete inherited[TICKET_VAR];
 const { scope, publish, untrusted } = launch;
 const proxied = Boolean(scope || publish || untrusted);
 const child = spawn(launch.command, launch.args, {

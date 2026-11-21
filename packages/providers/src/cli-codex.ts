@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ModelProvider, RunRequest, RunResult, Usage } from "./types.ts";
@@ -12,6 +12,106 @@ import type { ModelProvider, RunRequest, RunResult, Usage } from "./types.ts";
 export interface CliCodexOptions {
   command?: [string, ...string[]];
   env?: Record<string, string>;
+  /** Host layout for the sandbox profile (tests); defaults from this machine. */
+  host?: CodexHost;
+}
+
+export interface CodexHost {
+  home: string;
+  /** The codex CLI's own install (it re-runs itself inside the sandbox). */
+  codexPackages: string;
+  /** PATH folders: tools like ffmpeg that live under home stay runnable. */
+  path: string[];
+}
+
+const defaultHost = (): CodexHost => ({
+  home: homedir(),
+  codexPackages: join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "packages"),
+  path: (process.env.PATH ?? "").split(":").filter(Boolean),
+});
+
+// Values that must never appear on the command line: they reach the MCP server through the
+// codex process environment (`env_vars`), and the agent's shell does not inherit them.
+const SECRET_ENV = /TOKEN|TICKET|SECRET|PASSWORD|KEY/;
+const toml = (v: unknown): string =>
+  Array.isArray(v)
+    ? `[${v.map(toml).join(", ")}]`
+    : typeof v === "object" && v !== null
+      ? `{ ${Object.entries(v)
+          .map(([k, x]) => `${JSON.stringify(k)} = ${toml(x)}`)
+          .join(", ")} }`
+      : JSON.stringify(v);
+
+/** Folders from the run's scoped CLI rules (ADR-0010): Read(//dir/**) and Edit(//dir/**). */
+function scopedDirs(allowedTools: string[]): { read: string[]; write: string[] } {
+  const pick = (tool: string) =>
+    allowedTools
+      .map((r) => new RegExp(`^${tool}\\(/(/.+)/\\*\\*\\)$`).exec(r)?.[1])
+      .filter((d): d is string => d !== undefined);
+  return { read: pick("Read"), write: pick("Edit") };
+}
+
+/**
+ * Filesystem profile (ADR-0040 stage 2): the system readable, the user's home denied except the
+ * run's own folders, PATH tools and codex itself; network only with the open web.
+ */
+export function codexProfile(req: RunRequest, host: CodexHost) {
+  const writes = req.tools.some((t) => WRITERS.has(t));
+  const dirs = scopedDirs(req.allowedTools);
+  const fs: Record<string, "read" | "write" | "deny"> = { "/": "read", [host.home]: "deny" };
+  for (const d of host.path) if (d.startsWith(`${host.home}/`)) fs[d] = "read";
+  fs[host.codexPackages] = "read";
+  for (const d of [req.cwd, ...dirs.read]) fs[d] = "read";
+  if (writes) for (const d of [req.cwd, ...dirs.write]) fs[d] = "write";
+  return { fs, network: req.allowedTools.includes("WebFetch") };
+}
+
+/** The per-run MCP servers (Claude config file shape) as codex config, secrets kept off argv. */
+export function codexMcp(req: RunRequest): { args: string[]; env: Record<string, string> } {
+  if (!req.mcpConfigPath) return { args: [], env: {} };
+  const servers =
+    (
+      JSON.parse(readFileSync(req.mcpConfigPath, "utf8")) as {
+        mcpServers?: Record<
+          string,
+          { command: string; args?: string[]; env?: Record<string, string> }
+        >;
+      }
+    ).mcpServers ?? {};
+  const args: string[] = [];
+  const env: Record<string, string> = {};
+  for (const [id, server] of Object.entries(servers)) {
+    const inline: Record<string, string> = {};
+    const forward: string[] = [];
+    for (const [k, v] of Object.entries(server.env ?? {})) {
+      if (!SECRET_ENV.test(k)) {
+        inline[k] = v;
+        continue;
+      }
+      // One name per server: several launchers each need their own ticket.
+      const name = `${k}_${id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+      env[name] = v;
+      inline[`${k}_VAR`] = name;
+      forward.push(name);
+    }
+    // Only the tools this run was granted, without a prompt (the gateway decides).
+    const prefix = `mcp__${id}__`;
+    const tools = req.allowedTools
+      .filter((r) => r.startsWith(prefix))
+      .map((r) => r.slice(prefix.length));
+    args.push(
+      "-c",
+      `mcp_servers.${id}=${toml({
+        command: server.command,
+        args: server.args ?? [],
+        env: inline,
+        env_vars: forward,
+        enabled_tools: tools,
+        default_tools_approval_mode: "approve",
+      })}`,
+    );
+  }
+  return { args, env };
 }
 
 const KILL_GRACE_MS = 3000;
@@ -23,11 +123,14 @@ export function cliCodex(opts: CliCodexOptions = {}): ModelProvider {
   return { id: "cli-codex", run: (req) => runCodex(bin, lead, req, opts) };
 }
 
-/** Sandbox from the run's tools: writing tools → its own folders writable, else read-only. */
-export function codexArgs(req: RunRequest, files: { last: string; schema?: string }): string[] {
-  const writes = req.tools.some((t) => WRITERS.has(t));
-  // The open web only where the owner granted it (bare WebFetch rule, ADR-0035).
-  const network = req.allowedTools.includes("WebFetch");
+/** Command line: a permissions profile instead of `-s` (which would override it). */
+export function codexArgs(
+  req: RunRequest,
+  files: { last: string; schema?: string },
+  host: CodexHost = defaultHost(),
+  mcp: { args: string[]; env: Record<string, string> } = { args: [], env: {} },
+): string[] {
+  const profile = codexProfile(req, host);
   const args = [
     "exec",
     "--json",
@@ -40,16 +143,21 @@ export function codexArgs(req: RunRequest, files: { last: string; schema?: strin
     req.model,
     "-C",
     req.cwd,
-    "-s",
-    writes ? "workspace-write" : "read-only",
     "-c",
     'approval_policy="never"',
     "-c",
-    `sandbox_workspace_write.network_access=${network}`,
+    'default_permissions="achords"',
+    "-c",
+    `permissions.achords.filesystem=${toml(profile.fs)}`,
+    "-c",
+    `permissions.achords.network.enabled=${profile.network}`,
+    // The agent's shell never sees achords tokens or tickets, whatever their name.
+    "-c",
+    `shell_environment_policy.exclude=${toml(["ACHORDS_*", ...Object.keys(mcp.env)])}`,
+    ...mcp.args,
     "-o",
     files.last,
   ];
-  if (writes) for (const dir of req.addDirs ?? []) args.push("--add-dir", dir);
   if (files.schema) args.push("--output-schema", files.schema);
   args.push("-");
   return args;
@@ -88,9 +196,25 @@ function runCodex(
     let stderr = "";
     let stop: RunResult["stopReason"] | undefined;
     let settled = false;
-    const child = spawn(bin, [...lead, ...codexArgs(req, files)], {
+    let mcp: { args: string[]; env: Record<string, string> };
+    try {
+      mcp = codexMcp(req);
+    } catch (err) {
+      rmSync(dir, { recursive: true, force: true });
+      resolve({
+        ok: false,
+        stopReason: "error",
+        text: "",
+        error: `MCP config: ${(err as Error).message}`,
+        usage: empty(),
+        windows: [],
+        durationMs: Date.now() - started,
+      });
+      return;
+    }
+    const child = spawn(bin, [...lead, ...codexArgs(req, files, opts.host ?? defaultHost(), mcp)], {
       cwd: req.cwd,
-      env: { ...process.env, ...opts.env, ...req.env },
+      env: { ...process.env, ...opts.env, ...req.env, ...mcp.env },
       stdio: ["pipe", "pipe", "pipe"],
       detached: true,
     });

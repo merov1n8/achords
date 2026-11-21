@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cliCodex, codexArgs } from "./cli-codex.ts";
+import { cliCodex, codexArgs, codexMcp } from "./cli-codex.ts";
 import type { RunRequest } from "./types.ts";
 
 const FAKE = new URL("./fake-codex.test-helper.mjs", import.meta.url).pathname;
@@ -31,18 +31,82 @@ describe("cli-codex (ADR-0040)", () => {
       env: { FAKE_CODEX_MODE: mode, FAKE_CODEX_RECORD: record },
     });
 
-  it("maps tools to a sandbox and keeps the web off unless granted", () => {
+  const host = {
+    home: "/Users/o",
+    codexPackages: "/Users/o/.codex/packages",
+    path: ["/Users/o/.local/bin", "/usr/bin"],
+  };
+  const fsOf = (args: string[]) =>
+    args.find((a) => a.startsWith("permissions.achords.filesystem="));
+
+  it("denies the home folder except the run's own folders, PATH tools and codex (ADR-0040)", () => {
     const files = { last: "/t/last.txt" };
-    const ro = codexArgs(req(), files);
-    expect(ro).toEqual(expect.arrayContaining(["-s", "read-only", "--ignore-user-config"]));
-    expect(ro).toContain("sandbox_workspace_write.network_access=false");
-    const rw = codexArgs(
-      req({ tools: ["Read", "Edit"], addDirs: ["/x"], allowedTools: ["WebFetch"] }),
+    const ro = codexArgs(
+      req({
+        cwd: "/Users/o/ws",
+        allowedTools: ["Read(//Users/o/ws/**)", "Read(//Users/o/docs/**)"],
+      }),
       files,
+      host,
     );
-    expect(rw).toEqual(expect.arrayContaining(["-s", "workspace-write", "--add-dir", "/x"]));
-    expect(rw).toContain("sandbox_workspace_write.network_access=true");
+    expect(ro).not.toContain("-s"); // -s would override the profile
+    expect(fsOf(ro)).toBe(
+      'permissions.achords.filesystem={ "/" = "read", "/Users/o" = "deny", "/Users/o/.local/bin" = "read", "/Users/o/.codex/packages" = "read", "/Users/o/ws" = "read", "/Users/o/docs" = "read" }',
+    );
+    expect(ro).toContain("permissions.achords.network.enabled=false");
+    expect(ro).toContain('shell_environment_policy.exclude=["ACHORDS_*"]');
+    const rw = codexArgs(
+      req({
+        cwd: "/Users/o/ws",
+        tools: ["Read", "Edit"],
+        allowedTools: ["Edit(//Users/o/ws/**)", "WebFetch"],
+      }),
+      files,
+      host,
+    );
+    expect(fsOf(rw)).toContain('"/Users/o/ws" = "write"');
+    expect(rw).toContain("permissions.achords.network.enabled=true");
     expect(rw.at(-1)).toBe("-");
+  });
+
+  it("passes MCP servers with secrets off the command line and only granted tools", () => {
+    const cfg = join(dir, "mcp.json");
+    writeFileSync(
+      cfg,
+      JSON.stringify({
+        mcpServers: {
+          achords: {
+            command: "node",
+            args: ["hub.ts"],
+            env: {
+              ACHORDS_HUB_URL: "http://h",
+              ACHORDS_RUN_TOKEN: "rt",
+              ACHORDS_TOOLS: "ask_owner",
+            },
+          },
+          blender: {
+            command: "node",
+            args: ["launch.ts"],
+            env: { ACHORDS_HUB_URL: "http://h", ACHORDS_MCP_TICKET: "tk" },
+          },
+        },
+      }),
+    );
+    const { args, env } = codexMcp(
+      req({
+        mcpConfigPath: cfg,
+        allowedTools: ["mcp__achords__ask_owner", "mcp__blender__get_scene_info"],
+      }),
+    );
+    expect(env).toEqual({ ACHORDS_RUN_TOKEN_ACHORDS: "rt", ACHORDS_MCP_TICKET_BLENDER: "tk" });
+    expect(args.join(" ")).not.toMatch(/\brt\b|\btk\b/);
+    expect(args[1]).toBe(
+      'mcp_servers.achords={ "command" = "node", "args" = ["hub.ts"], "env" = { "ACHORDS_HUB_URL" = "http://h", "ACHORDS_RUN_TOKEN_VAR" = "ACHORDS_RUN_TOKEN_ACHORDS", "ACHORDS_TOOLS" = "ask_owner" }, "env_vars" = ["ACHORDS_RUN_TOKEN_ACHORDS"], "enabled_tools" = ["ask_owner"], "default_tools_approval_mode" = "approve" }',
+    );
+    expect(args[3]).toContain('"enabled_tools" = ["get_scene_info"]');
+    // Every forwarded name is hidden from the agent's shell, not only ACHORDS_*.
+    const all = codexArgs(req(), { last: "/t/l" }, host, { args, env: { PROBE_TOKEN_X: "v" } });
+    expect(all).toContain('shell_environment_policy.exclude=["ACHORDS_*", "PROBE_TOKEN_X"]');
   });
 
   it("sends the prompt on stdin (role first) and returns the final message and usage", async () => {

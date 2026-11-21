@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- OpenAI agents, second stage: runs on GPT models can now delegate, ask you and use Blender and Unity, and they only read their own folders (your home folder, SSH keys and the codex login are off limits); client integrations with credentials stay with Claude-run agents. Checked with live codex runs.
 - Change agents by asking: tell the boss "give social access to Meta" or "let web-dev read the WordPress docs"; it posts the exact change in plain words (+ meta, − npm test) with Approve / Reject, and only an approved change is written to agent.yaml, keeping your comments. A proposal made before you edited the file by hand is refused.
 - Test connection on Settings → Integrations: one read call through the same path agents use (for client integrations with a chosen project, e.g. its GA4 property or Facebook page) shows whether the credentials and accounts work.
 - All chats: a checkbox in the table header selects every chat shown.
