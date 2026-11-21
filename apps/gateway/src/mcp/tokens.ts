@@ -49,6 +49,10 @@ export interface McpLaunch {
   publish?: { integration: string; mode: "review" | "auto"; tools: string[]; token: string };
   /** ADR-0038: results carry third-party content; the launcher marks them as data. */
   untrusted?: string;
+  /** Working folder of the server process (the run's folder). */
+  cwd?: string;
+  /** ADR-0050: a remote server over Streamable HTTP instead of `command` (headers resolved). */
+  remote?: { url: string; headers: Record<string, string> };
 }
 
 export interface McpTickets {
