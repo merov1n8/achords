@@ -42,3 +42,4 @@
 - [ADR-0040: OpenAI models through the codex CLI](0040-openai-models-through-codex-cli.md)
 - [ADR-0041: Owner-approved changes to existing agents](0041-owner-approved-agent-changes.md)
 - [ADR-0042: The owner's own accounts for work without a client project](0042-own-accounts.md)
+- [ADR-0043: Auto-update from the public main branch](0043-auto-update-from-main.md)
