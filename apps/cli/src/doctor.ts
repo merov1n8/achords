@@ -11,6 +11,7 @@ import {
   loadAgents,
   loadCatalog,
   loadProjects,
+  ownProject,
 } from "@achords/policy";
 import { installedLaunchdPath, protectedFolderOf } from "./launchd.ts";
 
@@ -358,7 +359,7 @@ export function systemDoctorEnv(
           join(paths.home, "catalog"),
         ),
         loadAgents(join(paths.home, "agents")).values(),
-        loadProjects(join(paths.home, "projects")).values(),
+        [...loadProjects(join(paths.home, "projects")).values(), ownProject(paths.home)],
         (id) => ids.has(id),
         (bin) => path.split(":").some((dir) => dir && existsSync(join(dir, bin))),
       );

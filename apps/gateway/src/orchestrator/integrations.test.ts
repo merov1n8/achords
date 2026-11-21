@@ -200,16 +200,33 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(redeemed[1]).toBeUndefined();
   });
 
-  it("refuses secrets next to a shell, unknown integrations and a missing project", async () => {
+  it("refuses secrets next to a shell and unknown integrations", async () => {
     const shelly = await give("shelly", "acme");
     expect(shelly.status).toBe("failed");
     expect(shelly.error).toMatch(/uses credentials and agent shelly has a shell/);
     const ghost = await give("ghost");
     expect(ghost.error).toMatch(/integration ga4 is not in the catalog/);
-    const noProject = await give("marketer");
-    expect(noProject.error).toMatch(/integration wp needs a project/);
     expect(seen).toEqual([]);
     expect(resolved).toEqual([]);
+  });
+
+  it("work without a client project uses the owner's own accounts (ADR-0042)", async () => {
+    const own = await give("marketer");
+    expect(own.status).toBe("done");
+    expect(resolved).toEqual([["vault:wp-own", "agent:marketer/mcp:wp"]]);
+    // A scoped integration takes the own targets, never another client's.
+    writeFileSync(join(home, "accounts.yaml"), 'integrations:\n  ga: ["999"]\n');
+    const launches: McpLaunch[] = [];
+    const original = tickets.issue.bind(tickets);
+    tickets.issue = (launch) => {
+      launches.push(launch);
+      return original(launch);
+    };
+    await give("analyst");
+    expect(launches[0]?.scope?.allowed).toEqual(["999"]);
+    // A client project without targets does not fall back to the owner's accounts.
+    await give("analyst", "acme");
+    expect(launches).toHaveLength(1);
   });
 
   it("runs builtin servers on the gateway's Node and resolves credential files", async () => {
@@ -344,7 +361,9 @@ describe("integrations in runs (ADR-0034)", () => {
         expect(run.req.allowedTools).not.toContain("mcp__ga__run_report");
       }
       expect(seen[0]?.req.prompt).toMatch(/project.yaml of acme names no targets\): ga/);
-      expect(seen[1]?.req.prompt).toMatch(/no client project\): ga/);
+      expect(seen[1]?.req.prompt).toMatch(
+        /no client project, and your own accounts name none\): ga/,
+      );
     });
   });
 

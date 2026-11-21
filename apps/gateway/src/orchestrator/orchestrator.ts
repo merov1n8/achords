@@ -85,6 +85,8 @@ import {
   loadWorkflow,
   type Manifest,
   manifestChanges,
+  OWN,
+  ownProject,
   type Project,
   parseManifest,
   patchManifestText,
@@ -1108,8 +1110,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (!deps.integrations?.call || !entry)
         return { ok: false, text: `integration ${id} is not available` };
       if (!entry.test) return { ok: false, text: "this integration has no connection test" };
-      const project = slug ? projects().get(slug) : undefined;
-      if (slug && !project) return { ok: false, text: `unknown project ${slug}` };
+      const project = slug && slug !== OWN ? projects().get(slug) : ownProject(home);
+      if (!project) return { ok: false, text: `unknown project ${slug}` };
       const target = scopeTargets(entry, project?.integrations)[0];
       const args = Object.fromEntries(
         Object.entries(entry.test.args).map(([k, v]) => [
@@ -1139,8 +1141,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (!deps.integrations?.call || !entry) return fail(`integration ${id} is not available`);
       // Monitors only read.
       if (!entry.tools.read.includes(tool)) return fail(`${tool} is not a read tool of ${id}`);
-      const project = c.project ? projects().get(String(c.project)) : undefined;
-      if (c.project && !project) return fail(`unknown project ${String(c.project)}`);
+      const project = c.project ? projects().get(String(c.project)) : ownProject(home);
+      if (!project) return fail(`unknown project ${String(c.project)}`);
       let launch: McpLaunch;
       try {
         launch = buildLaunch(entry, "monitor", project, `monitor:${monitor.name}/mcp:${id}`);
@@ -1592,10 +1594,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         if (!granted.ok) throw new Error(granted.reason);
         const agentId = manifest.id;
         const runProject = project;
+        // Work without a client project uses the owner's own accounts (ADR-0042); a client
+        // project only ever its own.
+        const accounts = project ?? ownProject(home);
         // Shared accounts reach every client (ADR-0036): a scoped integration runs only in a
         // project that names its own properties, and the launcher enforces them per call.
         const usable = granted.entries.filter((entry) => {
-          if (!entry.scope || scopeTargets(entry, project?.integrations).length) return true;
+          if (!entry.scope || scopeTargets(entry, accounts.integrations).length) return true;
           unscoped.push(entry.id);
           return false;
         });
@@ -1611,7 +1616,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // ADR-0038: a run that reads the open web never publishes without the owner.
           const openWeb = runManifest.tools.some((x) => x === "WebFetch" || x === "WebSearch");
           const mode = chosen === "auto" && openWeb ? "review" : chosen;
-          const launch = buildLaunch(entry, agentId, runProject);
+          const launch = buildLaunch(entry, agentId, accounts);
           return {
             id: entry.id,
             // Client accounts carry third-party text (comments, queries, posts): marked as data.
@@ -1678,7 +1683,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           ? `This client's own integration targets (calls for anything else are refused): ${scopes.join("; ")}.`
           : "",
         unscoped.length
-          ? `Not available in this run (${project ? `project.yaml of ${project.slug} names no targets` : "no client project"}): ${unscoped.join(", ")}.`
+          ? `Not available in this run (${project ? `project.yaml of ${project.slug} names no targets` : "no client project, and your own accounts name none"}): ${unscoped.join(", ")}.`
           : "",
       ]
         .filter(Boolean)

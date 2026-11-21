@@ -10,7 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createProject, loadProjects, updateProject } from "./projects.ts";
+import {
+  createProject,
+  loadOwnAccounts,
+  loadProjects,
+  ownProject,
+  saveOwnAccounts,
+  updateProject,
+} from "./projects.ts";
 
 describe("projects", () => {
   let dir: string;
@@ -100,5 +107,17 @@ describe("projects", () => {
     expect(readFileSync(join(dir, "acme", "project.yaml"), "utf8")).toMatch(/instagram:/);
     expect(updateProject(dir, "acme", { integrations: {} }).integrations).toEqual({});
     expect(() => updateProject(dir, "acme", { integrations: { "Bad Key": ["x"] } })).toThrow();
+  });
+
+  it("keeps the owner's own accounts outside projects; 'own' is not a project name (ADR-0042)", () => {
+    expect(loadOwnAccounts(dir)).toEqual({});
+    expect(saveOwnAccounts(dir, { facebook: ["1365", " "], ga4: [] })).toEqual({
+      facebook: ["1365"],
+    });
+    expect(loadOwnAccounts(dir)).toEqual({ facebook: ["1365"] });
+    expect(ownProject(dir)).toMatchObject({ slug: "own", integrations: { facebook: ["1365"] } });
+    expect(() => createProject(dir, { slug: "own", name: "x", workspace: "w" })).toThrow(
+      /reserved/,
+    );
   });
 });
