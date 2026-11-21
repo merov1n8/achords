@@ -120,6 +120,23 @@ describe("orchestrator", () => {
     expect(calls[0]?.appendSystemPrompt).toContain("ask");
   });
 
+  it("@agent goes straight to that agent, without the boss", async () => {
+    const { orch, calls } = make(() => result({ text: "kész" }));
+    const t = createThread(db, {});
+    expect(
+      await orch.handleMessage(t.id, "@web-dev nézd meg a kosár hibát\nrészletek", "telegram"),
+    ).toBe("delegate");
+    expect(calls).toHaveLength(0); // no boss run
+    expect(listMessages(db, t.id).at(-1)?.content).toBe("→ web-dev is on it.");
+    const task = db.prepare("SELECT title, description, assignee_agent_id FROM tasks").get();
+    expect(task).toMatchObject({ title: "nézd meg a kosár hibát", assignee_agent_id: "web-dev" });
+    expect(String(task?.description)).toMatch(/részletek[\s\S]*language of this message/);
+    expect(await orch.handleMessage(t.id, "@nobody hello", "web")).toBe("error");
+    expect(listMessages(db, t.id).at(-1)?.content).toMatch(
+      /no agent called nobody. Agents: web-dev/,
+    );
+  });
+
   it("boss proposes an agent change; only the approved diff is written, once (ADR-0041)", async () => {
     const change = {
       agent: "web-dev",
