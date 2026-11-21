@@ -101,6 +101,43 @@ it. This writes their `agent.yaml` `mcp` list (validated first, comments kept); 
 the agents, **Remove** takes the app from every agent. Terminal alternative: add the id to `mcp:`
 in `~/.achords/agents/<id>/agent.yaml`.
 
+## Agents with any website: Apple containers
+
+An agent with `*` in its network list (Agents → Edit → Network) runs in an Apple container: a
+small Linux virtual machine that sees only the agent's own folders (ADR-0051). The checkbox "Run
+in an Apple container" below the network list is on by default; switching it off lets the agent
+reach any website directly on this Mac (`container: false` in `agent.yaml`).
+
+1. Install Apple's container tool once (macOS 26, Apple silicon):
+
+   ```sh
+   brew install container
+   brew services start container      # starts at login from now on
+   container system status            # "running"
+   ```
+
+   If it asks to install a Linux kernel (first start), accept the recommended one.
+
+2. Claude sign-in for container runs: the virtual machine cannot use this Mac's Keychain login.
+   In Terminal run `claude setup-token`, sign in in the browser, and paste the printed token in
+   web Settings → Model access → Claude → **Token for container runs** (stored in the vault as
+   `claude-oauth-token`, never shown again; terminal: `pnpm achords secret set claude-oauth-token`).
+   With the Claude provider on an API key no token is needed. Revoke the token in your Claude
+   account if it leaks; a new one replaces the stored value.
+
+3. The image (Node 22, the claude CLI, git, Python, uv) is built from
+   `seed/container/Dockerfile` on the first container run; that task waits about a minute and
+   then runs. To build it ahead: `pnpm achords container build`. An update that changes the
+   Dockerfile gives the image a new tag, so it is rebuilt on the next container run and the old
+   one is removed. Check: `container image ls` shows `achords-agent:<tag>`.
+
+Container runs use Claude models only for now: an agent with an OpenAI or Gemini model and the
+container on fails with that reason. Apps on this Mac (Blender, Unity) are not reachable from a
+container. Running containers: `container ls` (names `achords-run-…`); `achords kill` stops them,
+by hand `container kill <name>`. The gateway reaches agents in containers on the container
+network's host address (`192.168.64.1`, same port as the web UI): only the agent API, only from
+that network, never from the LAN.
+
 ## WordPress
 
 A project can have several sites (ADR-0047); each has its own WordPress user and application
@@ -183,6 +220,7 @@ mkdir -p ~/.achords/run && touch ~/.achords/run/STOP       # block restarts
 launchctl bootout gui/$(id -u)/dev.achords.gateway        # unload the service
 pkill -KILL -f 'apps/gateway/src/main.ts'                 # kill the gateway
 # agent runs: see `ps -o pid,pgid,command` and `kill -KILL -<pgid>`
+# agent runs in containers: `container ls`, then `container kill achords-run-…`
 ```
 
 Remove `~/.achords/run/STOP` (or run `achords resume`) to allow starting again.

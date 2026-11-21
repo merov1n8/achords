@@ -78,6 +78,9 @@ export function updateAgent(agentsDir: string, id: string, f: AgentFields): void
     if (f.shell) list(doc, ["shell", "allow"], f.shell.allow);
     else doc.deleteIn(["shell"]);
     list(doc, ["network", "allow"], f.network?.allow ?? []);
+    // ADR-0051: written out next to "*" so the owner sees the choice; gone without it.
+    if (f.network?.allow.includes("*")) doc.setIn(["container"], f.container ?? true);
+    else doc.deleteIn(["container"]);
     list(doc, ["delegation", "can_delegate_to"], f.delegation?.can_delegate_to ?? []);
     list(doc, ["delegation", "accepts_from"], f.delegation?.accepts_from ?? []);
     if (f.budget?.per_run_usd) doc.setIn(["budget", "per_run_usd"], f.budget.per_run_usd);
@@ -102,6 +105,8 @@ export interface NewAgent {
   fs?: { read?: string[]; write?: string[] };
   shell?: { allow: string[] };
   network?: { allow: string[] };
+  /** Only with "*" in network.allow (ADR-0051); default true there. */
+  container?: boolean;
   delegation?: { can_delegate_to?: string[]; accepts_from?: string[] };
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   budget?: { per_run_usd?: number };
@@ -128,6 +133,7 @@ export function createAgentFiles(agentsDir: string, a: NewAgent): { id: string }
     fs: { read: a.fs?.read ?? [], write: a.fs?.write ?? [] },
     ...(a.shell ? { shell: a.shell } : {}),
     ...(a.network?.allow.length ? { network: a.network } : {}),
+    ...(a.network?.allow.includes("*") ? { container: a.container ?? true } : {}),
     ...(a.delegation ? { delegation: a.delegation } : {}),
     ...(a.budget?.per_run_usd ? { budget: a.budget } : {}),
     ...(a.effort ? { effort: a.effort } : {}),
@@ -198,6 +204,11 @@ export function patchManifestText(text: string, patch: AgentPatch, source = "age
     doc.setIn(path, fresh);
   }
   if (patch.defaultModel) doc.setIn(["models", "default"], patch.defaultModel);
+  // The container choice only exists next to "*" (ADR-0051).
+  const allow = (
+    doc.getIn(["network", "allow"]) as { toJSON?: () => unknown } | undefined
+  )?.toJSON?.();
+  if (!(Array.isArray(allow) && allow.includes("*"))) doc.deleteIn(["container"]);
   const out = doc.toString({ flowCollectionPadding: false });
   parseManifest(out, source); // throws with field paths if invalid
   return out;
@@ -230,6 +241,10 @@ export function manifestChanges(before: string, after: string): string[] {
   }
   if (a.models.default !== b.models.default) {
     lines.push(`default model: ${a.models.default} → ${b.models.default}`);
+  }
+  if (a.container !== b.container) {
+    const on = (x: boolean) => (x ? "on" : "off");
+    lines.push(`Apple container: ${on(a.container)} → ${on(b.container)}`);
   }
   return lines;
 }

@@ -14,11 +14,23 @@ const HUB = process.env.ACHORDS_HUB_URL ?? "";
 const TICKET_VAR = process.env.ACHORDS_MCP_TICKET_VAR ?? "";
 const TICKET = process.env.ACHORDS_MCP_TICKET ?? process.env[TICKET_VAR] ?? "";
 
-const res = await fetch(`${HUB}/api/agent/mcp-env`, {
-  method: "POST",
-  headers: { authorization: `Bearer ${TICKET}` },
-  signal: AbortSignal.timeout(10_000),
-}).catch(() => undefined);
+// In a container run (ADR-0051) the hub's listener on the container network may come up a moment
+// after the VM: retry while nothing answers. The ticket is only spent once a request arrives.
+let res: Response | undefined;
+for (let i = 0; i < 20; i++) {
+  if (i) await new Promise((r) => setTimeout(r, 250));
+  try {
+    res = await fetch(`${HUB}/api/agent/mcp-env`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TICKET}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    break;
+  } catch (err) {
+    // A timeout may mean the request arrived: never send the ticket twice then.
+    if ((err as Error).name === "TimeoutError") break;
+  }
+}
 if (!res?.ok) {
   process.stderr.write(
     `achords: integration launch refused (${res?.status ?? "hub unreachable"})\n`,

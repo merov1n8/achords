@@ -103,6 +103,24 @@ describe("control", () => {
     after.close();
   });
 
+  it("kill: stops the run containers too (ADR-0051)", () => {
+    const paths = homePaths(home);
+    const report = kill({
+      paths,
+      service: fakeService().svc,
+      killContainers: () => ["achords-run-ab12cd34-1"],
+    });
+    expect(report.steps).toContain("containers stopped: achords-run-ab12cd34-1");
+    const failing = kill({
+      paths,
+      service: fakeService().svc,
+      killContainers: () => {
+        throw new Error("container service down");
+      },
+    });
+    expect(failing.errors).toEqual(["containers: container service down"]);
+  });
+
   it("kill: takes down a foreground gateway via its pidfile", async () => {
     const paths = homePaths(home);
     const main = new URL("../../gateway/src/main.ts", import.meta.url).pathname;

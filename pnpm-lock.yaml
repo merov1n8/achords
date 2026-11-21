@@ -50,6 +50,9 @@ importers:
       '@achords/memory':
         specifier: workspace:*
         version: link:../../packages/memory
+      '@achords/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@achords/policy':
         specifier: workspace:*
         version: link:../../packages/policy

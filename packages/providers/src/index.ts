@@ -11,6 +11,12 @@ export {
   codexProfile,
 } from "./cli-codex.ts";
 export { type CliGeminiOptions, cliGemini, geminiArgs } from "./cli-gemini.ts";
+export {
+  CONTAINER_CPUS,
+  CONTAINER_MEMORY,
+  containerRunArgs,
+  stopContainer,
+} from "./container.ts";
 export { type LocalOpenAIOptions, localOpenAI } from "./local-openai.ts";
 export * from "./types.ts";
 export { stubApiMeter, subscriptionMeter, type UsageMeter, type UsageSnapshot } from "./usage.ts";

@@ -4,7 +4,15 @@ import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
 import { SecretInput } from "./SecretInput.tsx";
 
-type Provider = { provider: string; label: string; mode: string; keyId: string; keySet: boolean };
+type Provider = {
+  provider: string;
+  label: string;
+  mode: string;
+  keyId: string;
+  keySet: boolean;
+  containerTokenId?: string;
+  containerTokenSet?: boolean;
+};
 type Budget = { day: number; month: number; spentDay: number; spentMonth: number };
 
 /** API budget of one provider: warn at 80%, new work waits at 100% (Phase 4). */
@@ -100,6 +108,17 @@ export function ModelAccess() {
           </div>
           {p.mode === "api" && !p.keySet && <p class="error small">{t("access.keyMissing")}</p>}
           <SecretInput id={p.keyId} label={t("access.key")} set={p.keySet} onSaved={list.refresh} />
+          {p.containerTokenId && (
+            <>
+              <SecretInput
+                id={p.containerTokenId}
+                label={t("access.containerToken")}
+                set={p.containerTokenSet ?? false}
+                onSaved={list.refresh}
+              />
+              <p class="muted small">{t("access.containerTokenHelp")}</p>
+            </>
+          )}
           {budgets.data && (
             <BudgetForm
               key={`${p.provider}-${budgets.data[p.provider]?.day}-${budgets.data[p.provider]?.month}`}

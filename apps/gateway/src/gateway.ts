@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, type RequestListener } from "node:http";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -29,6 +29,7 @@ import {
 } from "@achords/policy";
 import { CODEX_API_KEY_ENV, cliClaude, cliCodex, cliGemini, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
+import { containerHost } from "./container.ts";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
 import { createMcpTickets, createRunTokens } from "./mcp/tokens.ts";
@@ -58,12 +59,15 @@ const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
 const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
 const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
+const SEED_CONTAINER = new URL("../../../seed/container/", import.meta.url).pathname;
 // Phase 4 providers: vault key and the variable each official CLI reads in API mode.
 export const BILLING: Record<string, { label: string; key: string; env: string }> = {
   "cli-claude": { label: "Claude", key: "anthropic-api-key", env: "ANTHROPIC_API_KEY" },
   "cli-codex": { label: "OpenAI", key: "openai-api-key", env: CODEX_API_KEY_ENV },
   "cli-gemini": { label: "Google Gemini", key: "gemini-api-key", env: "GEMINI_API_KEY" },
 };
+// ADR-0051: subscription runs in a container sign in with a `claude setup-token` token.
+export const CLAUDE_CONTAINER_TOKEN = "claude-oauth-token";
 
 // launchd names the job in XPC_SERVICE_NAME, our systemd unit sets ACHORDS_SERVICE: only the
 // installed service auto-updates (never tests, CI or a gateway started by hand).
@@ -234,8 +238,44 @@ export function runGateway(home: string): Promise<number> {
     return undefined;
   };
 
+  // ADR-0051: the agent API is also served on the container network's host address, for
+  // agent runs inside Apple containers; the Host allow-list grows when that listener binds.
+  const allowedHosts: string[] = [];
+  let api: { port: number; handler: RequestListener } | undefined;
+  const containers = containerHost({
+    home,
+    dockerfileDir: SEED_CONTAINER,
+    api: () => api,
+    allowHost: (host) => allowedHosts.push(host),
+    log,
+  });
+  containers
+    .cleanup()
+    .then((names) => {
+      if (names.length) log(`container: stopped leftover runs ${names.join(", ")}`);
+    })
+    .catch(() => {});
+
   const orchestrator = createOrchestrator({
     billing,
+    container: {
+      prepare: () => containers.prepare(),
+      // The hub server and the launcher with their dependencies; nothing else of the checkout.
+      codeDirs: [join(REPO, "node_modules"), join(REPO, "packages"), join(REPO, "apps", "gateway")],
+      claudeLogin: () => {
+        if (!existsSync(paths.vaultDb) || !getVault().status(CLAUDE_CONTAINER_TOKEN).set) {
+          throw new Error(
+            "this agent runs in an Apple container, which cannot use this Mac's Claude login. Add a token for container runs in Settings → Model access (run `claude setup-token` in Terminal and paste the result).",
+          );
+        }
+        return {
+          CLAUDE_CODE_OAUTH_TOKEN: getVault().resolve(
+            CLAUDE_CONTAINER_TOKEN,
+            "provider:cli-claude/container",
+          ),
+        };
+      },
+    },
     budget,
     // Price list for CLIs that report tokens only; read per run, so edits apply at once.
     price: (model, usage) => costOf(loadPricing(home), model, usage),
@@ -335,6 +375,7 @@ export function runGateway(home: string): Promise<number> {
         await Promise.race([working, new Promise((r) => setTimeout(r, SHUTDOWN_WAIT_MS))]);
       }
       server.close();
+      containers.close();
       vault?.close();
       memory.close();
       db.close();
@@ -412,126 +453,127 @@ export function runGateway(home: string): Promise<number> {
     server.listen(port, "127.0.0.1", () => {
       const actual = (server.address() as { port: number }).port;
       hub.url = `http://127.0.0.1:${actual}`;
-      server.on(
-        "request",
-        createApiHandler({
-          db,
-          orchestrator,
-          vault: getVault,
-          runTokens,
-          mcpTickets,
-          agentsDir: join(home, "agents"),
-          projectsDir: paths.projectsDir,
-          home,
-          catalog: () => loadCatalog(SEED_CATALOG, join(home, "catalog")),
-          billing: {
-            list: () =>
-              Object.entries(BILLING).map(([provider, p]) => ({
-                provider,
-                label: p.label,
-                mode: getSetting(db, `billing.${provider}`) === "api" ? "api" : "subscription",
-                keyId: p.key,
-                keySet: existsSync(paths.vaultDb) && getVault().status(p.key).set,
-              })),
-            setMode: (provider, mode) => {
-              if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
-              setSetting(db, `billing.${provider}`, mode);
-            },
-            budgets: () =>
-              Object.fromEntries(
-                Object.keys(BILLING).map((p) => [
-                  p,
-                  {
-                    day: Number(getSetting(db, `budget.${p}.day`) ?? 0),
-                    month: Number(getSetting(db, `budget.${p}.month`) ?? 0),
-                    spentDay: apiSpendSince(db, p, periodStart("day")),
-                    spentMonth: apiSpendSince(db, p, periodStart("month")),
-                  },
-                ]),
-              ),
-            setBudget: (provider, period, usd) => {
-              if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
-              setSetting(db, `budget.${provider}.${period}`, String(usd));
-            },
+      allowedHosts.push(`127.0.0.1:${actual}`, `localhost:${actual}`);
+      const handler = createApiHandler({
+        db,
+        orchestrator,
+        vault: getVault,
+        runTokens,
+        mcpTickets,
+        agentsDir: join(home, "agents"),
+        projectsDir: paths.projectsDir,
+        home,
+        catalog: () => loadCatalog(SEED_CATALOG, join(home, "catalog")),
+        billing: {
+          list: () =>
+            Object.entries(BILLING).map(([provider, p]) => ({
+              provider,
+              label: p.label,
+              mode: getSetting(db, `billing.${provider}`) === "api" ? "api" : "subscription",
+              keyId: p.key,
+              keySet: existsSync(paths.vaultDb) && getVault().status(p.key).set,
+              ...(provider === "cli-claude"
+                ? {
+                    containerTokenId: CLAUDE_CONTAINER_TOKEN,
+                    containerTokenSet:
+                      existsSync(paths.vaultDb) && getVault().status(CLAUDE_CONTAINER_TOKEN).set,
+                  }
+                : {}),
+            })),
+          setMode: (provider, mode) => {
+            if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
+            setSetting(db, `billing.${provider}`, mode);
           },
-          update: {
-            status: async () => {
-              const parse = (key: string) => {
-                const raw = getSetting(db, key);
-                return raw ? (JSON.parse(raw) as unknown) : null;
-              };
-              const head = await updaterDeps.exec("git", [
-                "-C",
-                REPO,
-                "log",
-                "-1",
-                "--format=%h %s",
-              ]);
-              return {
-                auto: autoUpdate(db),
-                service: AS_SERVICE,
-                current: head.out.trim(),
-                check: parse("update.check"),
-                ready: parse(READY_KEY),
-                last: parse(LAST_KEY),
-              };
-            },
-            setAuto: (on) => setSetting(db, AUTO_KEY, on ? "1" : "0"),
-            checkNow: async () => {
-              if (!AS_SERVICE)
-                return { status: "blocked", reason: "only the installed service updates itself" };
-              return updateTick(updaterDeps, true);
-            },
+          budgets: () =>
+            Object.fromEntries(
+              Object.keys(BILLING).map((p) => [
+                p,
+                {
+                  day: Number(getSetting(db, `budget.${p}.day`) ?? 0),
+                  month: Number(getSetting(db, `budget.${p}.month`) ?? 0),
+                  spentDay: apiSpendSince(db, p, periodStart("day")),
+                  spentMonth: apiSpendSince(db, p, periodStart("month")),
+                },
+              ]),
+            ),
+          setBudget: (provider, period, usd) => {
+            if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
+            setSetting(db, `budget.${provider}.${period}`, String(usd));
           },
-          // The codex CLI's own model list (no login data in it); missing file: no suggestions.
-          codexModels: () => {
-            try {
-              const cache = JSON.parse(
-                readFileSync(join(homedir(), ".codex", "models_cache.json"), "utf8"),
-              ) as { models?: { slug?: string; visibility?: string }[] };
-              return (cache.models ?? [])
-                .filter((m) => m.slug && m.visibility === "list")
-                .map((m) => `cli-codex/${m.slug}`);
-            } catch {
-              return [];
-            }
+        },
+        update: {
+          status: async () => {
+            const parse = (key: string) => {
+              const raw = getSetting(db, key);
+              return raw ? (JSON.parse(raw) as unknown) : null;
+            };
+            const head = await updaterDeps.exec("git", ["-C", REPO, "log", "-1", "--format=%h %s"]);
+            return {
+              auto: autoUpdate(db),
+              service: AS_SERVICE,
+              current: head.out.trim(),
+              check: parse("update.check"),
+              ready: parse(READY_KEY),
+              last: parse(LAST_KEY),
+            };
           },
-          integrations: () => {
-            const ids = new Set(
-              existsSync(paths.vaultDb)
-                ? getVault()
-                    .list()
-                    .map((s) => s.id)
-                : [],
-            );
-            // The gateway's own PATH is the one agent runs and MCP servers get.
-            const path = (process.env.PATH ?? "").split(":");
-            return integrationStatus(
-              loadCatalog(SEED_CATALOG, join(home, "catalog")),
-              loadAgents(join(home, "agents")).values(),
-              // Own accounts count like a project named "own" (ADR-0042).
-              [...loadProjects(paths.projectsDir).values(), ownProject(home)],
-              (id) => ids.has(id),
-              (bin) => path.some((dir) => dir && existsSync(join(dir, bin))),
-            );
+          setAuto: (on) => setSetting(db, AUTO_KEY, on ? "1" : "0"),
+          checkNow: async () => {
+            if (!AS_SERVICE)
+              return { status: "blocked", reason: "only the installed service updates itself" };
+            return updateTick(updaterDeps, true);
           },
-          transcriber,
-          runDir: paths.runDir,
-          // Suggestions only: chat models pulled in Ollama (embedding models filtered out).
-          localModels: async () => {
-            const res = await fetch("http://127.0.0.1:11434/api/tags", {
-              signal: AbortSignal.timeout(1500),
-            });
-            const body = (await res.json()) as { models?: { name: string }[] };
-            return (body.models ?? [])
-              .map((m) => m.name.replace(/:latest$/, ""))
-              .filter((n) => !/embed|bge|minilm/i.test(n));
-          },
-          allowedHosts: [`127.0.0.1:${actual}`, `localhost:${actual}`],
-          staticDir: WEB_DIST,
-          log,
-        }),
-      );
+        },
+        // The codex CLI's own model list (no login data in it); missing file: no suggestions.
+        codexModels: () => {
+          try {
+            const cache = JSON.parse(
+              readFileSync(join(homedir(), ".codex", "models_cache.json"), "utf8"),
+            ) as { models?: { slug?: string; visibility?: string }[] };
+            return (cache.models ?? [])
+              .filter((m) => m.slug && m.visibility === "list")
+              .map((m) => `cli-codex/${m.slug}`);
+          } catch {
+            return [];
+          }
+        },
+        integrations: () => {
+          const ids = new Set(
+            existsSync(paths.vaultDb)
+              ? getVault()
+                  .list()
+                  .map((s) => s.id)
+              : [],
+          );
+          // The gateway's own PATH is the one agent runs and MCP servers get.
+          const path = (process.env.PATH ?? "").split(":");
+          return integrationStatus(
+            loadCatalog(SEED_CATALOG, join(home, "catalog")),
+            loadAgents(join(home, "agents")).values(),
+            // Own accounts count like a project named "own" (ADR-0042).
+            [...loadProjects(paths.projectsDir).values(), ownProject(home)],
+            (id) => ids.has(id),
+            (bin) => path.some((dir) => dir && existsSync(join(dir, bin))),
+          );
+        },
+        transcriber,
+        runDir: paths.runDir,
+        // Suggestions only: chat models pulled in Ollama (embedding models filtered out).
+        localModels: async () => {
+          const res = await fetch("http://127.0.0.1:11434/api/tags", {
+            signal: AbortSignal.timeout(1500),
+          });
+          const body = (await res.json()) as { models?: { name: string }[] };
+          return (body.models ?? [])
+            .map((m) => m.name.replace(/:latest$/, ""))
+            .filter((n) => !/embed|bge|minilm/i.test(n));
+        },
+        allowedHosts,
+        staticDir: WEB_DIST,
+        log,
+      });
+      server.on("request", handler);
+      api = { port: actual, handler };
       // Pidfile last: once it is visible, `achords stop` may SIGTERM us, so handlers must be ready.
       writeFileSync(paths.pidFile, String(process.pid), { mode: 0o600 });
       log(`started (pid ${process.pid}, home ${home}, http://127.0.0.1:${actual})`);
