@@ -718,5 +718,10 @@
   "agents.form.effort.high": "High",
   "agents.form.effort.xhigh": "Extra high",
   "agents.form.effort.max": "Max",
-  "agents.form.effortHelp": "How hard the model thinks: higher is slower and uses more of your quota. Claude uses it as set; OpenAI models go up to High; Gemini ignores it."
+  "agents.form.effortHelp": "How hard the model thinks: higher is slower and uses more of your quota. Claude uses it as set; OpenAI models go up to High; Gemini ignores it.",
+  "remote.title": "Remote address",
+  "remote.help": "Open Achords from your phone or another computer through Tailscale: run `tailscale serve --bg 7420` once on this Mac, then enter its Tailscale address here (shown in the Tailscale app, e.g. mini.tail1234.ts.net). When Achords moves to another Mac, change it here. Leave empty to allow this Mac only.",
+  "remote.useSuggested": "Use this Mac's address",
+  "remote.saved": "Saved. Open {url} on your phone and pair it with a code.",
+  "remote.cleared": "Cleared: only this Mac can open Achords."
 }
