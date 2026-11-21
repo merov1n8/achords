@@ -1,4 +1,7 @@
 /** One agent turn-loop executed by a model backend (CLI subprocess, API loop or local model). */
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type Effort = (typeof EFFORTS)[number];
+
 export interface RunRequest {
   prompt: string;
   /** Provider-specific model name, e.g. "sonnet". */
@@ -20,6 +23,8 @@ export interface RunRequest {
   appendSystemPrompt?: string;
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /** How hard the model thinks (claude --effort; codex reasoning effort, capped at high). */
+  effort?: Effort;
   timeoutMs: number;
   signal?: AbortSignal;
   /** Extra environment for the child only (broker-injected credentials). */

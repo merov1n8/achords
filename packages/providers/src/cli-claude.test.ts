@@ -74,6 +74,12 @@ describe("cli-claude adapter", () => {
     ]);
   });
 
+  it("passes the agent's effort level", async () => {
+    await provider().run(req({ effort: "xhigh" }));
+    const seen = JSON.parse(readFileSync(record, "utf8"));
+    expect(seen.argv.join(" ")).toContain("--effort xhigh");
+  });
+
   it("adds extra directories and a JSON schema, and returns the structured output", async () => {
     const schema = { type: "object", properties: { action: { type: "string" } } };
     const res = await provider("structured").run(

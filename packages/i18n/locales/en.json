@@ -150,7 +150,7 @@
   "agents.form.description": "Scope",
   "agents.form.descriptionHelp": "What it does, what it does not do, what it hands to whom. Saved as AGENT.md; the first paragraph is what the boss sees when routing work.",
   "agents.form.roles": "Workflow roles",
-  "agents.form.rolesHelp": "Kanban permissions, comma separated, e.g. qa. Separate from the job role.",
+  "agents.form.rolesHelp": "Kanban permissions from the workflow rules (e.g. qa may approve review → done). Separate from the job role.",
   "agents.form.permissions": "Permissions",
   "agents.form.permissionsHelp": "Everything starts off. Switch on only what this agent needs.",
   "agents.form.tools": "Tools",
@@ -671,5 +671,14 @@
   "skills.modesHelp": "Review: every new skill waits for your approval. Automatic: new skills from agents are saved at once and reported in the chat. Changes to existing skills, and skills from runs that read the open web, always wait for you.",
   "skills.mode.review": "Review first",
   "skills.mode.auto": "Automatic",
-  "skills.updatedOn": "updated {date}"
+  "skills.updatedOn": "updated {date}",
+  "agents.form.newRole": "Another role",
+  "agents.form.effort": "Effort",
+  "agents.form.effortDefault": "CLI default",
+  "agents.form.effort.low": "Low",
+  "agents.form.effort.medium": "Medium",
+  "agents.form.effort.high": "High",
+  "agents.form.effort.xhigh": "Extra high",
+  "agents.form.effort.max": "Max",
+  "agents.form.effortHelp": "How hard the model thinks: higher is slower and uses more of your quota. Claude uses it as set; OpenAI models go up to High; Gemini ignores it."
 }
