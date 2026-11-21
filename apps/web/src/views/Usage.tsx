@@ -108,6 +108,32 @@ function SpendPanel(props: { spend: Spend }) {
   );
 }
 
+/** Summary boxes: real API money first, the subscription estimate beside it. */
+function SpendSummary(props: { spend: Spend }) {
+  const sum = (rows: SpendRow[], billing: string) =>
+    rows.filter((r) => r.billing === billing).reduce((n, r) => n + r.usd, 0);
+  const today = props.spend.today.provider;
+  const month = props.spend.month.provider;
+  return (
+    <div class="kpis gap-top">
+      <div class="card kpi hl solid">
+        <span class="k">{t("usage.kpi.apiToday")}</span>
+        <span class="v">${sum(today, "api").toFixed(2)}</span>
+        <span class="s">{t("usage.kpi.apiHint")}</span>
+      </div>
+      <div class="card kpi hl">
+        <span class="k">{t("usage.kpi.apiMonth")}</span>
+        <span class="v">${sum(month, "api").toFixed(2)}</span>
+      </div>
+      <div class="card kpi">
+        <span class="k">{t("usage.kpi.subToday")}</span>
+        <span class="v">${sum(today, "subscription").toFixed(2)}</span>
+        <span class="s">{t("usage.kpi.subHint")}</span>
+      </div>
+    </div>
+  );
+}
+
 export function Usage() {
   const usage = usePoll(
     () => api<{ windows: Window[]; spentTodayUsd: number; spend?: Spend }>("/api/usage"),
@@ -154,6 +180,7 @@ export function Usage() {
           </div>
         )}
       </div>
+      {usage.data?.spend && <SpendSummary spend={usage.data.spend} />}
       <p class="muted gap-top">
         {t("usage.spentToday", { usd: (usage.data?.spentTodayUsd ?? 0).toFixed(2) })}
       </p>

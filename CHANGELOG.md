@@ -29,6 +29,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Web UI redesign: Geist fonts, new design tokens with three light and three dark backgrounds and
+  four accents per mode (Settings → Appearance), a sidebar that collapses to an icon rail, the
+  new achords mark and favicon, and summary boxes on the Usage page.
 - The hub's own MCP server (delegate, ask_owner, …) runs on the official MCP TypeScript SDK (`@modelcontextprotocol/server`) instead of a hand-written JSON-RPC loop; same tools, same run tokens.
 
 - Sub-agents write their final report in the language the owner uses with the boss.
