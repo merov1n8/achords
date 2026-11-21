@@ -18,7 +18,7 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
-import { macApps } from "@achords/platform";
+import { findTailscaleHost, macApps } from "@achords/platform";
 import {
   costOf,
   integrationStatus,
@@ -470,6 +470,18 @@ export function runGateway(home: string): Promise<number> {
       const actual = (server.address() as { port: number }).port;
       hub.url = `http://127.0.0.1:${actual}`;
       allowedHosts.push(`127.0.0.1:${actual}`, `localhost:${actual}`);
+      // Phone or another computer: `tailscale serve` forwards https://<machine>.<tailnet>.ts.net
+      // here with that Host. Accept exactly this machine's name, checked again every minute
+      // (Tailscale may be switched on or renamed later).
+      const addTailscale = () =>
+        void findTailscaleHost().then((host) => {
+          if (host && !allowedHosts.includes(host)) {
+            allowedHosts.push(host);
+            log(`web: also reachable as https://${host} (Tailscale)`);
+          }
+        });
+      addTailscale();
+      setInterval(addTailscale, 60_000).unref();
       const handler = createApiHandler({
         db,
         orchestrator,
