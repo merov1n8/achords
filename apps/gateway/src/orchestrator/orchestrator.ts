@@ -1318,6 +1318,37 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       appendMessage(db, { threadId, role: "user", channel, content: text });
       // An open question from an agent in this thread takes the owner's reply (not the boss).
       if (answerOwnerQuestion(db, threadId, text)) return "routed";
+      // "@agent …": straight to that agent, without the boss (owner request).
+      const mention = /^@([a-z0-9][a-z0-9-]{0,63})[\s,:]+([\s\S]+)$/i.exec(text.trim());
+      if (mention) {
+        const id = (mention[1] as string).toLowerCase();
+        const all = agents();
+        if (id !== BOSS_ID) {
+          if (!all.has(id)) {
+            const known = [...all.keys()].filter((a) => a !== BOSS_ID).join(", ");
+            post(threadId, t("thread.unknownAgent", { agent: id, agents: known }));
+            return "error";
+          }
+          const body = (mention[2] as string).trim();
+          const firstLine = body.split("\n")[0] ?? body;
+          const title = firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
+          const r = orchestrator.delegate(
+            { from: "boss", threadId },
+            {
+              agent: id,
+              title,
+              // The agent never sees the chat: the owner's words are the task, and the reply
+              // language follows them.
+              instructions: `${body}\n\nThe owner wrote this to you directly. Write your final report in the language of this message.`,
+            },
+          );
+          post(
+            threadId,
+            r.ok ? t("thread.direct", { agent: id }) : t("thread.bossError", { reason: r.reason }),
+          );
+          return r.ok ? "delegate" : "error";
+        }
+      }
       try {
         const all = agents();
         const boss = all.get(BOSS_ID);
