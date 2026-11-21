@@ -1737,3 +1737,12 @@ td.actions > * {
 .agent-name {
   font-weight: 500;
 }
+.pair-code {
+  font-family: var(--mono);
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: center;
+  margin: 8px 0 16px;
+  user-select: all;
+}

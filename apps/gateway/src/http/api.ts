@@ -7,6 +7,7 @@ import {
   addChecklistItem,
   addComment,
   createMonitor,
+  createPairingCode,
   createSchedule,
   createSession,
   createThread,
@@ -362,6 +363,14 @@ export function createApiHandler(deps: ApiDeps) {
         setSetting(db, REMOTE_HOST_KEY, raw);
         log(raw ? `web: remote address set to ${raw}` : "web: remote address cleared");
         return { host: raw };
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/pair-codes$/,
+      ({ session }) => {
+        log(`web: pairing code made on ${session.deviceName}`);
+        return { code: createPairingCode(db, "web") };
       },
     ],
     [
