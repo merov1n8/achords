@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- A missing account or credential for one integration no longer fails the whole task: that integration is left out of the run and the agent is told why (e.g. social posting to Facebook while your own WordPress address is not set).
 - The live progress bar no longer slides over the chat box while an agent is working.
 - WordPress links were shown as [REDACTED]: the site address is not a secret, so it now comes from the project's accounts (channel `wordpress`) instead of the vault.
 - **Security:** agent file and fetch permissions are now enforced by the CLI. A manifest granting `Read`/`Edit`/`Write`/`WebFetch` used to allow them everywhere (any file of the user, any web host), because a bare tool name in `--allowedTools` is unscoped. Rules are now scoped to the agent's `fs.read`/`fs.write` folders (its working folder when none) and its `network.allow` hosts; the rest is refused. Verified against the real CLI.

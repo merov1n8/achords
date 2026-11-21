@@ -462,8 +462,9 @@ describe("integrations in runs (ADR-0034)", () => {
       return original(launch);
     };
     const without = await give("siter", "acme");
-    expect(without.status).toBe("failed");
-    expect(without.error).toMatch(/needs the project's wordpress account/);
+    expect(without.status).toBe("done"); // the integration is left out, the run goes on
+    expect(seen.at(-1)?.req.prompt).toMatch(/site \(needs the project's wordpress account\)/);
+    expect(launches).toEqual([]);
     appendFileSync(
       join(home, "projects", "acme", "project.yaml"),
       'integrations:\n  wordpress: ["https://acme.example"]\n',
@@ -585,6 +586,18 @@ describe("integrations in runs (ADR-0034)", () => {
     );
     expect(plainLine('{"name":"Site","url":"https://a.example"}')).toBe(
       "name: Site · url: https://a.example",
+    );
+  });
+
+  it("an integration that cannot be set up for this run is left out; the run goes on", async () => {
+    // siter needs the project's wordpress account; own accounts name none.
+    agent("both", "mcp: [site, blender]");
+    orch.syncAgents();
+    const task = await give("both");
+    expect(task.status).toBe("done");
+    expect(Object.keys(JSON.parse(seen[0]?.config ?? "{}").mcpServers ?? {})).toContain("blender");
+    expect(seen[0]?.req.prompt).toMatch(
+      /Not available in this run: site \(needs the project's wordpress account\)/,
     );
   });
 });
