@@ -725,5 +725,10 @@
   "remote.saved": "Saved. Open {url} on your phone and pair it with a code.",
   "remote.cleared": "Cleared: only this Mac can open Achords.",
   "devices.newCode": "New pairing code",
-  "devices.codeHelp": "Open Achords on the new device (this Mac's remote address, see below) and enter this code. It works once and expires in 10 minutes."
+  "devices.codeHelp": "Open Achords on the new device (this Mac's remote address, see below) and enter this code. It works once and expires in 10 minutes.",
+  "projects.delete": "Delete",
+  "projects.deleteTitle": "Delete {name}?",
+  "projects.deleteConfirm": "The project disappears from Achords. Its files and PROJECT.md are not deleted: the folder is moved aside so you can check it and delete it by hand. Chats keep their history.",
+  "projects.removedTitle": "Project removed",
+  "projects.removedText": "Its folder was moved here. Check it and delete it in Finder when you no longer need it:"
 }

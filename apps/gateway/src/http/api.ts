@@ -77,6 +77,7 @@ import {
   ownerSecrets,
   parseSkillText,
   readSkill,
+  removeProject,
   saveOwnAccounts,
   secretRefs,
   setIntegrationAgents,
@@ -698,6 +699,30 @@ export function createApiHandler(deps: ApiDeps) {
           doc: p.doc,
           integrations: p.integrations,
         };
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})$/,
+      ({ params }) => {
+        const slug = params[0] as string;
+        const dir = projectsDirOrThrow();
+        if (!loadProjects(dir).has(slug)) throw new HttpError(404, "no such project");
+        const busy = db
+          .prepare(
+            "SELECT 1 FROM tasks WHERE project = ? AND status IN ('queued', 'claimed') LIMIT 1",
+          )
+          .get(slug);
+        if (busy) {
+          throw new HttpError(
+            409,
+            "Work for this project is still running or queued; stop it first.",
+          );
+        }
+        // Nothing is deleted: the folder goes aside for the owner to check and remove by hand.
+        const movedTo = removeProject(dir, slug, join(dirname(dir), "projects-removed"));
+        log(`project ${slug} removed from Achords; its folder is now ${movedTo}`);
+        return { ok: true, movedTo };
       },
     ],
     [

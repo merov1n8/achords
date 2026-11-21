@@ -15,6 +15,7 @@ import {
   loadOwnAccounts,
   loadProjects,
   ownProject,
+  removeProject,
   saveOwnAccounts,
   updateProject,
 } from "./projects.ts";
@@ -72,6 +73,20 @@ describe("projects", () => {
     expect(existsSync(join(dir, "acme", "files", "index.php"))).toBe(true);
     expect(() => updateProject(dir, "acme", { workspace: "../x" })).toThrow(/workspace/);
     expect(() => updateProject(dir, "nope", { name: "x" })).toThrow(/no project/);
+  });
+
+  it("removes a project from Achords by moving its folder aside, files untouched", () => {
+    createProject(dir, { slug: "acme", name: "Acme", workspace: "web-clients" });
+    writeFileSync(join(dir, "acme", "files", "logo.png"), "x");
+    const aside = join(dir, "..", `${dir.split("/").at(-1)}-removed`);
+    const moved = removeProject(dir, "acme", aside, 1_700_000_000_000);
+    expect(loadProjects(dir).has("acme")).toBe(false);
+    expect(moved).toBe(join(aside, "acme-2023-11-14"));
+    expect(readFileSync(join(moved, "files", "logo.png"), "utf8")).toBe("x");
+    // The slug is free again.
+    createProject(dir, { slug: "acme", name: "Acme 2", workspace: "web-clients" });
+    expect(() => removeProject(dir, "nope", aside)).toThrow(/no project/);
+    rmSync(aside, { recursive: true, force: true });
   });
 
   it("an empty or missing projects folder is fine", () => {

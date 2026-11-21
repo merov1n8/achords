@@ -75,6 +75,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Projects can be deleted (Projects → Edit → Delete, with a confirmation). Nothing is erased:
+  the folder moves to `~/.achords/projects-removed/` for you to check and delete by hand.
 - Settings → Devices: "New pairing code" shows a one-time code in a modal for pairing a phone or
   another computer, no terminal needed.
 - Web UI from a phone or another computer through Tailscale: set the address in Settings →

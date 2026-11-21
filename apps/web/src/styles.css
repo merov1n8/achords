@@ -1746,3 +1746,7 @@ td.actions > * {
   margin: 8px 0 16px;
   user-select: all;
 }
+.select-all {
+  user-select: all;
+  overflow-wrap: anywhere;
+}
