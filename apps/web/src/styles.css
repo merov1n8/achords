@@ -1045,12 +1045,6 @@ main > .page {
 .icon-btn:focus-visible {
   opacity: 1;
 }
-.threadmenu {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 6px 6px 30px;
-}
 .sub-heading {
   padding: 8px 10px 2px 36px;
   font-size: 11px;
@@ -1077,9 +1071,17 @@ main > .page {
   background: var(--surface);
   color: var(--text);
   box-shadow: 0 24px 48px -16px rgb(0 0 0 / 0.35);
+  /* Opened from a table cell, it would inherit the cell's alignment otherwise. */
+  text-align: left;
+  white-space: normal;
 }
 .modal.wide {
   width: min(720px, calc(100vw - 32px));
+}
+/* Long forms scroll in the body; header and footer (the Save button) stay visible. */
+.modal[open] {
+  display: flex;
+  flex-direction: column;
 }
 .modal::backdrop {
   background: rgb(10 10 12 / 0.45);
@@ -1099,12 +1101,79 @@ main > .page {
   border-bottom: 1px solid var(--border);
 }
 .modal-b {
+  flex: 1;
+  min-height: 0;
   padding: 18px;
   overflow: auto;
 }
 .modal-f {
   justify-content: flex-end;
   border-top: 1px solid var(--border);
+}
+/* Row actions popover (role="menu"), placed fixed under its trigger by the script */
+.menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 170px;
+  padding: 4px;
+  display: grid;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hover);
+}
+.menuitem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+.menuitem:hover,
+.menuitem:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+.menuitem.danger {
+  color: var(--bad);
+}
+/* Wide tables scroll sideways on phones so the row actions stay reachable. */
+.panel:has(> table) {
+  overflow-x: auto;
+}
+/* Last table column: Edit/Delete icon buttons, kept right */
+td.row-actions {
+  text-align: right;
+  white-space: nowrap;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+/* Schedule repeat picker */
+fieldset.repeat {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.repeat .row.wrap > .field {
+  min-width: 140px;
+}
+.repeat .days {
+  gap: 6px;
+}
+.repeat .days .btn {
+  min-width: 44px;
+  padding: 0 10px;
+  justify-content: center;
+}
+.repeat-sum {
+  margin: -4px 0 12px;
 }
 .btn.danger-solid {
   background: var(--bad);

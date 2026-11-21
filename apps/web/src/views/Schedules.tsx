@@ -1,8 +1,10 @@
-import { Plus } from "lucide-preact";
-import { useState } from "preact/hooks";
+import { Pencil, Plus, Trash2 } from "lucide-preact";
+import { useId, useState } from "preact/hooks";
 import { api } from "../api.ts";
+import { Confirm, Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
+import { clock, fromCron, KINDS, type Repeat, summary, toCron, withKind } from "../repeat.ts";
 import type { Agent, Project } from "../types.ts";
 
 type Schedule = {
@@ -97,7 +99,7 @@ function List({
   onChange: () => void;
   onEdit: (s: Schedule) => void;
 }) {
-  const [confirm, setConfirm] = useState<string>();
+  const [confirm, setConfirm] = useState<Schedule>();
   const [error, setError] = useState<string>();
   const act = async (fn: () => Promise<unknown>) => {
     setError(undefined);
@@ -133,9 +135,7 @@ function List({
               <td>
                 <code>{s.agentId}</code>
               </td>
-              <td>
-                <code>{s.cron}</code>
-              </td>
+              <td title={s.cron}>{summary(fromCron(s.cron))}</td>
               <td>{s.enabled ? `${day(s.nextRunAt)} ${time(s.nextRunAt)}` : "–"}</td>
               <td>
                 {s.lastStatus ? (
@@ -161,29 +161,44 @@ function List({
                   }
                 />
               </td>
-              <td class="row">
-                <button type="button" class="btn ghost" onClick={() => onEdit(s)}>
-                  {t("common.edit")}
+              <td class="row-actions">
+                <button
+                  type="button"
+                  class="iconbtn"
+                  aria-label={t("common.edit")}
+                  title={t("common.edit")}
+                  onClick={() => onEdit(s)}
+                >
+                  <Pencil class="icon" />
                 </button>
-                {confirm === s.id ? (
-                  <button
-                    type="button"
-                    class="btn danger"
-                    onClick={() => act(() => api(`/api/schedules/${s.id}`, { method: "DELETE" }))}
-                  >
-                    {t("schedules.confirmDelete")}
-                  </button>
-                ) : (
-                  <button type="button" class="btn ghost" onClick={() => setConfirm(s.id)}>
-                    {t("schedules.delete")}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  class="iconbtn"
+                  aria-label={t("schedules.delete")}
+                  title={t("schedules.delete")}
+                  onClick={() => setConfirm(s)}
+                >
+                  <Trash2 class="icon" />
+                </button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
       {error && <p class="error">{error}</p>}
+      {confirm && (
+        <Confirm
+          title={t("schedules.deleteTitle")}
+          message={t("schedules.deleteConfirm", { name: confirm.name })}
+          confirmLabel={t("schedules.delete")}
+          danger
+          onConfirm={async () => {
+            await api(`/api/schedules/${confirm.id}`, { method: "DELETE" });
+            onChange();
+          }}
+          onClose={() => setConfirm(undefined)}
+        />
+      )}
     </div>
   );
 }
@@ -228,23 +243,33 @@ function Timeline({ days }: { days: number }) {
 function ScheduleForm(props: { editing?: Schedule; onClose: () => void; onCreated: () => void }) {
   const agents = usePoll(() => api<Agent[]>("/api/agents"), 60000);
   const projects = usePoll(() => api<Project[]>("/api/projects"), 60000);
+  const formId = useId();
   const e0 = props.editing;
   const [f, setF] = useState({
     name: e0?.name ?? "",
-    cron: e0?.cron ?? "0 9 * * 1-5",
     agentId: e0?.agentId ?? "",
     title: e0?.title ?? "",
     instructions: e0?.instructions ?? "",
     project: e0?.project ?? "",
     enabled: e0?.enabled ?? true,
   });
+  const [repeat, setRepeat] = useState<Repeat>(fromCron(e0?.cron ?? "0 9 * * 1-5"));
   const [error, setError] = useState<string>();
   const workers = (agents.data ?? []).filter((a) => a.id !== "boss");
   const submit = async (e: Event) => {
     e.preventDefault();
     setError(undefined);
+    if (repeat.kind === "weekly" && repeat.days.length === 0) {
+      setError(t("repeat.noDays"));
+      return;
+    }
     try {
-      const body = { ...f, agentId: f.agentId || workers[0]?.id, project: f.project || null };
+      const body = {
+        ...f,
+        cron: toCron(repeat),
+        agentId: f.agentId || workers[0]?.id,
+        project: f.project || null,
+      };
       if (e0) await api(`/api/schedules/${e0.id}`, { method: "PUT", body });
       else await api("/api/schedules", { method: "POST", body });
       props.onCreated();
@@ -252,73 +277,194 @@ function ScheduleForm(props: { editing?: Schedule; onClose: () => void; onCreate
       setError((err as Error).message);
     }
   };
-  const field = (key: "name" | "cron" | "title", label: string, help?: string) => (
+  const field = (key: "name" | "title", label: string) => (
     <label class="field">
       {label}
       <input
-        class={`input ${key === "cron" ? "mono" : ""}`}
+        class="input"
         value={f[key]}
         onInput={(e) => setF({ ...f, [key]: e.currentTarget.value })}
       />
-      {help && <span class="muted small">{help}</span>}
     </label>
   );
   return (
-    <form class="panel gap-top narrow" onSubmit={submit}>
-      <div class="page-head">
-        <h2>{t(e0 ? "schedules.edit" : "schedules.new")}</h2>
-        <button type="button" class="btn ghost" onClick={props.onClose}>
-          {t("common.close")}
-        </button>
-      </div>
-      {field("name", t("schedules.name"))}
-      {field("cron", t("schedules.when"), t("schedules.cronHelp"))}
-      <label class="field">
-        {t("schedules.agent")}
-        <select
-          class="input"
-          value={f.agentId || workers[0]?.id}
-          onChange={(e) => setF({ ...f, agentId: e.currentTarget.value })}
-        >
-          {workers.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name} ({a.id})
-            </option>
-          ))}
-        </select>
-      </label>
-      {field("title", t("schedules.taskTitle"))}
-      <label class="field">
-        {t("schedules.instructions")}
-        <textarea
-          class="input"
-          rows={4}
-          value={f.instructions}
-          onInput={(e) => setF({ ...f, instructions: e.currentTarget.value })}
-        />
-        <span class="muted small">{t("schedules.instructionsHelp")}</span>
-      </label>
-      {!!projects.data?.length && (
+    <Modal
+      title={t(e0 ? "schedules.edit" : "schedules.new")}
+      onClose={props.onClose}
+      footer={
+        <>
+          <button type="button" class="btn ghost" onClick={props.onClose}>
+            {t("common.cancel")}
+          </button>
+          <button type="submit" form={formId} class="btn primary">
+            {e0 ? t("common.save") : t("schedules.create")}
+          </button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={submit}>
+        {field("name", t("schedules.name"))}
+        <RepeatPicker value={repeat} onChange={setRepeat} />
         <label class="field">
-          {t("chat.project")}
+          {t("schedules.agent")}
           <select
             class="input"
-            value={f.project}
-            onChange={(e) => setF({ ...f, project: e.currentTarget.value })}
+            value={f.agentId || workers[0]?.id}
+            onChange={(e) => setF({ ...f, agentId: e.currentTarget.value })}
           >
-            <option value="">{t("chat.noProject")}</option>
-            {projects.data.map((p) => (
-              <option key={p.slug} value={p.slug}>
-                {p.name}
+            {workers.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} ({a.id})
               </option>
             ))}
           </select>
         </label>
+        {field("title", t("schedules.taskTitle"))}
+        <label class="field">
+          {t("schedules.instructions")}
+          <textarea
+            class="input"
+            rows={4}
+            value={f.instructions}
+            onInput={(e) => setF({ ...f, instructions: e.currentTarget.value })}
+          />
+          <span class="muted small">{t("schedules.instructionsHelp")}</span>
+        </label>
+        {!!projects.data?.length && (
+          <label class="field">
+            {t("chat.project")}
+            <select
+              class="input"
+              value={f.project}
+              onChange={(e) => setF({ ...f, project: e.currentTarget.value })}
+            >
+              <option value="">{t("chat.noProject")}</option>
+              {projects.data.map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {error && <p class="error">{error}</p>}
+      </form>
+    </Modal>
+  );
+}
+
+// Monday first, as people read a week; cron keeps Sunday as 0.
+const WEEK = [1, 2, 3, 4, 5, 6, 0];
+
+/** Repeat + when, like a todo app; Custom keeps raw cron for anything the picker cannot say. */
+function RepeatPicker({ value: r, onChange }: { value: Repeat; onChange: (r: Repeat) => void }) {
+  const time = "hour" in r && (
+    <label class="field">
+      {t("repeat.time")}
+      <input
+        type="time"
+        class="input"
+        value={clock(r.hour, r.minute)}
+        onInput={(e) => {
+          const [h, m] = e.currentTarget.value.split(":").map(Number);
+          if (Number.isInteger(h) && Number.isInteger(m))
+            onChange({ ...r, hour: h as number, minute: m as number });
+        }}
+      />
+    </label>
+  );
+  return (
+    <fieldset class="repeat">
+      <div class="row wrap">
+        <label class="field grow">
+          {t("repeat.label")}
+          <select
+            class="input"
+            value={r.kind}
+            onChange={(e) => onChange(withKind(r, e.currentTarget.value as Repeat["kind"]))}
+          >
+            {KINDS.map((k) => (
+              <option key={k} value={k}>
+                {t(`repeat.kind.${k}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {r.kind === "hourly" && (
+          <label class="field grow">
+            {t("repeat.minute")}
+            <input
+              type="number"
+              class="input"
+              min={0}
+              max={59}
+              value={r.minute}
+              onInput={(e) => {
+                const m = Number(e.currentTarget.value);
+                if (Number.isInteger(m) && m >= 0 && m <= 59) onChange({ ...r, minute: m });
+              }}
+            />
+          </label>
+        )}
+        {r.kind === "monthly" && (
+          <label class="field grow">
+            {t("repeat.dayOfMonth")}
+            <select
+              class="input"
+              value={r.day}
+              onChange={(e) => onChange({ ...r, day: Number(e.currentTarget.value) })}
+            >
+              {Array.from({ length: 31 }, (_, i) => (
+                <option key={i + 1} value={i + 1}>
+                  {i + 1}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {r.kind !== "custom" && r.kind !== "hourly" && <div class="grow">{time}</div>}
+      </div>
+      {r.kind === "weekly" && (
+        <div class="field">
+          {t("repeat.days")}
+          <div class="row wrap days">
+            {WEEK.map((d) => (
+              <button
+                key={d}
+                type="button"
+                class="btn"
+                aria-pressed={r.days.includes(d)}
+                onClick={() =>
+                  onChange({
+                    ...r,
+                    days: r.days.includes(d)
+                      ? r.days.filter((x) => x !== d)
+                      : [...r.days, d].sort((a, b) => a - b),
+                  })
+                }
+              >
+                {t(`repeat.day.${d}`)}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
-      <button type="submit" class="btn primary">
-        {e0 ? t("common.save") : t("schedules.create")}
-      </button>
-      {error && <p class="error">{error}</p>}
-    </form>
+      {r.kind === "monthly" && r.day > 28 && (
+        <p class="muted small">{t("repeat.dayOfMonthHelp")}</p>
+      )}
+      {r.kind === "custom" ? (
+        <label class="field">
+          {t("repeat.cron")}
+          <input
+            class="input mono"
+            value={r.cron}
+            onInput={(e) => onChange({ kind: "custom", cron: e.currentTarget.value })}
+          />
+          <span class="muted small">{t("schedules.cronHelp")}</span>
+        </label>
+      ) : (
+        <p class="muted small repeat-sum">{summary(r)}</p>
+      )}
+    </fieldset>
   );
 }
