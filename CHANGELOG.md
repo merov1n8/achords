@@ -36,6 +36,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Chat: your own messages are a plain rounded bubble (as in the design); click the chat title to
+  rename it in place; the Telegram chat can be deleted (Telegram starts a new one).
 - Integrations → Per client lists every WordPress site as its own row (site, project, status)
   with its own Login and Test connection.
 - The product is written Achords in the web UI, notices and docs. The agent list shows the name
