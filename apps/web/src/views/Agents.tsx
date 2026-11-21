@@ -14,6 +14,7 @@ type AgentDetail = {
   role: string;
   workspace: string;
   roles: string[];
+  effort?: string;
   models: Models;
   tools: string[];
   fs: { read: string[]; write: string[] };
@@ -114,13 +115,15 @@ function AgentForm({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [opts, setOpts] = useState<{ tools: string[]; models: string[] }>();
+  const [opts, setOpts] = useState<{ tools: string[]; models: string[]; roles: string[] }>();
+  const [newRole, setNewRole] = useState("");
   const [f, setF] = useState({
     id: "",
     name: "",
     role: "",
     workspace: "",
-    roles: "",
+    roles: [] as string[],
+    effort: "",
     description: "",
     models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] } as Models,
     tools: [] as string[],
@@ -137,7 +140,7 @@ function AgentForm({
   const [custom, setCustom] = useState("");
   const formId = useId();
   useEffect(() => {
-    api<{ tools: string[]; models: string[] }>("/api/agent-options")
+    api<{ tools: string[]; models: string[]; roles: string[] }>("/api/agent-options")
       .then(setOpts)
       .catch((err: Error) => setError(err.message));
     if (!id) return;
@@ -148,7 +151,8 @@ function AgentForm({
           name: d.name,
           role: d.role,
           workspace: d.workspace,
-          roles: d.roles.join(", "),
+          roles: d.roles,
+          effort: d.effort ?? "",
           description: d.doc,
           models: { default: d.models.default, allowed: d.models.allowed ?? [d.models.default] },
           tools: d.tools,
@@ -200,10 +204,8 @@ function AgentForm({
         name: f.name,
         role: f.role,
         workspace: f.workspace,
-        roles: f.roles
-          .split(",")
-          .map((r) => r.trim())
-          .filter(Boolean),
+        roles: f.roles,
+        ...(f.effort ? { effort: f.effort } : {}),
         models: f.models,
         tools: f.tools,
         fs: { write: lines(f.write), read: lines(f.read) },
@@ -271,7 +273,57 @@ function AgentForm({
           />
           <span class="muted small">{t("agents.form.descriptionHelp")}</span>
         </label>
-        {text("roles", t("agents.form.roles"), t("agents.form.rolesHelp"))}
+        <div class="field">
+          {t("agents.form.roles")}
+          <div class="row wrap">
+            {[...new Set([...(opts?.roles ?? []), ...f.roles])].map((r) => (
+              <label key={r} class="row">
+                <input
+                  type="checkbox"
+                  checked={f.roles.includes(r)}
+                  onChange={() => set({ roles: toggle(f.roles, r) })}
+                />
+                <code>{r}</code>
+              </label>
+            ))}
+          </div>
+          <div class="row">
+            <input
+              class="input"
+              placeholder={t("agents.form.newRole")}
+              value={newRole}
+              onInput={(e) => setNewRole(e.currentTarget.value.toLowerCase())}
+            />
+            <button
+              type="button"
+              class="btn"
+              disabled={!/^[a-z0-9][a-z0-9-]{0,63}$/.test(newRole.trim())}
+              onClick={() => {
+                if (!f.roles.includes(newRole.trim())) set({ roles: [...f.roles, newRole.trim()] });
+                setNewRole("");
+              }}
+            >
+              {t("agents.add")}
+            </button>
+          </div>
+          <span class="muted small">{t("agents.form.rolesHelp")}</span>
+        </div>
+        <label class="field">
+          {t("agents.form.effort")}
+          <select
+            class="input"
+            value={f.effort}
+            onChange={(e) => set({ effort: e.currentTarget.value })}
+          >
+            <option value="">{t("agents.form.effortDefault")}</option>
+            {["low", "medium", "high", "xhigh", "max"].map((x) => (
+              <option key={x} value={x}>
+                {t(`agents.form.effort.${x}`)}
+              </option>
+            ))}
+          </select>
+          <span class="muted small">{t("agents.form.effortHelp")}</span>
+        </label>
         <div class="field">
           {t("agents.form.models")}
           <span class="muted small">{t("agents.allowedHelp")}</span>

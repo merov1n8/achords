@@ -69,6 +69,17 @@ describe("cli-codex (ADR-0040)", () => {
     expect(rw.at(-1)).toBe("-");
   });
 
+  it("maps the agent's effort to codex reasoning effort (max and xhigh become high)", () => {
+    const files = { last: "/t/last.txt" };
+    expect(codexArgs(req({ effort: "low" }), files, host)).toContain(
+      'model_reasoning_effort="low"',
+    );
+    expect(codexArgs(req({ effort: "max" }), files, host)).toContain(
+      'model_reasoning_effort="high"',
+    );
+    expect(codexArgs(req({}), files, host).join(" ")).not.toContain("model_reasoning_effort");
+  });
+
   it("passes MCP servers with secrets off the command line and only granted tools", () => {
     const cfg = join(dir, "mcp.json");
     writeFileSync(

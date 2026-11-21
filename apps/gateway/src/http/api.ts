@@ -53,6 +53,7 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
+  type AgentFields,
   type Catalog,
   type CatalogEntry,
   createAgentFiles,
@@ -62,6 +63,7 @@ import {
   isSkillName,
   isSkillWorkspace,
   listSkills,
+  loadAgents,
   loadManifest,
   loadOwnAccounts,
   loadProjects,
@@ -1226,6 +1228,7 @@ export function createApiHandler(deps: ApiDeps) {
           network: m.network,
           delegation: m.delegation,
           ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
+          ...(m.effort ? { effort: m.effort } : {}),
           doc: existsSync(docPath) ? readFileSync(docPath, "utf8") : "",
           // Aliases always run the newest model of a family; local models as pulled.
           suggestions: [
@@ -1241,7 +1244,21 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/agent-options$/,
       async () => {
         const local = (await deps.localModels?.().catch(() => [])) ?? [];
+        // Workflow roles to tick: those the workspaces' rules name (role:x) and those in use.
+        const workspaces = [...new Set(listAgents(db).map((a) => a.workspace))];
+        const roles = new Set<string>();
+        for (const ws of workspaces) {
+          const wf = deps.orchestrator.workflow(ws).workflow;
+          for (const tr of wf.transitions) if (tr.by.startsWith("role:")) roles.add(tr.by.slice(5));
+          for (const on of Object.values(wf.on_enter)) {
+            if (on.assign?.startsWith("role:")) roles.add(on.assign.slice(5));
+          }
+        }
+        if (deps.agentsDir)
+          for (const m of loadAgents(deps.agentsDir).values())
+            for (const r of m.roles) roles.add(r);
         return {
+          roles: [...roles].sort(),
           tools: AGENT_TOOL_NAMES,
           models: [
             ...CLAUDE_ALIASES,
@@ -1524,6 +1541,9 @@ export function createApiHandler(deps: ApiDeps) {
         accepts_from: list(obj(b.delegation).accepts_from, "delegation.accepts_from"),
       },
       ...(perRun > 0 ? { budget: { per_run_usd: perRun } } : {}),
+      ...(b.effort
+        ? { effort: str(b.effort, "effort", 10) as NonNullable<AgentFields["effort"]> }
+        : {}),
     };
   };
   const manifestPath = (id: string) => {

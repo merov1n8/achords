@@ -15,6 +15,11 @@ export function AddSignin(props: {
   const services = signinServices(props.items);
   const [key, setKey] = useState(services[0]?.key ?? "");
   const service = services.find((s) => s.key === key);
+  // Saved means done: refresh the page behind and close.
+  const done = () => {
+    props.onSaved();
+    props.onClose();
+  };
   return (
     <Modal
       title={t("integrations.addSignin")}
@@ -36,18 +41,26 @@ export function AddSignin(props: {
         </select>
       </label>
       {service?.oauth === "google" ? (
-        <GoogleSignin key={key} onSaved={props.onSaved} />
+        <GoogleSignin key={key} onSaved={done} />
       ) : (
-        service && <Tokens key={key} service={service} onSaved={props.onSaved} />
+        service && <Tokens key={key} service={service} onSaved={props.onSaved} onDone={done} />
       )}
     </Modal>
   );
 }
 
 /** Write-only inputs for the vault ids the service's entries use. */
-function Tokens(props: { service: SigninService; onSaved: () => void }) {
+function Tokens(props: { service: SigninService; onSaved: () => void; onDone: () => void }) {
   const ids = [...new Set(props.service.entries.flatMap((e) => e.secrets))];
   const missing = new Set(props.service.entries.flatMap((e) => e.missingSecrets));
+  const [saved, setSaved] = useState<string[]>([]);
+  // Closes once every missing token is saved (or after replacing one when none was missing).
+  const onSaved = (id: string) => {
+    const now = [...saved, id];
+    setSaved(now);
+    if ([...missing].every((m) => now.includes(m))) props.onDone();
+    else props.onSaved();
+  };
   return (
     <>
       <p class="muted small">{t("integrations.tokensHelp")}</p>
@@ -57,7 +70,7 @@ function Tokens(props: { service: SigninService; onSaved: () => void }) {
           id={id}
           label={t("integrations.setSecret")}
           set={!missing.has(id)}
-          onSaved={props.onSaved}
+          onSaved={() => onSaved(id)}
         />
       ))}
     </>

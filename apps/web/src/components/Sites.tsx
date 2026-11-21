@@ -26,6 +26,19 @@ export function Sites(props: { slug: string }) {
   const [removing, setRemoving] = useState<string>();
   const list = sites.data?.sites ?? [];
   const site = list.find((s) => s.url === creds);
+  const [savedParts, setSavedParts] = useState<string[]>([]);
+  // The login modal closes once both user and password are set (either saved now or before).
+  const loginSaved = (part: "user" | "password") => {
+    sites.refresh();
+    const now = [...savedParts, part];
+    setSavedParts(now);
+    const isSet = (p: "user" | "password") =>
+      now.includes(p) || site?.legacy || !site?.missing.includes(site.secrets[p]);
+    if (isSet("user") && isSet("password")) {
+      setCreds(undefined);
+      setSavedParts([]);
+    }
+  };
   return (
     <div class="field">
       <div class="row">
@@ -88,7 +101,13 @@ export function Sites(props: { slug: string }) {
         />
       )}
       {creds && (
-        <Modal title={t("sites.loginTitle", { url: creds })} onClose={() => setCreds(undefined)}>
+        <Modal
+          title={t("sites.loginTitle", { url: creds })}
+          onClose={() => {
+            setCreds(undefined);
+            setSavedParts([]);
+          }}
+        >
           {site ? (
             <>
               <p class="muted small">{t("sites.loginHelp")}</p>
@@ -97,13 +116,13 @@ export function Sites(props: { slug: string }) {
                 label={t("projects.wordpressUser")}
                 type="text"
                 set={!site.missing.includes(site.secrets.user) || site.legacy}
-                onSaved={sites.refresh}
+                onSaved={() => loginSaved("user")}
               />
               <SecretInput
                 id={site.secrets.password}
                 label={t("projects.wordpressPassword")}
                 set={!site.missing.includes(site.secrets.password) || site.legacy}
-                onSaved={sites.refresh}
+                onSaved={() => loginSaved("password")}
               />
               {site.legacy && <p class="muted small">{t("sites.legacy")}</p>}
             </>
