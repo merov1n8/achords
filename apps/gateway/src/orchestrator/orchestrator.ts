@@ -2128,6 +2128,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       defer(db, task.id, WORKER_ID, overBudget, BUDGET_DEFER_MS);
       return;
     }
+    // Stopped by the owner while the run was being prepared: do not start it.
+    if (getTask(db, task.id)?.status !== "claimed") {
+      hubRun?.revoke();
+      if (hubRun) rmSync(hubRun.file, { force: true });
+      return;
+    }
     const run = startRun(db, {
       provider: built.provider.id,
       model: built.req.model,

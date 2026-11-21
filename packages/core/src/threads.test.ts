@@ -29,6 +29,29 @@ describe("threads", () => {
     expect(listThreads(db).map((t) => t.id)).toEqual([a.id, b.id]);
   });
 
+  it("names the agent that wrote last in each chat (traces left out)", () => {
+    const db = openCoreDatabase(":memory:");
+    db.prepare(
+      "INSERT INTO agents (id, name, role, workspace, created_at, updated_at) VALUES ('coder', 'Coder', 'dev', 'shared', 0, 0)",
+    ).run();
+    const a = createThread(db, { title: "a" });
+    const agent = (author: string, visibility?: "trace") =>
+      appendMessage(db, {
+        threadId: a.id,
+        role: "agent",
+        channel: "web",
+        content: "x",
+        author,
+        ...(visibility ? { visibility } : {}),
+      });
+    expect(getThread(db, a.id)?.lastAgent).toBeNull();
+    agent("ghost");
+    expect(listThreads(db)[0]?.lastAgent).toBe("ghost");
+    agent("coder");
+    agent("boss", "trace");
+    expect(listThreads(db)[0]?.lastAgent).toBe("Coder");
+  });
+
   it("hides trace messages unless asked", () => {
     const db = openCoreDatabase(":memory:");
     const t = createThread(db, {});

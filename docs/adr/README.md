@@ -49,3 +49,4 @@
 - [ADR-0047: Several sites per project, each with its own credentials](0047-several-sites-per-project.md)
 - [ADR-0048: Web sign-in and integration setup](0048-web-sign-in-and-integration-setup.md)
 - [ADR-0049: Skills: Markdown how-tos, progressive disclosure, owner-approved proposals](0049-skills.md)
+- [ADR-0052: Chat run details and Stop per chat](0052-chat-run-details-and-stop.md)

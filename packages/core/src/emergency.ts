@@ -22,7 +22,8 @@ export function killActiveRuns(db: Db): string[] {
   return lines;
 }
 
-function killRun(pid: number | null, pgid: number | null, startedAt: number): string {
+/** SIGKILLs one run's process group, unless its PID now belongs to another process. */
+export function killRun(pid: number | null, pgid: number | null, startedAt: number): string {
   const probe = pgid ?? pid;
   if (probe === null) return "run without pid: marked cancelled";
   const age = processAgeMs(probe);

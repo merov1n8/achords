@@ -36,6 +36,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- The Chat page has its own chat list column (search, Recent / By project, pin, rename, archive,
+  delete, All chats) instead of the list in the sidebar; Chat in the sidebar is a plain menu item.
+  Each chat in the list shows the agent that answered last and how long ago.
 - Modals close after a successful save (project edit, WordPress logins, sign-in tokens, Google
   sign-in). Agent workflow roles are checkboxes of the roles the workflows use, plus your own.
 - Agents have an Effort setting (low to max): passed to Claude as `--effort`, to OpenAI models as
@@ -70,6 +73,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Run details next to each chat: how many of the chat's agents are working, the tokens and cost
+  of its runs (with your daily API budget, if set) and every agent with running, waiting, queued or
+  idle. On narrower screens they open from the info button. **Stop run** cancels the chat's queued
+  and waiting tasks and stops its running agents at once (as the emergency stop does, but only for
+  this chat). Buttons above the message box address one of the chat's agents directly (@agent).
+- Phones: an opened chat fills the screen with a back button, a live status line ("1 of 3 agents
+  working · $0.41") and a thin progress line; the info button opens the run details from below.
 - Skills: short how-tos your agents follow (Skills page in the sidebar and in the phone's More menu). Agents see each skill's name and description and read the full text when they need it. After a task that took several attempts or a correction from you, an agent can propose a new skill or a change; you get it in the chat with Approve / Reject, changes shown as before and after. Per workspace you can let new skills be saved automatically; changes always wait for you. Send a link in chat ("found a good skill, build it in") and it is built in directly, or proposed as a change to a similar skill you already have. On the Skills page you can also add, edit, switch off, delete and import skills from a link yourself. Two starter skills ship: writing the final report in plain language, and a self-check before reporting done.
 
 - Settings → Integrations can set up everything that needed the terminal before: **Add sign-in**
