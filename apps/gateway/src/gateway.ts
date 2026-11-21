@@ -34,7 +34,7 @@ import { callTool } from "./mcp/call.ts";
 import { createMcpTickets, createRunTokens } from "./mcp/tokens.ts";
 import { runMonitors } from "./monitors.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
-import { seedAgents, seedSchedules } from "./orchestrator/seed.ts";
+import { seedAgents, seedSchedules, seedSkills } from "./orchestrator/seed.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
 import {
   AUTO_KEY,
@@ -53,6 +53,7 @@ const TICK_MS = 1000;
 const SHUTDOWN_WAIT_MS = 5000;
 const SEED_AGENTS = new URL("../../../seed/agents/", import.meta.url).pathname;
 const SEED_SCHEDULES = new URL("../../../seed/schedules/", import.meta.url).pathname;
+const SEED_SKILLS = new URL("../../../seed/skills/", import.meta.url).pathname;
 const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
 const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
@@ -286,6 +287,8 @@ export function runGateway(home: string): Promise<number> {
   const seededSchedules = seedSchedules(SEED_SCHEDULES, db);
   if (seededSchedules.length)
     log(`seeded schedules (off until enabled): ${seededSchedules.join(", ")}`);
+  const seededSkills = seedSkills(SEED_SKILLS, join(home, "skills"), db);
+  if (seededSkills.length) log(`seeded skills: ${seededSkills.join(", ")}`);
 
   // Voice notes (Telegram and web) are transcribed on this machine (ADR-0014).
   const transcriber = whisperTranscriber({

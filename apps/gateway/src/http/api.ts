@@ -57,12 +57,18 @@ import {
   type CatalogEntry,
   createAgentFiles,
   createProject,
+  deleteSkill,
   type IntegrationStatus,
+  isSkillName,
+  isSkillWorkspace,
+  listSkills,
   loadManifest,
   loadOwnAccounts,
   loadProjects,
   OWN,
   ownerSecrets,
+  parseSkillText,
+  readSkill,
   saveOwnAccounts,
   secretRefs,
   setIntegrationAgents,
@@ -71,10 +77,13 @@ import {
   updateManifestModels,
   updateManifestName,
   updateProject,
+  writeSkill,
 } from "@achords/policy";
 import { createGoogleSignins, parseClientJson, type Vault } from "@achords/secrets";
 import type { McpTickets, RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
+import { fetchSkillSource } from "../orchestrator/skill-fetch.ts";
+import { skillMode, skillModeKey, skillProposals } from "../orchestrator/skills.ts";
 import type { Transcriber } from "../voice/transcribe.ts";
 import { serveStatic } from "./static.ts";
 
@@ -114,6 +123,9 @@ export interface ApiDeps {
     | "requestPublish"
     | "testIntegration"
     | "logPublish"
+    | "skillRead"
+    | "skillFetch"
+    | "skillPropose"
     | "createCard"
     | "startCard"
   >;
@@ -838,7 +850,7 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/actions$/,
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
-        if (!/^(proposal|move|access|publish):(approve|reject):[\w-]{1,36}$/.test(data)) {
+        if (!/^(proposal|move|access|publish|skill):(approve|reject):[\w-]{1,36}$/.test(data)) {
           throw new HttpError(400, "unknown action");
         }
         const out = deps.orchestrator.runAction(data);
@@ -864,6 +876,123 @@ export function createApiHandler(deps: ApiDeps) {
         const out = deps.orchestrator.decideProposal(params[0] as string, params[1] === "approve");
         if (!out.ok) throw new HttpError(409, out.reason);
         return out;
+      },
+    ],
+    // Skills (ADR-0049): owner only; agents propose through the hub, never write here.
+    [
+      "GET",
+      /^\/api\/skills$/,
+      () => {
+        const workspaces = [
+          ...new Set(["shared", ...listAgents(db).map((a) => a.workspace)]),
+        ].filter(isSkillWorkspace);
+        return {
+          skills: listSkills(skillsDir()),
+          workspaces,
+          modes: Object.fromEntries(workspaces.map((ws) => [ws, skillMode(db, ws)])),
+          proposals: skillProposals(db),
+        };
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/skills$/,
+      async ({ req }) => {
+        const b = await readJson(req, 256 * 1024);
+        const workspace = str(b.workspace, "workspace", 64);
+        const name = str(b.name, "name", 64);
+        if (!isSkillWorkspace(workspace)) throw new HttpError(400, "invalid workspace");
+        if (!isSkillName(name)) {
+          throw new HttpError(
+            400,
+            "name: lowercase letters, digits and dashes (e.g. owner-report)",
+          );
+        }
+        if (readSkill(skillsDir(), workspace, name)) {
+          throw new HttpError(409, `a skill named ${name} already exists in ${workspace}`);
+        }
+        return writeSkill(skillsDir(), {
+          workspace,
+          name,
+          ...skillFields(b),
+          enabled: b.enabled !== false,
+        });
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/skills\/([\w-]{1,64})\/([a-z0-9-]{1,64})$/,
+      async ({ req, params }) => {
+        const old = existingSkill(params[0] as string, params[1] as string);
+        const b = await readJson(req, 256 * 1024);
+        // The table's on/off switch sends only `enabled`; the edit form sends the text too.
+        const { source: _source, ...rest } = old;
+        const next = b.body === undefined ? old : { ...rest, ...skillFields(b) };
+        return writeSkill(skillsDir(), {
+          ...next,
+          ...(b.enabled !== undefined ? { enabled: b.enabled === true } : {}),
+        });
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/skills\/([\w-]{1,64})\/([a-z0-9-]{1,64})$/,
+      ({ params }) => {
+        const s = existingSkill(params[0] as string, params[1] as string);
+        deleteSkill(skillsDir(), s.workspace, s.name);
+        return { ok: true };
+      },
+    ],
+    // Import from a link: the gateway fetches it and returns a draft the owner edits and saves.
+    [
+      "POST",
+      /^\/api\/skills\/import$/,
+      async ({ body }) => {
+        const url = str((await body()).url, "url", 2000);
+        let page: { url: string; text: string };
+        try {
+          page = await fetchSkillSource(url);
+        } catch (err) {
+          throw new HttpError(422, (err as Error).message);
+        }
+        let meta: Record<string, unknown> = {};
+        let text = page.text;
+        try {
+          ({ meta, body: text } = parseSkillText(page.text));
+        } catch {}
+        const segments = new URL(page.url).pathname.split("/").filter(Boolean);
+        const file = segments.at(-1)?.replace(/\.(md|markdown|txt|html?)$/i, "") ?? "";
+        const guess =
+          typeof meta.name === "string"
+            ? meta.name
+            : /^skill$/i.test(file)
+              ? (segments.at(-2) ?? "")
+              : file;
+        const firstLine = text.split("\n").find((l) => l.trim() && !l.startsWith("#")) ?? "";
+        return {
+          name: guess
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 64),
+          description: (typeof meta.description === "string" ? meta.description : firstLine)
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 300),
+          body: text,
+          source: url,
+        };
+      },
+    ],
+    [
+      "PUT",
+      /^\/api\/skills-mode\/([\w-]{1,64})$/,
+      async ({ params, body }) => {
+        const mode = (await body()).mode;
+        if (mode !== "review" && mode !== "auto")
+          throw new HttpError(400, "mode must be review or auto");
+        setSetting(db, skillModeKey(params[0] as string), mode);
+        return { ok: true };
       },
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
@@ -1351,6 +1480,23 @@ export function createApiHandler(deps: ApiDeps) {
     return deps.projectsDir;
   };
 
+  const skillsDir = () => join(homeOrThrow(), "skills");
+  const existingSkill = (workspace: string, name: string) => {
+    const s = isSkillWorkspace(workspace) ? readSkill(skillsDir(), workspace, name) : undefined;
+    if (!s) throw new HttpError(404, "no such skill");
+    return s;
+  };
+  /** Description, body and source of an owner add or edit. */
+  const skillFields = (b: Record<string, unknown>) => {
+    const source =
+      b.source === undefined || b.source === "" ? undefined : str(b.source, "source", 2000);
+    return {
+      description: str(b.description, "description", 300).replace(/\s+/g, " ").trim(),
+      body: str(b.body, "body", 200_000),
+      ...(source ? { source } : {}),
+    };
+  };
+
   /** The agent form (create and edit share it); validated again by the manifest schema. */
   const agentForm = (b: Record<string, unknown>) => {
     const list = (v: unknown, field: string) => (v === undefined ? [] : strList(v, field));
@@ -1478,6 +1624,37 @@ export function createApiHandler(deps: ApiDeps) {
                   result: typeof b.result === "string" ? b.result.slice(0, 2000) : "",
                 });
           send(res, out.ok ? 200 : 409, out);
+          return;
+        }
+        // Skills (ADR-0049): read, fetch (async) and propose; the workspace comes from the token's task.
+        if (method === "POST" && tool.startsWith("skill_")) {
+          if (!caller.tools.includes(tool)) {
+            throw new HttpError(403, `tool ${tool} not granted to this run`);
+          }
+          const b = await readJson(req, 256 * 1024);
+          const from = { from: "task" as const, taskId: caller.taskId };
+          const o = deps.orchestrator;
+          const opt = (v: unknown, field: string, max: number) =>
+            v === undefined || v === "" ? undefined : str(v, field, max);
+          const replaces = opt(b.replaces, "replaces", 64);
+          const sourceUrl = opt(b.source_url, "source_url", 2000);
+          const out =
+            tool === "skill_read"
+              ? o.skillRead(from, str(b.name, "name", 64))
+              : tool === "skill_fetch"
+                ? await o.skillFetch(from, str(b.url, "url", 2000))
+                : tool === "skill_propose"
+                  ? o.skillPropose(from, {
+                      name: str(b.name, "name", 64),
+                      description: str(b.description, "description", 300),
+                      body: str(b.body, "body", 100_000),
+                      reason: str(b.reason, "reason", 2000),
+                      ...(replaces ? { replaces } : {}),
+                      ...(sourceUrl ? { sourceUrl } : {}),
+                    })
+                  : undefined;
+          if (!out) throw new HttpError(404, "not found");
+          send(res, 200, out);
           return;
         }
         const AGENT_TOOLS = [
