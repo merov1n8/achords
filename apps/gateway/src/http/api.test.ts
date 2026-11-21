@@ -1028,6 +1028,33 @@ describe("HTTP API", () => {
     });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toMatch(/absolute/);
+
+    // Edit uses the same form, pre-filled from GET, and keeps what the form does not show.
+    const detail = (await (await call("/api/agents/qa")).json()) as Record<string, unknown>;
+    expect(detail).toMatchObject({
+      role: "qa",
+      roles: ["qa"],
+      tools: ["Read"],
+      fs: { read: [], write: [] },
+      doc: expect.stringContaining("Reviews web work."),
+    });
+    const { id: _id, description: _d, ...rest } = form;
+    const put = (body: unknown) =>
+      call("/api/agents/qa", { method: "PUT", body: JSON.stringify(body) });
+    expect(
+      (await put({ ...rest, role: "reviewer", doc: "# Tester\n\nChecks pages." })).status,
+    ).toBe(200);
+    expect(readFileSync(join(agentsDir, "qa", "agent.yaml"), "utf8")).toContain("role: reviewer");
+    expect(readFileSync(join(agentsDir, "qa", "AGENT.md"), "utf8")).toContain("Checks pages.");
+    expect((await put({ ...rest, doc: "x", fs: { write: ["relative"] } })).status).toBe(400);
+    expect(
+      (
+        await call("/api/agents/nope", {
+          method: "PUT",
+          body: JSON.stringify({ ...rest, doc: "x" }),
+        })
+      ).status,
+    ).toBe(404);
   });
 
   it("agent rooms: agents open them with their run token; the owner reads them (ADR-0032)", async () => {
