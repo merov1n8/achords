@@ -124,9 +124,12 @@ function runOnce(
     let stop: RunResult["stopReason"] | undefined;
     let settled = false;
 
+    const env: NodeJS.ProcessEnv = { ...process.env, ...opts.env, ...req.env };
+    // Subscription runs never pick up an API key that happens to be in the environment.
+    if (req.billing !== "api") delete env.ANTHROPIC_API_KEY;
     const child = spawn(bin, args, {
       cwd: req.cwd,
-      env: { ...process.env, ...opts.env, ...req.env },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       // Own process group, so timeout/cancel/`achords kill` reach the CLI's subprocesses too.
       detached: true,

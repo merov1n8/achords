@@ -130,4 +130,14 @@ describe("cli-codex (ADR-0040)", () => {
     const slow = await provider("hang").run(req({ timeoutMs: 300 }));
     expect(slow.stopReason).toBe("timeout");
   });
+
+  it("API mode adds its own provider entry reading the key from the environment (Phase 4)", () => {
+    const sub = codexArgs(req(), { last: "/t/l" }, host);
+    expect(sub.join(" ")).not.toContain("model_provider");
+    const api = codexArgs(req({ billing: "api" }), { last: "/t/l" }, host);
+    expect(api).toContain('model_provider="achords-openai"');
+    expect(api.find((a) => a.startsWith("model_providers."))).toBe(
+      'model_providers.achords-openai={ "name" = "OpenAI API (achords)", "base_url" = "https://api.openai.com/v1", "env_key" = "ACHORDS_OPENAI_API_KEY", "wire_api" = "responses" }',
+    );
+  });
 });
