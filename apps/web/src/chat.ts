@@ -3,7 +3,11 @@
 export interface ThreadSummary {
   agentsWorking: number;
   agentsTotal: number;
+  tasksDone: number;
+  tasksTotal: number;
+  waitingOwner: boolean;
   tokensIn: number;
+  tokensCached: number;
   tokensOut: number;
   costUsd: number;
   budgetDayUsd?: number;

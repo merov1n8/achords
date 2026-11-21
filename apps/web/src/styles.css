@@ -630,7 +630,8 @@ main > .page {
   border: 0;
   background: none;
   outline: none;
-  resize: none;
+  resize: vertical;
+  max-height: 50vh;
   min-height: 44px;
   padding: 0;
   box-shadow: none;
@@ -1791,4 +1792,8 @@ td.actions > * {
   height: 13px;
   color: var(--muted);
   flex: none;
+}
+.waiting-you {
+  color: var(--warn);
+  font-weight: 600;
 }

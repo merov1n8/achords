@@ -188,10 +188,9 @@
   "chat.back": "Back to chats",
   "chat.details": "Run details",
   "chat.activeRun": "Active run",
-  "chat.agentsWorking": "agents working",
-  "chat.statusLine": "{n} of {total} agents working · {usd}",
+  "chat.statusLine": "{done} of {total} tasks done · {usd}",
   "chat.tokens": "Tokens this chat",
-  "chat.tokensInOut": "in {in} · out {out}",
+  "chat.tokensInOut": "in {in} (of which {cached} from cache) · out {out}",
   "chat.cost": "Cost",
   "chat.budgetDay": "budget {usd} / day",
   "chat.noBudget": "no daily API budget set",
@@ -735,5 +734,10 @@
   "chat.rename": "Rename chat",
   "chat.renameHint": "Click to rename",
   "projects.pickChannel": "Choose a type",
-  "chat.titlePlaceholder": "Name this chat"
+  "chat.titlePlaceholder": "Name this chat",
+  "chat.tasksDone": "tasks done",
+  "chat.waitingYou": "waiting for your answer",
+  "chat.nWorking": "{n} working",
+  "chat.nothingRunning": "nothing running",
+  "chat.statusWaiting": "Waiting for your answer · {usd}"
 }

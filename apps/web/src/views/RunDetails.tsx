@@ -18,19 +18,30 @@ export function RunDetails(props: { summary: ThreadSummary; onStop: () => void }
           {t("chat.activeRun")}
         </span>
         <span class="v">
-          {s.agentsWorking} / {s.agentsTotal}
+          {s.tasksDone} / {s.tasksTotal}
         </span>
-        <span class="s">{t("chat.agentsWorking")}</span>
+        <span class="s">
+          {t("chat.tasksDone")}
+          {" · "}
+          {s.waitingOwner ? (
+            <strong class="waiting-you">{t("chat.waitingYou")}</strong>
+          ) : s.agentsWorking ? (
+            t("chat.nWorking", { n: s.agentsWorking })
+          ) : (
+            t("chat.nothingRunning")
+          )}
+        </span>
         {/* <progress> keeps the CSP strict: no inline width styles. */}
-        <progress max={Math.max(s.agentsTotal, 1)} value={s.agentsWorking} />
+        <progress max={Math.max(s.tasksTotal, 1)} value={s.tasksDone} />
       </div>
       <div class="kpi-pair">
         <div class="card kpi">
           <span class="k">{t("chat.tokens")}</span>
-          <span class="v">{formatTokens(s.tokensIn + s.tokensOut)}</span>
+          <span class="v">{formatTokens(s.tokensIn + s.tokensCached + s.tokensOut)}</span>
           <span class="s">
             {t("chat.tokensInOut", {
-              in: formatTokens(s.tokensIn),
+              in: formatTokens(s.tokensIn + s.tokensCached),
+              cached: formatTokens(s.tokensCached),
               out: formatTokens(s.tokensOut),
             })}
           </span>

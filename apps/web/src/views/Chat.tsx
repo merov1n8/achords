@@ -159,11 +159,13 @@ function Conversation(props: {
           {s && (
             <div class="status muted small">
               <span class={`dot ${s.agentsWorking ? "" : "off"}`} />
-              {t("chat.statusLine", {
-                n: s.agentsWorking,
-                total: s.agentsTotal,
-                usd: formatUsd(s.costUsd),
-              })}
+              {s.waitingOwner
+                ? t("chat.statusWaiting", { usd: formatUsd(s.costUsd) })
+                : t("chat.statusLine", {
+                    done: s.tasksDone,
+                    total: s.tasksTotal,
+                    usd: formatUsd(s.costUsd),
+                  })}
             </div>
           )}
         </div>
@@ -185,11 +187,7 @@ function Conversation(props: {
         </button>
       </header>
       {s && (
-        <progress
-          class="thread-progress"
-          max={Math.max(s.agentsTotal, 1)}
-          value={s.agentsWorking}
-        />
+        <progress class="thread-progress" max={Math.max(s.tasksTotal, 1)} value={s.tasksDone} />
       )}
       <div class="messages">
         {list.map((m) => (
@@ -248,7 +246,10 @@ function Conversation(props: {
           ref={input}
           class="input"
           value={text}
-          onInput={(e) => setText(e.currentTarget.value)}
+          onInput={(e) => {
+            setText(e.currentTarget.value);
+            grow(e.currentTarget);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) send(e);
           }}
@@ -376,4 +377,19 @@ function TitleEdit(props: {
       }}
     />
   );
+}
+
+/**
+ * The composer grows with what is typed (up to half the screen), like the Claude apps; the owner
+ * can also drag it taller. Emptied after sending, it goes back to its small size.
+ */
+function grow(el: HTMLTextAreaElement): void {
+  if (!el.value) {
+    el.style.height = "";
+    return;
+  }
+  const max = Math.round(window.innerHeight * 0.5);
+  const manual = el.offsetHeight;
+  el.style.height = "auto";
+  el.style.height = `${Math.min(Math.max(el.scrollHeight, manual), max)}px`;
 }

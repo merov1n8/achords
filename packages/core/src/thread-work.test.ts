@@ -31,7 +31,7 @@ describe("thread work", () => {
       const run = startRun(db, { provider: "cli-claude", taskId, agentId });
       finishRun(db, run.id, "succeeded", {
         costUsd: usd,
-        tokens: { input, output, cached: 0 },
+        tokens: { input, output, cached: 5000 },
       });
     };
     done(root.id, "coder", 1000, 200, 0.25);
@@ -39,6 +39,8 @@ describe("thread work", () => {
     done(other.id, "writer", 9999, 9999, 9);
     expect(threadSummary(db, thread.id)).toMatchObject({
       tokensIn: 1500,
+      // Most input of a CLI run is read from the prompt cache; shown apart so "in" is not tiny.
+      tokensCached: 10000,
       tokensOut: 300,
       costUsd: 0.35,
     });
@@ -74,10 +76,50 @@ describe("thread work", () => {
     expect(threadSummary(db, createThread(db, {}).id)).toEqual({
       agentsWorking: 0,
       agentsTotal: 0,
+      tasksDone: 0,
+      tasksTotal: 0,
+      waitingOwner: false,
+      tokensCached: 0,
       tokensIn: 0,
       tokensOut: 0,
       costUsd: 0,
       participants: [],
+    });
+  });
+
+  it("counts the chat's tasks (cards), done of all, and says when work waits for the owner", () => {
+    const { db, thread } = setup();
+    const t1 = enqueueRoot(db, {
+      title: "Plan",
+      threadId: thread.id,
+      caller: "boss",
+      assigneeAgentId: "coder",
+    });
+    const t2 = enqueueRoot(db, {
+      title: "Q1",
+      threadId: thread.id,
+      caller: "boss",
+      assigneeAgentId: "coder",
+    });
+    enqueueRoot(db, { title: "Q2", threadId: thread.id, caller: "boss", assigneeAgentId: "coder" });
+    enqueueChild(db, t2, { title: "step", caller: "coder", assigneeAgentId: "tester" });
+    db.prepare("UPDATE tasks SET status = 'done' WHERE id IN (?, ?)").run(t1.id, t2.id);
+    expect(threadSummary(db, thread.id)).toMatchObject({
+      tasksDone: 2,
+      tasksTotal: 3,
+      waitingOwner: false,
+    });
+    const q3 = enqueueRoot(db, {
+      title: "Q3",
+      threadId: thread.id,
+      caller: "boss",
+      assigneeAgentId: "coder",
+    });
+    askOwner(db, q3.id, "Which tier?");
+    expect(threadSummary(db, thread.id)).toMatchObject({
+      tasksDone: 2,
+      tasksTotal: 4,
+      waitingOwner: true,
     });
   });
 

@@ -8,7 +8,14 @@ export type ParticipantStatus = "running" | "queued" | "idle" | "waiting";
 export interface ThreadSummary {
   agentsWorking: number;
   agentsTotal: number;
+  /** The chat's own tasks (its cards; delegated steps not counted): finished of all. */
+  tasksDone: number;
+  tasksTotal: number;
+  /** Some work of the chat waits for the owner's answer. */
+  waitingOwner: boolean;
   tokensIn: number;
+  /** Input read from the prompt cache (not in tokensIn). */
+  tokensCached: number;
   tokensOut: number;
   costUsd: number;
   participants: { agent: string; name: string; status: ParticipantStatus }[];
@@ -26,7 +33,7 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
   const totals = db
     .prepare(
       `SELECT COALESCE(SUM(input_tokens), 0) AS i, COALESCE(SUM(output_tokens), 0) AS o,
-         COALESCE(SUM(cost_usd), 0) AS usd
+         COALESCE(SUM(cached_tokens), 0) AS c, COALESCE(SUM(cost_usd), 0) AS usd
        FROM runs WHERE task_id IN (${THREAD_TASKS})`,
     )
     .get(threadId, threadId);
@@ -57,10 +64,21 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
     else if (RANK.indexOf(status) > RANK.indexOf(seen.status)) seen.status = status;
   }
   const participants = [...byAgent.values()];
+  const tasks = db
+    .prepare(
+      `SELECT COUNT(*) AS total,
+         SUM(CASE WHEN status IN ('done', 'failed', 'cancelled') THEN 1 ELSE 0 END) AS done
+       FROM tasks WHERE thread_id = ? AND parent_id IS NULL`,
+    )
+    .get(threadId);
   return {
     agentsWorking: participants.filter((p) => p.status === "running").length,
     agentsTotal: participants.length,
+    tasksDone: Number(tasks?.done ?? 0),
+    tasksTotal: Number(tasks?.total ?? 0),
+    waitingOwner: rows.some((r) => r.status === "queued" && Number(r.waiting_owner) === 1),
     tokensIn: Number(totals?.i ?? 0),
+    tokensCached: Number(totals?.c ?? 0),
     tokensOut: Number(totals?.o ?? 0),
     costUsd: Number(totals?.usd ?? 0),
     participants,

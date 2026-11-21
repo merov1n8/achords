@@ -452,7 +452,11 @@ describe("HTTP API", () => {
     expect(await (await call(`/api/threads/${thread.id}/summary`)).json()).toEqual({
       agentsWorking: 0,
       agentsTotal: 1,
+      tasksDone: 0,
+      tasksTotal: 1,
+      waitingOwner: false,
       tokensIn: 10,
+      tokensCached: 0,
       tokensOut: 5,
       costUsd: 0.4,
       budgetDayUsd: 5,

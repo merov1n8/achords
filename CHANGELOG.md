@@ -39,6 +39,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Chat run details count the chat's tasks (done of all) and say when work waits for your answer;
+  input tokens include the part read from cache; the message box grows as you type and can be
+  dragged taller.
 - Chat: your own messages use a neutral colour instead of the accent colour.
 - Project accounts: the type is a dropdown (Git repository included; GitHub and GitLab addresses,
   https or ssh, are checked); the chat title shows a pencil to show it can be renamed.
