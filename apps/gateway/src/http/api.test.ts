@@ -329,6 +329,27 @@ describe("HTTP API", () => {
     }
   });
 
+  it("a paired device makes a pairing code for another one (web: Devices → New pairing code)", async () => {
+    const { call } = await pair();
+    const res = await call("/api/pair-codes", { method: "POST", body: "{}" });
+    const { code } = (await res.json()) as { code: string };
+    expect(code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    // The code pairs a second browser once.
+    const second = await fetch(`${base}/api/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ code, deviceName: "phone" }),
+    });
+    expect(second.status).toBe(200);
+    // Without a session nobody gets a code.
+    const anon = await fetch(`${base}/api/pair-codes`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: "{}",
+    });
+    expect(anon.status).toBe(401);
+  });
+
   it("blocks foreign Host headers (DNS rebinding)", async () => {
     const { cookie } = await pair();
     // fetch() ignores a custom Host header, so use http.request to really send one.

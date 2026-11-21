@@ -75,6 +75,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Settings → Devices: "New pairing code" shows a one-time code in a modal for pairing a phone or
+  another computer, no terminal needed.
 - Web UI from a phone or another computer through Tailscale: set the address in Settings →
   Devices → Remote address (after `tailscale serve --bg 7420`); see OPERATIONS.
 - Blender and the Unity Editor are opened by achords when a run needs them and they are not
