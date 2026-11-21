@@ -1,7 +1,7 @@
-import { LogOut } from "lucide-preact";
+import { LogOut, Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
-import { Confirm } from "../components/Modal.tsx";
+import { Confirm, Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
@@ -10,11 +10,38 @@ import type { Device } from "../types.ts";
 export function Devices({ onLogout }: { onLogout: () => void }) {
   const devices = usePoll(() => api<Device[]>("/api/devices"), 10000);
   const [revoking, setRevoking] = useState<Device>();
+  const [code, setCode] = useState<string>();
+  const [codeError, setCodeError] = useState<string>();
+  const newCode = async () => {
+    setCodeError(undefined);
+    try {
+      setCode((await api<{ code: string }>("/api/pair-codes", { method: "POST" })).code);
+    } catch (err) {
+      setCodeError((err as Error).message);
+    }
+  };
   return (
     <>
       <div class="page-head">
         <h1>{t("nav.devices")}</h1>
+        <button type="button" class="btn primary" onClick={newCode}>
+          <Plus class="icon" />
+          {t("devices.newCode")}
+        </button>
       </div>
+      {codeError && <p class="error">{codeError}</p>}
+      {code && (
+        <Modal
+          title={t("devices.newCode")}
+          onClose={() => {
+            setCode(undefined);
+            devices.refresh();
+          }}
+        >
+          <p class="pair-code">{code}</p>
+          <p class="muted">{t("devices.codeHelp")}</p>
+        </Modal>
+      )}
       <div class="panel">
         <table>
           <thead>

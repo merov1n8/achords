@@ -53,7 +53,7 @@
   "devices.thisDevice": "this device",
   "devices.logout": "Log out",
   "devices.revoke": "Revoke",
-  "devices.pairHint": "To pair another device, run `achords pair web` on the host.",
+  "devices.pairHint": "To pair another device, press New pairing code (or run `achords pair web` on the host).",
   "pair.intro": "Pair this browser: run `achords pair web` on the host and enter the code.",
   "pair.code": "Pairing code",
   "pair.deviceName": "Device name",
@@ -723,5 +723,7 @@
   "remote.help": "Open Achords from your phone or another computer through Tailscale: run `tailscale serve --bg 7420` once on this Mac, then enter its Tailscale address here (shown in the Tailscale app, e.g. mini.tail1234.ts.net). When Achords moves to another Mac, change it here. Leave empty to allow this Mac only.",
   "remote.useSuggested": "Use this Mac's address",
   "remote.saved": "Saved. Open {url} on your phone and pair it with a code.",
-  "remote.cleared": "Cleared: only this Mac can open Achords."
+  "remote.cleared": "Cleared: only this Mac can open Achords.",
+  "devices.newCode": "New pairing code",
+  "devices.codeHelp": "Open Achords on the new device (this Mac's remote address, see below) and enter this code. It works once and expires in 10 minutes."
 }
