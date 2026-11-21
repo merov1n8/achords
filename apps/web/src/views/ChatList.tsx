@@ -1,6 +1,16 @@
-import { Ellipsis, Plus } from "lucide-preact";
-import { useEffect, useState } from "preact/hooks";
+import {
+  Archive,
+  ArchiveRestore,
+  Ellipsis,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  Trash2,
+} from "lucide-preact";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
+import { Confirm, Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
 import type { Project, Thread } from "../types.ts";
@@ -8,79 +18,187 @@ import type { Project, Thread } from "../types.ts";
 const RECENT = 10;
 const PER_PROJECT = 5;
 
-/** Pin, rename, archive or delete one chat (owner request: many chats). */
-export function ThreadMenu(props: { thread: Thread; onChange: () => void; onClose: () => void }) {
+/**
+ * The … button of one chat and its menu: pin, rename, archive, delete. A small popover anchored
+ * to the button (fixed, so the scrolling sidebar does not clip it); rename and delete open modals.
+ */
+export function ThreadMenu(props: { thread: Thread; onChange: () => void }) {
   const th = props.thread;
-  const [renaming, setRenaming] = useState(false);
+  const menuId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number }>();
+  const [dialog, setDialog] = useState<"rename" | "delete">();
   const [title, setTitle] = useState(th.title ?? "");
-  const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string>();
-  const act = async (fn: () => Promise<unknown>) => {
+  const open = pos !== undefined;
+
+  const close = (refocus = true) => {
+    setPos(undefined);
+    if (refocus) trigger.current?.focus();
+  };
+  const toggle = () => {
+    const r = trigger.current?.getBoundingClientRect();
+    if (open || !r) return close(false);
+    setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+  };
+  const items = () => [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+
+  useLayoutEffect(() => {
+    const m = menu.current;
+    const r = trigger.current?.getBoundingClientRect();
+    if (!open || !m || !r) return;
+    // No room below: open upwards.
+    if (r.bottom + 4 + m.offsetHeight > window.innerHeight - 8) {
+      setPos({ top: Math.max(8, r.top - 4 - m.offsetHeight), right: window.innerWidth - r.right });
+    }
+    items()[0]?.focus();
+    const outside = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (!m.contains(target) && !trigger.current?.contains(target)) close(false);
+    };
+    // The menu is placed once; scrolling or resizing would leave it floating elsewhere.
+    const away = (e: Event) => {
+      if (!m.contains(e.target as Node)) close(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    window.addEventListener("scroll", away, true);
+    window.addEventListener("resize", away);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      window.removeEventListener("scroll", away, true);
+      window.removeEventListener("resize", away);
+    };
+  }, [open]);
+
+  const onKey = (e: KeyboardEvent) => {
+    const list = items();
+    const i = list.indexOf(document.activeElement as HTMLElement);
+    const go = (n: number) => list[(n + list.length) % list.length]?.focus();
+    if (e.key === "ArrowDown") go(i + 1);
+    else if (e.key === "ArrowUp") go(i - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(list.length - 1);
+    else if (e.key === "Escape") close();
+    else if (e.key === "Tab") close(false);
+    else return;
+    if (e.key !== "Tab") e.preventDefault();
+  };
+
+  const put = async (body: object) => {
     setError(undefined);
     try {
-      await fn();
+      await api(`/api/threads/${th.id}`, { method: "PUT", body });
       props.onChange();
-      props.onClose();
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     }
   };
-  const put = (body: object) => api(`/api/threads/${th.id}`, { method: "PUT", body });
-  if (renaming) {
-    return (
-      <form
-        class="threadmenu"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (title.trim()) void act(() => put({ title: title.trim() }));
-        }}
-      >
-        <input
-          class="input"
-          aria-label={t("chats.rename")}
-          value={title}
-          onInput={(e) => setTitle(e.currentTarget.value)}
-        />
-        <button type="submit" class="btn">
-          {t("common.save")}
-        </button>
-      </form>
-    );
-  }
+  const item = (Icon: typeof Pin, label: string, run: () => void, danger = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      tabIndex={-1}
+      class={`menuitem ${danger ? "danger" : ""}`}
+      onClick={() => {
+        close();
+        run();
+      }}
+    >
+      <Icon class="icon" />
+      {label}
+    </button>
+  );
+
   return (
-    <div class="threadmenu">
+    <>
       <button
+        ref={trigger}
         type="button"
-        class="btn ghost"
-        onClick={() => act(() => put({ pinned: !th.pinned }))}
+        class="btn ghost icon-btn"
+        aria-label={t("chats.actions")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={toggle}
       >
-        {th.pinned ? t("chats.unpin") : t("chats.pin")}
+        <Ellipsis class="icon" />
       </button>
-      <button type="button" class="btn ghost" onClick={() => setRenaming(true)}>
-        {t("chats.rename")}
-      </button>
-      <button
-        type="button"
-        class="btn ghost"
-        onClick={() => act(() => put({ archived: !th.archived }))}
-      >
-        {th.archived ? t("chats.unarchive") : t("chats.archive")}
-      </button>
-      {confirm ? (
-        <button
-          type="button"
-          class="btn danger"
-          onClick={() => act(() => api(`/api/threads/${th.id}`, { method: "DELETE" }))}
+      {pos && (
+        <div
+          ref={menu}
+          id={menuId}
+          role="menu"
+          aria-label={th.title ?? t("chat.untitled")}
+          class="menu"
+          style={{ top: `${pos.top}px`, right: `${pos.right}px` }}
+          onKeyDown={onKey}
         >
-          {t("chats.confirmDelete")}
-        </button>
-      ) : (
-        <button type="button" class="btn ghost" onClick={() => setConfirm(true)}>
-          {t("chats.delete")}
-        </button>
+          {th.pinned
+            ? item(PinOff, t("chats.unpin"), () => put({ pinned: false }))
+            : item(Pin, t("chats.pin"), () => put({ pinned: true }))}
+          {item(Pencil, t("chats.rename"), () => {
+            setTitle(th.title ?? "");
+            setDialog("rename");
+          })}
+          {th.archived
+            ? item(ArchiveRestore, t("chats.unarchive"), () => put({ archived: false }))
+            : item(Archive, t("chats.archive"), () => put({ archived: true }))}
+          {item(Trash2, t("chats.delete"), () => setDialog("delete"), true)}
+        </div>
       )}
-      {error && <span class="error small">{error}</span>}
-    </div>
+      {error && !dialog && <span class="error small">{error}</span>}
+      {dialog === "rename" && (
+        <Modal
+          title={t("chats.renameTitle")}
+          onClose={() => {
+            setDialog(undefined);
+            setError(undefined);
+          }}
+          footer={
+            <>
+              <button type="button" class="btn ghost" onClick={() => setDialog(undefined)}>
+                {t("common.cancel")}
+              </button>
+              <button type="submit" form={`${menuId}-rename`} class="btn primary">
+                {t("common.save")}
+              </button>
+            </>
+          }
+        >
+          <form
+            id={`${menuId}-rename`}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (title.trim() && (await put({ title: title.trim() }))) setDialog(undefined);
+            }}
+          >
+            <input
+              class="input"
+              aria-label={t("chats.rename")}
+              value={title}
+              onInput={(e) => setTitle(e.currentTarget.value)}
+            />
+            {error && <p class="error">{error}</p>}
+          </form>
+        </Modal>
+      )}
+      {dialog === "delete" && (
+        <Confirm
+          title={t("chats.deleteTitle")}
+          message={t("chats.deleteConfirm", { title: th.title ?? t("chat.untitled") })}
+          confirmLabel={t("chats.delete")}
+          danger
+          onConfirm={async () => {
+            await api(`/api/threads/${th.id}`, { method: "DELETE" });
+            props.onChange();
+          }}
+          onClose={() => setDialog(undefined)}
+        />
+      )}
+    </>
   );
 }
 
@@ -92,7 +210,6 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [byProject, setByProject] = useState(false);
-  const [menu, setMenu] = useState<string>();
   // Typing settles for a moment before the search runs.
   useEffect(() => {
     const id = setTimeout(() => setQuery(q.trim()), 250);
@@ -113,18 +230,8 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
           {th.pinned ? "📌 " : ""}
           {th.title ?? t("chat.untitled")}
         </a>
-        <button
-          type="button"
-          class="btn ghost icon-btn"
-          aria-label={t("chats.actions")}
-          onClick={() => setMenu(menu === th.id ? undefined : th.id)}
-        >
-          <Ellipsis class="icon" />
-        </button>
+        <ThreadMenu thread={th} onChange={threads.refresh} />
       </div>
-      {menu === th.id && (
-        <ThreadMenu thread={th} onChange={threads.refresh} onClose={() => setMenu(undefined)} />
-      )}
     </div>
   );
   const heading = (text: string) => <div class="sub-heading">{text}</div>;

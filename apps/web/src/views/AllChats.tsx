@@ -13,7 +13,6 @@ export function AllChats(props: { project?: string | undefined }) {
   const [query, setQuery] = useState("");
   const [archived, setArchived] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [menu, setMenu] = useState<string>();
   const [error, setError] = useState<string>();
   useEffect(() => {
     const id = setTimeout(() => setQuery(q.trim()), 250);
@@ -124,46 +123,27 @@ export function AllChats(props: { project?: string | undefined }) {
             </thead>
             <tbody>
               {list.map((th) => (
-                <>
-                  <tr key={th.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        aria-label={t("chats.select")}
-                        checked={selected.has(th.id)}
-                        onChange={() => toggle(th.id)}
-                      />
-                    </td>
-                    <td>
-                      <a href={`#/chat/${th.id}`}>
-                        {th.pinned ? "📌 " : ""}
-                        {th.title ?? t("chat.untitled")}
-                      </a>
-                    </td>
-                    <td>{th.project ? (names.get(th.project) ?? th.project) : "–"}</td>
-                    <td class="muted small">{ago(th.updatedAt)}</td>
-                    <td>
-                      <button
-                        type="button"
-                        class="btn ghost"
-                        onClick={() => setMenu(menu === th.id ? undefined : th.id)}
-                      >
-                        {t("chats.actions")}
-                      </button>
-                    </td>
-                  </tr>
-                  {menu === th.id && (
-                    <tr key={`${th.id}-menu`}>
-                      <td colSpan={5}>
-                        <ThreadMenu
-                          thread={th}
-                          onChange={threads.refresh}
-                          onClose={() => setMenu(undefined)}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </>
+                <tr key={th.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={t("chats.select")}
+                      checked={selected.has(th.id)}
+                      onChange={() => toggle(th.id)}
+                    />
+                  </td>
+                  <td>
+                    <a href={`#/chat/${th.id}`}>
+                      {th.pinned ? "📌 " : ""}
+                      {th.title ?? t("chat.untitled")}
+                    </a>
+                  </td>
+                  <td>{th.project ? (names.get(th.project) ?? th.project) : "–"}</td>
+                  <td class="muted small">{ago(th.updatedAt)}</td>
+                  <td class="actions">
+                    <ThreadMenu thread={th} onChange={threads.refresh} />
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
