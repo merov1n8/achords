@@ -475,20 +475,20 @@ describe("integrations in runs (ADR-0034)", () => {
     });
   });
 
-  it("an OpenAI (codex) run gets no MCP tools yet and is told so (ADR-0040)", async () => {
+  it("an OpenAI (codex) run gets hub tools and local integrations, never credentials (ADR-0040)", async () => {
     mkdirSync(join(home, "agents", "oai"), { recursive: true });
     writeFileSync(
       join(home, "agents", "oai", "agent.yaml"),
-      "id: oai\nname: oai\nrole: oai\nworkspace: web-clients\nmodels:\n  default: cli-codex/gpt-6-astra\n  allowed: [cli-codex/gpt-6-astra, cli-claude/sonnet]\ntools: [Read]\nmcp: [wp]\n",
+      "id: oai\nname: oai\nrole: oai\nworkspace: web-clients\nmodels:\n  default: cli-codex/gpt-6-astra\n  allowed: [cli-codex/gpt-6-astra, cli-claude/sonnet]\ntools: [Read]\nmcp: [wp, blender]\n",
     );
     orch.syncAgents();
     const task = await give("oai", "acme");
     expect(task.status).toBe("done");
     expect(seen[0]?.req.model).toBe("gpt-6-astra");
-    expect(seen[0]?.req.mcpConfigPath).toBeUndefined();
-    expect(seen[0]?.req.prompt).toMatch(
-      /OpenAI model without achords tools[\s\S]*\(wp are left out\)/,
-    );
+    const servers = Object.keys(JSON.parse(seen[0]?.config ?? "{}").mcpServers ?? {});
+    expect(servers.sort()).toEqual(["achords", "blender"]);
+    expect(seen[0]?.req.allowedTools).toContain("mcp__achords__ask_owner");
+    expect(seen[0]?.req.prompt).toMatch(/client credentials are left out: wp/);
     expect(resolved).toEqual([]); // no credentials were even resolved
   });
 

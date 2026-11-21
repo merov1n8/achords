@@ -6,7 +6,9 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 
 const HUB = process.env.ACHORDS_HUB_URL ?? "";
-const TOKEN = process.env.ACHORDS_RUN_TOKEN ?? "";
+// Under codex the token arrives under another name, given in ACHORDS_RUN_TOKEN_VAR (ADR-0040).
+const TOKEN =
+  process.env.ACHORDS_RUN_TOKEN ?? process.env[process.env.ACHORDS_RUN_TOKEN_VAR ?? ""] ?? "";
 // Tools granted to this run; the gateway checks again, this only keeps the model's view honest.
 const GRANTED = new Set((process.env.ACHORDS_TOOLS ?? "").split(",").filter(Boolean));
 
