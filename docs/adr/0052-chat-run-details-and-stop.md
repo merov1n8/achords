@@ -1,0 +1,12 @@
+# ADR-0052: Chat run details and Stop per chat
+
+Status: Accepted (2026-11-21)
+
+- Context: The owner wants to see, next to a conversation, which agents work on it and what it costs, and to stop that work without stopping everything (`achords kill`, Telegram `/stop`). The chat list moves from the sidebar into the Chat page (approved design: list | conversation | run details).
+
+- Decision:
+  - A chat's work is every task with its `thread_id`, plus tasks whose `root_id` is one of them (delegated children, ADR-0029). `GET /api/threads/:id/summary` (owner session) returns `agentsWorking`, `agentsTotal`, `tokensIn`, `tokensOut`, `costUsd` (sums over the runs of those tasks) and `participants` (one entry per agent: assignee, else the agent of its latest run; status `running` = claimed, `waiting` = queued on delegated children or an owner question, `queued`, `idle` = anything else; the busiest task decides). `budgetDayUsd` is the sum of the day budgets of the API providers (ADR-0046), left out when none is set. Boss turns are not tasks and are not counted.
+  - `POST /api/threads/:id/stop` (owner session + CSRF) cancels the chat's `queued` and `claimed` tasks first, then for each of their running runs uses the `achords kill` path (`killRun`: SIGKILL of the recorded process group, skipped when the PID was reused) and marks the run cancelled. Cancelling first means the worker that sees its run die finds the task no longer claimed: `fail` changes nothing, so there is no retry and no failure message. The worker also checks just before starting a run that its task is still claimed. The queue is not paused and other chats keep running.
+  - Web: the chat list is the Chat page's first column; the third column shows the summary and Stop (with a confirmation). Below 1200 px it opens from an info button as a side sheet, on phones as a bottom sheet (native `<dialog>`, the More sheet pattern). On phones an open chat hides the top bar and the tab bar.
+
+- Consequences: Stop is immediate and loses the stopped run's unfinished work and its usage numbers (the CLI never reported them). Known gap: Stop pressed in the instant between a run's start and its PID being recorded marks the run cancelled but cannot find its process; that agent finishes and its result is still posted, while the task stays cancelled. Chats with work started before `thread_id` was set on children are still covered through `root_id`.

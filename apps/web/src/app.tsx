@@ -24,7 +24,6 @@ import { Agents } from "./views/Agents.tsx";
 import { AllChats } from "./views/AllChats.tsx";
 import { Appearance } from "./views/Appearance.tsx";
 import { Chat } from "./views/Chat.tsx";
-import { ChatList } from "./views/ChatList.tsx";
 import { Devices } from "./views/Devices.tsx";
 import { Integrations } from "./views/Integrations.tsx";
 import { Kanban } from "./views/Kanban.tsx";
@@ -100,7 +99,9 @@ export function App() {
   };
 
   return (
-    <div class={`layout ${collapsed ? "collapsed" : ""}`}>
+    <div
+      class={`layout ${collapsed ? "collapsed" : ""} ${section === "chat" && sub ? "thread-open" : ""}`}
+    >
       <TopBar section={section} sub={sub} onNewChat={newThread} />
       <Sidebar
         section={section}
@@ -109,10 +110,13 @@ export function App() {
         collapsed={collapsed}
         onCollapse={toggleCollapsed}
       />
-      <main>
+      {/* The chat page brings its own columns, edge to edge. */}
+      <main class={section === "chat" ? "flush" : undefined}>
         {/* Pages scroll here; the live bar sits below them and never covers the chat box. */}
         <div class="page">
-          {section === "chat" && <Chat threadId={sub} onThread={(id) => go(`chat/${id}`)} />}
+          {section === "chat" && (
+            <Chat threadId={sub} onThread={(id) => go(`chat/${id}`)} onNew={newThread} />
+          )}
           {section === "kanban" && <Kanban />}
           {section === "agents" && <Agents />}
           {section === "projects" && <Projects />}
@@ -131,12 +135,7 @@ export function App() {
         </div>
         <LiveBar />
       </main>
-      <TabBar
-        section={section}
-        chatHref={section === "chat" && sub ? `#/chat/${sub}` : "#/chats"}
-        moreOpen={more}
-        onMore={() => setMore(true)}
-      />
+      <TabBar section={section} chatHref="#/chat" moreOpen={more} onMore={() => setMore(true)} />
       <MoreSheet
         open={more}
         onClose={() => setMore(false)}
@@ -173,10 +172,6 @@ function Sidebar(props: {
   collapsed: boolean;
   onCollapse: () => void;
 }) {
-  const newThread = async () => {
-    const thread = await api<Thread>("/api/threads", { method: "POST", body: {} });
-    go(`chat/${thread.id}`);
-  };
   const subLink = (href: string, label: string, active: boolean) => (
     <a class={`sub ${active ? "active" : ""}`} href={href}>
       {label}
@@ -199,13 +194,14 @@ function Sidebar(props: {
           {props.collapsed ? <PanelLeftOpen class="icon" /> : <PanelLeftClose class="icon" />}
         </button>
       </div>
-      <Group
-        icon={<MessageSquare class="icon" />}
-        label={t("nav.chat")}
-        active={section === "chat" || section === "chats"}
+      <a
+        class={`nav ${section === "chat" || section === "chats" ? "active" : ""}`}
+        href="#/chat"
+        title={t("nav.chat")}
       >
-        <ChatList activeId={section === "chat" ? sub : undefined} onNew={newThread} />
-      </Group>
+        <MessageSquare class="icon" />
+        <span class="lbl">{t("nav.chat")}</span>
+      </a>
       <a
         class={`nav ${section === "kanban" ? "active" : ""}`}
         href="#/kanban"

@@ -12,6 +12,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hook
 import { api } from "../api.ts";
 import { Confirm, Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
+import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
 import type { Project, Thread } from "../types.ts";
 
@@ -20,7 +21,7 @@ const PER_PROJECT = 5;
 
 /**
  * The … button of one chat and its menu: pin, rename, archive, delete. A small popover anchored
- * to the button (fixed, so the scrolling sidebar does not clip it); rename and delete open modals.
+ * to the button (fixed, so the scrolling chat list does not clip it); rename and delete open modals.
  */
 export function ThreadMenu(props: { thread: Thread; onChange: () => void }) {
   const th = props.thread;
@@ -203,8 +204,8 @@ export function ThreadMenu(props: { thread: Thread; onChange: () => void }) {
 }
 
 /**
- * The chat part of the sidebar: search, pinned, recent and scheduled chats, or the latest few
- * per project; scrolls on its own so the rest of the menu stays put.
+ * The chat page's first column: search, pinned, recent and scheduled chats, or the latest few
+ * per project; scrolls on its own. On phones it is the whole Chat tab until a chat is opened.
  */
 export function ChatList(props: { activeId?: string | undefined; onNew: () => void }) {
   const [q, setQ] = useState("");
@@ -224,14 +225,22 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
   const all = threads.data ?? [];
 
   const item = (th: Thread) => (
-    <div key={th.id} class="threadrow">
-      <div class="row">
-        <a class={`sub grow ${th.id === props.activeId ? "active" : ""}`} href={`#/chat/${th.id}`}>
+    <div key={th.id} class={`threadrow ${th.id === props.activeId ? "active" : ""}`}>
+      <a
+        class="chatrow"
+        href={`#/chat/${th.id}`}
+        aria-current={th.id === props.activeId ? "page" : undefined}
+      >
+        <span class="t">
           {th.pinned && <Pin class="icon pin" aria-label={t("chats.pinned")} />}
           {th.title ?? t("chat.untitled")}
-        </a>
-        <ThreadMenu thread={th} onChange={threads.refresh} />
-      </div>
+        </span>
+        <span class="m">
+          {th.lastAgent ? `${th.lastAgent} · ` : ""}
+          {ago(th.updatedAt)}
+        </span>
+      </a>
+      <ThreadMenu thread={th} onChange={threads.refresh} />
     </div>
   );
   const heading = (text: string) => <div class="sub-heading">{text}</div>;
@@ -282,14 +291,25 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
   return (
     <div class="chatlist">
       <div class="chatlist-tools">
-        <input
-          class="input small"
-          type="search"
-          placeholder={t("chats.search")}
-          aria-label={t("chats.search")}
-          value={q}
-          onInput={(e) => setQ(e.currentTarget.value)}
-        />
+        <div class="row">
+          <input
+            class="input small grow"
+            type="search"
+            placeholder={t("chats.search")}
+            aria-label={t("chats.search")}
+            value={q}
+            onInput={(e) => setQ(e.currentTarget.value)}
+          />
+          <button
+            type="button"
+            class="btn primary square"
+            onClick={props.onNew}
+            aria-label={t("chat.newThread")}
+            title={t("chat.newThread")}
+          >
+            <Plus class="icon" />
+          </button>
+        </div>
         <div class="row small">
           <button
             type="button"
@@ -308,9 +328,6 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
         </div>
       </div>
       <div class="chatlist-items">{body}</div>
-      <button type="button" class="sub as-link" onClick={props.onNew}>
-        <Plus class="icon" /> {t("chat.newThread")}
-      </button>
       <a class="sub" href="#/chats">
         {t("chats.all")}
       </a>

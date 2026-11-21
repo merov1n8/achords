@@ -1148,31 +1148,253 @@ main > .page {
   opacity: 0.5;
 }
 
-/* Chat list in the sidebar: many chats, own scroll, actions per chat */
+/* Chat page: chat list | conversation | run details, edge to edge */
+main.flush {
+  padding: 0;
+}
+main.flush > .livebar {
+  margin: 0 12px 12px;
+}
+.chatpage {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 300px;
+  height: 100%;
+}
+.chatcol,
+.runcol {
+  min-height: 0;
+  overflow-y: auto;
+}
+.chatcol {
+  padding: 14px 12px;
+  border-right: 1px solid var(--border);
+}
+.runcol {
+  padding: 20px;
+  border-left: 1px solid var(--border);
+}
+.chatpage > .conversation {
+  max-width: none;
+  min-height: 0;
+  padding: 0 28px 16px;
+}
+.chat-empty {
+  padding: 24px 28px;
+}
+.thread-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  margin: 0 -28px 16px;
+  padding: 8px 28px;
+  border-bottom: 1px solid var(--border);
+}
+.thread-head h1 {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-head .crumb {
+  color: var(--muted);
+  font-weight: 400;
+}
+.thread-head .back,
+.thread-head .status,
+.thread-head .info,
+.thread-progress,
+.phone-only {
+  display: none;
+}
+/* Narrower desktops: the run details move behind the info button (a side sheet). */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+  .chatpage {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+  .runcol {
+    display: none;
+  }
+  .thread-head .info {
+    display: inline-grid;
+  }
+}
+.mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.mentions .chip {
+  border: 0;
+  cursor: pointer;
+}
+.mentions .chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.rundetails {
+  display: grid;
+  gap: 14px;
+}
+.kpi-pair {
+  display: grid;
+  gap: 14px;
+}
+.rundetails progress,
+.thread-progress {
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.rundetails progress::-webkit-progress-bar,
+.thread-progress::-webkit-progress-bar {
+  background: var(--surface-2);
+}
+.rundetails progress::-webkit-progress-value,
+.thread-progress::-webkit-progress-value {
+  background: var(--accent);
+}
+.rundetails progress::-moz-progress-bar,
+.thread-progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.participants {
+  display: grid;
+  gap: 10px;
+}
+.participants ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.chip .dot {
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+}
+.dot.off {
+  background: var(--muted);
+}
+.stop-run {
+  justify-content: center;
+}
+.run-sheet h2 {
+  font-size: 15px;
+}
+@media (min-width: 768px) {
+  .run-sheet {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(340px, 100vw);
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 16px 20px;
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    overflow-y: auto;
+  }
+  .run-sheet[open] {
+    display: grid;
+    align-content: start;
+    gap: 14px;
+  }
+  .run-sheet::backdrop {
+    background: rgb(10 10 12 / 0.45);
+  }
+  .run-sheet .grabber {
+    display: none;
+  }
+}
+
+/* Chat list (the chat page's first column): many chats, own scroll, actions per chat */
 .chatlist {
   display: grid;
-  gap: 4px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  height: 100%;
 }
 .chatlist-tools {
   display: grid;
-  gap: 4px;
-  padding: 4px 6px 4px 30px;
+  gap: 8px;
 }
 .chatlist-tools .btn.active {
   color: var(--text);
   background: var(--surface);
 }
+.chatlist .btn.square {
+  width: 36px;
+  padding: 0;
+  justify-content: center;
+}
 .chatlist-items {
-  max-height: 45vh;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.threadrow .grow {
+.chatlist .sub {
+  padding-left: 10px;
+}
+.chatlist .sub::before {
+  display: none;
+}
+.threadrow {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius);
+}
+.threadrow:hover {
+  background: var(--surface-2);
+}
+.threadrow.active {
+  background: var(--accent-soft);
+}
+.chatrow {
   flex: 1;
   min-width: 0;
+  display: grid;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+.chatrow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.chatrow .t {
+  font-size: 13.5px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chatrow .m {
+  font-size: 12px;
+  color: var(--muted);
+}
+.threadrow.active .m {
+  color: var(--accent-text);
 }
 .icon-btn {
   padding: 2px 4px;
@@ -1183,7 +1405,7 @@ main > .page {
   opacity: 1;
 }
 .sub-heading {
-  padding: 8px 10px 2px 36px;
+  padding: 8px 10px 2px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1195,7 +1417,107 @@ main > .page {
   list-style: none;
 }
 .sub-pad {
-  padding-left: 36px;
+  padding-left: 10px;
+}
+
+/* Chat on phones: the list, or one chat full screen (no top bar, no tab bar) */
+@media (max-width: 767.98px) {
+  main.flush {
+    padding: 0 0 calc(72px + env(safe-area-inset-bottom));
+  }
+  .layout.thread-open {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .thread-open .topbar,
+  .thread-open .tabbar,
+  .thread-open .livebar {
+    display: none;
+  }
+  .thread-open main.flush {
+    padding: 0;
+  }
+  .chatpage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chatcol {
+    padding: 14px;
+    border: 0;
+  }
+  .chatpage.has-thread .chatcol,
+  .chatpage:not(.has-thread) > :not(.chatcol),
+  .runcol {
+    display: none;
+  }
+  .chatpage > .conversation {
+    padding: 0;
+  }
+  .thread-head {
+    position: sticky;
+    top: 0;
+    gap: 4px;
+    min-height: 60px;
+    margin: 0;
+    padding: 6px 6px 6px 4px;
+    border: 0;
+    background: var(--bg);
+  }
+  .thread-head h1 {
+    font-size: 16px;
+  }
+  .thread-head .back,
+  .thread-head .info {
+    display: inline-grid;
+  }
+  .thread-head .status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .thread-head .crumb,
+  .thread-head .head-tools {
+    display: none;
+  }
+  .thread-progress {
+    display: block;
+    flex: none;
+    height: 3px;
+    border-radius: 0;
+  }
+  .conversation .messages {
+    padding: 14px;
+  }
+  .mentions {
+    margin: 0;
+    padding: 8px 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  .conversation .composer {
+    margin: 8px 14px calc(10px + env(safe-area-inset-bottom));
+    border-radius: 24px;
+    align-items: center;
+  }
+  .composer .btn {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 999px;
+  }
+  .send-lbl {
+    display: none;
+  }
+  .phone-only {
+    display: block;
+  }
+  .run-sheet .sheet-close {
+    display: none;
+  }
+  .kpi-pair {
+    grid-template-columns: 1fr 1fr;
+  }
+  /* The top bar has the New chat button there. */
+  .chatlist .btn.square {
+    display: none;
+  }
 }
 
 /* Modals (native <dialog>) and the row-actions popover */

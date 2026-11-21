@@ -44,6 +44,8 @@ import {
   setThreadProject,
   spendBy,
   spendSince,
+  stopThread,
+  threadSummary,
   updateChecklistItem,
   updateMonitor,
   updateSchedule,
@@ -410,6 +412,31 @@ export function createApiHandler(deps: ApiDeps) {
           .handleMessage(id, text, "web")
           .catch((err) => log(`handleMessage failed: ${(err as Error).message}`));
         send(res, 202, { accepted: true });
+      },
+    ],
+    // The chat page's run details column (and the phone's info sheet).
+    [
+      "GET",
+      /^\/api\/threads\/([\w-]{1,64})\/summary$/,
+      ({ params }) => {
+        const id = params[0] as string;
+        if (!getThread(db, id)) throw new HttpError(404, "no such chat");
+        // API spending limits per provider (Phase 4), added up; subscriptions have none.
+        const day = Object.values(deps.billing?.budgets() ?? {}).reduce((n, b) => n + b.day, 0);
+        return { ...threadSummary(db, id), ...(day > 0 ? { budgetDayUsd: day } : {}) };
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/threads\/([\w-]{1,64})\/stop$/,
+      ({ params }) => {
+        const id = params[0] as string;
+        if (!getThread(db, id)) throw new HttpError(404, "no such chat");
+        const out = stopThread(db, id);
+        log(
+          `owner stopped chat ${id}: ${out.cancelled} task(s) cancelled, ${out.stopped} run(s) killed`,
+        );
+        return out;
       },
     ],
     ["GET", /^\/api\/tasks$/, () => listTasks(db)],
