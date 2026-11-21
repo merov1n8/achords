@@ -172,7 +172,12 @@ export const toLists = (rows: Row[]): Record<string, string[]> => {
 };
 
 /** One list per channel; a client can have several of each (two Instagram accounts, …). */
-export function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }) {
+export function Accounts(props: {
+  rows: Row[];
+  onChange: (rows: Row[]) => void;
+  /** Help under the rows; the project text by default. */
+  help?: string;
+}) {
   const set = (i: number, patch: Partial<Row>) =>
     props.onChange(props.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
@@ -221,7 +226,7 @@ export function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }
           {t("projects.addAccount")}
         </button>
       </div>
-      <span class="muted small">{t("projects.accountsHelp")}</span>
+      <span class="muted small">{props.help ?? t("projects.accountsHelp")}</span>
     </div>
   );
 }

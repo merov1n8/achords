@@ -577,4 +577,14 @@ describe("integrations in runs (ADR-0034)", () => {
       text: /no connection test/,
     });
   });
+
+  it("connection test results read as one plain line", async () => {
+    const { plainLine } = await import("./orchestrator.ts");
+    expect(plainLine("# Achords\n- **ID**: `1365`\n- **Category**: Software")).toBe(
+      "Achords · ID: 1365 · Category: Software",
+    );
+    expect(plainLine('{"name":"Site","url":"https://a.example"}')).toBe(
+      "name: Site · url: https://a.example",
+    );
+  });
 });

@@ -101,6 +101,26 @@ import { z } from "zod";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
 import { describeCall, describeResult } from "./publish-text.ts";
 
+/** Tool output (often markdown or JSON) as one plain line for the owner. */
+export const plainLine = (text: string): string => {
+  try {
+    const o = JSON.parse(text) as unknown;
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      return Object.entries(o as Record<string, unknown>)
+        .filter(([, v]) => v !== null && typeof v !== "object")
+        .map(([k, v]) => `${k}: ${String(v)}`)
+        .join(" · ");
+    }
+  } catch {}
+  return text
+    .replace(/[#*`_>]+/g, "")
+    .split("\n")
+    .map((l) => l.replace(/^\s*-\s*/, "").trim())
+    .filter(Boolean)
+    .join(" · ")
+    .replace(/\s{2,}/g, " ");
+};
+
 const BOSS_ID = "boss";
 const WORKER_ID = "gateway";
 const LEASE_MS = 10 * 60_000;
@@ -1129,7 +1149,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         return { ok: false, text: (err as Error).message };
       }
       const r = await deps.integrations.call(launch, entry.test.tool, args);
-      return { ok: r.ok, text: redact(r.text).slice(0, 400) };
+      return { ok: r.ok, text: plainLine(redact(r.text)).slice(0, 300) };
     },
 
     async checkIntegration(monitor, previous) {
