@@ -131,6 +131,44 @@ describe("auto-update from main", () => {
     expect(JSON.parse(getSetting(db, LAST_KEY) ?? "{}")).toMatchObject({ ok: false });
   });
 
+  it("a failed update is not retried every tick, nor for the same commit at the next hourly check", async () => {
+    failStep = "pnpm install";
+    await updateTick(deps());
+    expect(told).toHaveLength(1);
+    // Idle ticks run every few seconds: the failure must not repeat (and notify) on each.
+    calls = [];
+    await updateTick(deps());
+    await updateTick(deps());
+    expect(told).toHaveLength(1);
+    expect(calls.some((c) => c.startsWith("pnpm"))).toBe(false);
+    // The next hourly check finds the same commit: still not retried by itself.
+    setSetting(db, "update.next_check", "0");
+    await updateTick(deps());
+    expect(told).toHaveLength(1);
+    // "Check now" (forced) tries again; here it works.
+    failStep = undefined;
+    await updateTick(deps(), true);
+    expect(exited).toBe(UPDATE_EXIT);
+  });
+
+  it("a newer commit after a failed one is tried again", async () => {
+    failStep = "pnpm install";
+    await updateTick(deps());
+    failStep = undefined;
+    git["git rev-parse origin/main"] = { out: "ccc3333" };
+    setSetting(db, "update.next_check", "0");
+    await updateTick(deps());
+    expect(exited).toBe(UPDATE_EXIT);
+  });
+
+  it("logs the failing step's output for diagnosis (not sent to the owner)", async () => {
+    const logged: string[] = [];
+    failStep = "pnpm install";
+    await updateTick({ ...deps(), log: (l) => logged.push(l) });
+    expect(logged.join("\n")).toMatch(/pnpm install.*boom/s);
+    expect(told[0]).not.toMatch(/boom/);
+  });
+
   it("reads owner/repo from GitHub remotes", () => {
     expect(githubRepo("git@github.com:merov1n8/achords.git")).toBe("merov1n8/achords");
     expect(githubRepo("https://github.com/a/b")).toBe("a/b");

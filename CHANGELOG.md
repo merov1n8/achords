@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Auto-update stopped at "pnpm install" (an undecided build-script setting that pnpm 12 treats as
+  an error) and then retried and notified every few seconds. The setting is decided, and a failed
+  update is now tried once per commit (again with "Check now" or when a newer commit lands); the
+  failing step's output goes to the gateway log.
 - A missing account or credential for one integration no longer fails the whole task: that integration is left out of the run and the agent is told why (e.g. social posting to Facebook while your own WordPress address is not set).
 - The live progress bar no longer slides over the chat box while an agent is working.
 - WordPress links were shown as [REDACTED]: the site address is not a secret, so it now comes from the project's accounts (channel `wordpress`) instead of the vault.
