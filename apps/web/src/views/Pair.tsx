@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { pair } from "../api.ts";
+import { Mark } from "../components/Mark.tsx";
 import { t } from "../i18n.ts";
 
 export function Pair({ onPaired }: { onPaired: () => void }) {
@@ -25,7 +26,8 @@ export function Pair({ onPaired }: { onPaired: () => void }) {
   return (
     <main class="pair panel">
       <div class="brand">
-        <span class="logo">a</span>achords
+        <Mark />
+        <span class="lbl">achords</span>
       </div>
       <p class="muted">{t("pair.intro")}</p>
       <form onSubmit={submit}>

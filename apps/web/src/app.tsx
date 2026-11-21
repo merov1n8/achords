@@ -3,18 +3,21 @@ import {
   Bot,
   CalendarClock,
   ChevronDown,
-  CircleCheck,
   Columns3,
   FolderKanban,
   Gauge,
   Menu,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings as SettingsIcon,
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { ApiError, api, loadSession, logout } from "./api.ts";
+import { Mark } from "./components/Mark.tsx";
 import { t } from "./i18n.ts";
+import { loadCollapsed, saveCollapsed } from "./theme.ts";
 import type { Thread } from "./types.ts";
 import { Agents } from "./views/Agents.tsx";
 import { AllChats } from "./views/AllChats.tsx";
@@ -48,6 +51,11 @@ export function App() {
   const [device, setDevice] = useState<string>();
   const [route, setRoute] = useState(parseRoute());
   const [drawer, setDrawer] = useState(false);
+  const [collapsed, setCollapsed] = useState(loadCollapsed());
+  const toggleCollapsed = () => {
+    saveCollapsed(!collapsed);
+    setCollapsed(!collapsed);
+  };
 
   const check = () =>
     loadSession()
@@ -86,7 +94,7 @@ export function App() {
   };
 
   return (
-    <div class="layout">
+    <div class={`layout ${collapsed ? "collapsed" : ""}`}>
       <div class="topbar">
         <button
           type="button"
@@ -98,7 +106,14 @@ export function App() {
         </button>
         <strong>achords</strong>
       </div>
-      <Sidebar section={section} sub={sub} open={drawer} device={device} />
+      <Sidebar
+        section={section}
+        sub={sub}
+        open={drawer}
+        device={device}
+        collapsed={collapsed}
+        onCollapse={toggleCollapsed}
+      />
       <main>
         {/* Pages scroll here; the live bar sits below them and never covers the chat box. */}
         <div class="page">
@@ -132,9 +147,9 @@ function Group(props: {
 }) {
   return (
     <details class="grp" open={props.active || undefined}>
-      <summary class={`nav ${props.active ? "active" : ""}`}>
+      <summary class={`nav ${props.active ? "active" : ""}`} title={props.label}>
         {props.icon}
-        {props.label}
+        <span class="lbl">{props.label}</span>
         <ChevronDown class="icon chev" />
       </summary>
       {props.children}
@@ -147,6 +162,8 @@ function Sidebar(props: {
   sub?: string | undefined;
   open: boolean;
   device?: string | undefined;
+  collapsed: boolean;
+  onCollapse: () => void;
 }) {
   const newThread = async () => {
     const thread = await api<Thread>("/api/threads", { method: "POST", body: {} });
@@ -161,7 +178,18 @@ function Sidebar(props: {
   return (
     <nav class={`side ${props.open ? "open" : ""}`} aria-label={t("nav.main")}>
       <div class="brand">
-        <span class="logo">a</span>achords
+        <Mark />
+        <span class="lbl">achords</span>
+        <button
+          type="button"
+          class="iconbtn collapse-btn"
+          onClick={props.onCollapse}
+          aria-label={t(props.collapsed ? "nav.expand" : "nav.collapse")}
+          aria-expanded={!props.collapsed}
+          title={t(props.collapsed ? "nav.expand" : "nav.collapse")}
+        >
+          {props.collapsed ? <PanelLeftOpen class="icon" /> : <PanelLeftClose class="icon" />}
+        </button>
       </div>
       <Group
         icon={<MessageSquare class="icon" />}
@@ -170,29 +198,49 @@ function Sidebar(props: {
       >
         <ChatList activeId={section === "chat" ? sub : undefined} onNew={newThread} />
       </Group>
-      <a class={`nav ${section === "kanban" ? "active" : ""}`} href="#/kanban">
+      <a
+        class={`nav ${section === "kanban" ? "active" : ""}`}
+        href="#/kanban"
+        title={t("nav.kanban")}
+      >
         <Columns3 class="icon" />
-        {t("nav.kanban")}
+        <span class="lbl">{t("nav.kanban")}</span>
       </a>
-      <a class={`nav ${section === "projects" ? "active" : ""}`} href="#/projects">
+      <a
+        class={`nav ${section === "projects" ? "active" : ""}`}
+        href="#/projects"
+        title={t("nav.projects")}
+      >
         <FolderKanban class="icon" />
-        {t("nav.projects")}
+        <span class="lbl">{t("nav.projects")}</span>
       </a>
-      <a class={`nav ${section === "agents" ? "active" : ""}`} href="#/agents">
+      <a
+        class={`nav ${section === "agents" ? "active" : ""}`}
+        href="#/agents"
+        title={t("nav.agents")}
+      >
         <Bot class="icon" />
-        {t("nav.agents")}
+        <span class="lbl">{t("nav.agents")}</span>
       </a>
-      <a class={`nav ${section === "schedules" ? "active" : ""}`} href="#/schedules">
+      <a
+        class={`nav ${section === "schedules" ? "active" : ""}`}
+        href="#/schedules"
+        title={t("nav.schedules")}
+      >
         <CalendarClock class="icon" />
-        {t("nav.schedules")}
+        <span class="lbl">{t("nav.schedules")}</span>
       </a>
-      <a class={`nav ${section === "monitors" ? "active" : ""}`} href="#/monitors">
+      <a
+        class={`nav ${section === "monitors" ? "active" : ""}`}
+        href="#/monitors"
+        title={t("nav.monitors")}
+      >
         <Activity class="icon" />
-        {t("nav.monitors")}
+        <span class="lbl">{t("nav.monitors")}</span>
       </a>
-      <a class={`nav ${section === "usage" ? "active" : ""}`} href="#/usage">
+      <a class={`nav ${section === "usage" ? "active" : ""}`} href="#/usage" title={t("nav.usage")}>
         <Gauge class="icon" />
-        {t("nav.usage")}
+        <span class="lbl">{t("nav.usage")}</span>
       </a>
       <Group
         icon={<SettingsIcon class="icon" />}
@@ -211,9 +259,9 @@ function Sidebar(props: {
         {subLink("#/settings/devices", t("nav.devices"), sub === "devices")}
         {subLink("#/settings/rooms", t("nav.rooms"), sub === "rooms")}
       </Group>
-      <div class="foot muted">
-        <CircleCheck class="icon" />
-        {t("nav.connected", { device: props.device ?? "" })}
+      <div class="foot muted" title={t("nav.connected", { device: props.device ?? "" })}>
+        <span class="dot" />
+        <span>{t("nav.connected", { device: props.device ?? "" })}</span>
       </div>
     </nav>
   );
