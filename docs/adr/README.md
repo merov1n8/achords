@@ -52,3 +52,4 @@
 - [ADR-0050: Remote MCP servers over Streamable HTTP](0050-remote-mcp-servers.md)
 - [ADR-0051: Agent runs with any website in an Apple container](0051-agent-runs-in-apple-containers.md)
 - [ADR-0052: Chat run details and Stop per chat](0052-chat-run-details-and-stop.md)
+- [ADR-0053: Skill folders and agent scopes](0053-skill-folders-and-agent-scopes.md)

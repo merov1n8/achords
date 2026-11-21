@@ -55,7 +55,9 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
+  AGENT_SKILLS,
   type AgentFields,
+  agentSkillScope,
   type Catalog,
   type CatalogEntry,
   createAgentFiles,
@@ -63,6 +65,7 @@ import {
   deleteSkill,
   type IntegrationStatus,
   isSkillName,
+  isSkillScope,
   isSkillWorkspace,
   listSkills,
   loadAgents,
@@ -76,7 +79,9 @@ import {
   saveOwnAccounts,
   secretRefs,
   setIntegrationAgents,
+  setSkillEnabled,
   siteStatus,
+  skillFiles,
   updateAgent,
   updateManifestModels,
   updateManifestName,
@@ -295,6 +300,9 @@ const strList = (v: unknown, field: string): string[] => {
 };
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// Skills: <scope>/<name>; the scope may be agents/<agent-id> (ADR-0053).
+const SKILL_ROUTE = /^\/api\/skills\/((?:agents\/)?[\w-]{1,64})\/([\w.-]{1,64})$/;
 
 export function createApiHandler(deps: ApiDeps) {
   const { db } = deps;
@@ -925,8 +933,12 @@ export function createApiHandler(deps: ApiDeps) {
           ...new Set(["shared", ...listAgents(db).map((a) => a.workspace)]),
         ].filter(isSkillWorkspace);
         return {
-          skills: listSkills(skillsDir()),
+          // Folder skills can be large and are only viewed one at a time (GET below).
+          skills: listSkills(skillsDir()).map((s) => (s.folder ? { ...s, body: "" } : s)),
           workspaces,
+          agents: listAgents(db)
+            .map((a) => a.id)
+            .filter((id) => isSkillScope(agentSkillScope(id))),
           modes: Object.fromEntries(workspaces.map((ws) => [ws, skillMode(db, ws)])),
           proposals: skillProposals(db),
         };
@@ -937,9 +949,18 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/skills$/,
       async ({ req }) => {
         const b = await readJson(req, 256 * 1024);
-        const workspace = str(b.workspace, "workspace", 64);
+        const workspace = str(b.workspace, "workspace", 72);
         const name = str(b.name, "name", 64);
-        if (!isSkillWorkspace(workspace)) throw new HttpError(400, "invalid workspace");
+        // A workspace, shared, or an agent's own scope (ADR-0053).
+        const agent = workspace.startsWith(`${AGENT_SKILLS}/`)
+          ? workspace.slice(AGENT_SKILLS.length + 1)
+          : undefined;
+        if (
+          !isSkillScope(workspace) ||
+          (agent !== undefined && !listAgents(db).some((a) => a.id === agent))
+        ) {
+          throw new HttpError(400, "invalid workspace");
+        }
         if (!isSkillName(name)) {
           throw new HttpError(
             400,
@@ -958,11 +979,27 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     [
+      "GET",
+      SKILL_ROUTE,
+      ({ params }) => {
+        const s = existingSkill(params[0] as string, params[1] as string);
+        return { ...s, ...skillFiles(s) };
+      },
+    ],
+    [
       "PUT",
-      /^\/api\/skills\/([\w-]{1,64})\/([a-z0-9-]{1,64})$/,
+      SKILL_ROUTE,
       async ({ req, params }) => {
         const old = existingSkill(params[0] as string, params[1] as string);
         const b = await readJson(req, 256 * 1024);
+        // Folder skills (ADR-0053) are edited in their folder; here only switched on or off.
+        if (old.folder) {
+          if (b.body !== undefined || typeof b.enabled !== "boolean") {
+            throw new HttpError(400, "a skill folder can only be switched on or off here");
+          }
+          setSkillEnabled(old.path, b.enabled);
+          return { ...old, enabled: b.enabled, body: "" };
+        }
         // The table's on/off switch sends only `enabled`; the edit form sends the text too.
         const { source: _source, ...rest } = old;
         const next = b.body === undefined ? old : { ...rest, ...skillFields(b) };
@@ -974,9 +1011,10 @@ export function createApiHandler(deps: ApiDeps) {
     ],
     [
       "DELETE",
-      /^\/api\/skills\/([\w-]{1,64})\/([a-z0-9-]{1,64})$/,
+      SKILL_ROUTE,
       ({ params }) => {
         const s = existingSkill(params[0] as string, params[1] as string);
+        if (s.folder) throw new HttpError(400, "a skill folder is removed in its folder");
         deleteSkill(skillsDir(), s.workspace, s.name);
         return { ok: true };
       },
@@ -1536,7 +1574,7 @@ export function createApiHandler(deps: ApiDeps) {
 
   const skillsDir = () => join(homeOrThrow(), "skills");
   const existingSkill = (workspace: string, name: string) => {
-    const s = isSkillWorkspace(workspace) ? readSkill(skillsDir(), workspace, name) : undefined;
+    const s = isSkillScope(workspace) ? readSkill(skillsDir(), workspace, name) : undefined;
     if (!s) throw new HttpError(404, "no such skill");
     return s;
   };

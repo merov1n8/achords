@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -91,6 +91,43 @@ describe("skill flow (ADR-0049)", () => {
     });
     expect(f.read("web-clients", "unity")).toEqual({ ok: false, reason: "no skill unity" });
     expect(f.read("web-clients", "../games/unity")).toMatchObject({ ok: false });
+  });
+
+  it("indexes skill folders of the agent's scope with their paths and lists a folder's files", () => {
+    const put = (rel: string, text: string) => {
+      mkdirSync(join(dir, rel, ".."), { recursive: true });
+      writeFileSync(join(dir, rel), text);
+      return join(dir, rel);
+    };
+    const ads = put(
+      "agents/web-dev/claude-ads/skills/ads-google/SKILL.md",
+      `---\nname: ads-google\ndescription: ${"Audit Google Ads accounts. ".repeat(20)}\n---\n\n# Google Ads\nRun scripts/check.py.\n`,
+    );
+    put("agents/web-dev/claude-ads/skills/ads-google/scripts/check.py", "print(1)");
+    put("agents/web-dev/claude-ads/skills/ads-google/references/bids.md", "# Bids\n");
+    put("agents/other/x/SKILL.md", "---\nname: other-only\ndescription: x\n---\nx\n");
+    const f = flow();
+    const block = f.promptBlock("web-clients", "web-dev");
+    const line = block.split("\n").find((l) => l.startsWith("- ads-google: "));
+    expect(line).toMatch(/^- ads-google: Audit Google Ads accounts\. .{150,}… \(.+\)$/);
+    expect(line?.endsWith(`(${ads})`)).toBe(true);
+    expect(block).toContain("Files next to a SKILL.md");
+    expect(block).not.toContain("other-only");
+    expect(f.promptBlock("web-clients")).not.toContain("ads-google");
+
+    const out = f.read("web-clients", "ads-google", "web-dev");
+    expect(out).toMatchObject({ ok: true });
+    if (!out.ok) return;
+    expect(out.text).toContain("# Google Ads\nRun scripts/check.py.");
+    expect(out.text).toContain(`Files in this skill's folder ${join(ads, "..")}`);
+    expect(out.text).toContain("- references/bids.md\n- scripts/check.py");
+    expect(f.read("web-clients", "ads-google", "other")).toMatchObject({ ok: false });
+
+    // An installed skill folder is never patched by a proposal.
+    expect(
+      flow().propose(caller, { ...req, name: "ads-google", replaces: "ads-google" }),
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/skill folder/) });
+    expect(skillProposals(db)).toEqual([]);
   });
 
   it("review mode: a new skill waits for Approve, then is written once", () => {
@@ -289,6 +326,13 @@ describe("skills in agent runs (ADR-0049)", () => {
       enabled: true,
       body: "secret-free body",
     });
+    writeSkill(join(home, "skills"), {
+      workspace: "agents/dev",
+      name: "dev-only",
+      description: "Only for dev",
+      enabled: true,
+      body: "x",
+    });
     const seen: RunRequest[] = [];
     const provider: ModelProvider = {
       id: "cli-claude",
@@ -336,7 +380,14 @@ describe("skills in agent runs (ADR-0049)", () => {
         "mcp__achords__skill_propose",
       ]),
     );
-    expect(seen[0]?.appendSystemPrompt).toContain("- owner-report: Report plainly");
+    expect(seen[0]?.appendSystemPrompt).toContain(
+      `- owner-report: Report plainly (${join(home, "skills", "shared", "owner-report.md")})`,
+    );
+    // ADR-0053: the visible skill folders are readable, never writable.
+    const skillRules = (seen[0]?.allowedTools ?? []).filter((r) => r.includes("skills"));
+    const rule = (scope: string) => `Read(/${realpathSync(join(home, "skills", scope))}/**)`;
+    expect(skillRules).toEqual([rule("agents/dev"), rule("shared")]);
+    expect(seen[0]?.appendSystemPrompt).toContain("- dev-only: Only for dev");
     expect(seen[0]?.appendSystemPrompt).not.toContain("secret-free body");
 
     const from = (taskId: string) => ({ from: "task" as const, taskId });

@@ -1,6 +1,6 @@
 # ADR-0049: Skills: Markdown how-tos, progressive disclosure, owner-approved proposals
 
-Status: Accepted (2026-11-21)
+Status: Accepted (2026-11-21); extended by ADR-0053 (skill folders, agent scopes)
 
 - Context: ARCHITECTURE §4.9 planned skills: reusable instructions that agents load only when needed, and that agents themselves suggest after hard-won lessons. The owner also wants to send a link in chat ("found a good skill, build it in") and have it built in. Skill text steers every later run of a workspace, so writing one is close to changing an agent's role instructions: the owner must stay in control, and text from the web must not become instructions on its own.
 

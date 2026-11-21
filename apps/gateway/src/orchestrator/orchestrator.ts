@@ -101,6 +101,7 @@ import {
   scopeTargets,
   secretRefs,
   siteCredentials,
+  skillScopes,
   type Workflow,
 } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/providers";
@@ -427,7 +428,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   /** A run's working folder: its first own folder (writable whenever it has write folders). */
   const workFolder = (m: Manifest) =>
     [...m.fs.write, ...m.fs.read].map(expandHome)[0] ?? join(agentsDir, m.id, "work");
-  const skills = createSkillFlow({ db, dir: join(home, "skills"), redact });
+  const skillsDir = join(home, "skills");
+  const skills = createSkillFlow({ db, dir: skillsDir, redact });
+  /**
+   * ADR-0053: the skill scopes a run sees (its agent's, its workspace's, shared), readable so the
+   * agent can open a SKILL.md and the files beside it. Never writable.
+   */
+  const skillRoots = (m: Manifest) =>
+    skillScopes(m.workspace, m.id)
+      .map((scope) => join(skillsDir, scope))
+      .filter((p) => existsSync(p));
 
   // Re-read on every use so manifest edits apply without a restart; mirrored into the DB
   // because tasks reference agents by id.
@@ -505,6 +515,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const pay = deps.billing?.(model.slice(0, slash));
 
     const roots = [...m.fs.write, ...m.fs.read].map(expandHome);
+    const skillDirs = skillRoots(m).filter((p) => !roots.includes(p));
     const cwd = workFolder(m);
     mkdirSync(cwd, { recursive: true, mode: 0o700 });
     // Only what the manifest grants, scoped: files in its own folders, fetches to its allowed
@@ -512,7 +523,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const real = (p: string) => (existsSync(p) ? realpathSync(p) : p);
     const allowedTools = allowRules({
       tools: m.tools,
-      read: [cwd, ...m.fs.read.map(expandHome)].map(real),
+      read: [cwd, ...m.fs.read.map(expandHome), ...skillDirs].map(real),
       write: (m.fs.write.length ? m.fs.write.map(expandHome) : [cwd]).map(real),
       network: m.network.allow,
       shell: m.tools.includes("Bash") ? (m.shell?.allow ?? []) : [],
@@ -525,7 +536,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       tools: m.tools,
       allowedTools,
       timeoutMs,
-      ...(roots.length > 1 ? { addDirs: roots.slice(1) } : {}),
+      ...(roots.length > 1 || skillDirs.length
+        ? { addDirs: [...roots.slice(1), ...skillDirs] }
+        : {}),
       ...(system ? { appendSystemPrompt: system } : {}),
       ...(m.budget.per_run_usd ? { maxBudgetUsd: m.budget.per_run_usd } : {}),
       ...(m.effort ? { effort: m.effort } : {}),
@@ -901,12 +914,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const orchestrator: Orchestrator = {
     skillRead(from, name) {
       const c = skillCaller(from.taskId);
-      return c ? skills.read(c.workspace, name) : { ok: false, reason: "unknown calling task" };
+      return c
+        ? skills.read(c.workspace, name, c.agentId)
+        : { ok: false, reason: "unknown calling task" };
     },
 
     async skillFetch(from, url) {
       const c = skillCaller(from.taskId);
-      return c ? skills.fetch(c.workspace, url) : { ok: false, reason: "unknown calling task" };
+      return c
+        ? skills.fetch(c.workspace, url, c.agentId)
+        : { ok: false, reason: "unknown calling task" };
     },
 
     skillPropose(from, request) {
@@ -2224,7 +2241,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       `${built.req.appendSystemPrompt ?? ""}\n\n${INJECTION_GUARD}`.trim();
     // Skills (ADR-0049): only the index; the hub's skill_read gives the full text.
     if (servers.achords) {
-      built.req.appendSystemPrompt = `${built.req.appendSystemPrompt}\n\n${skills.promptBlock(manifest.workspace)}`;
+      built.req.appendSystemPrompt = `${built.req.appendSystemPrompt}\n\n${skills.promptBlock(manifest.workspace, manifest.id)}`;
     }
     // Live progress (step 5b): the agent keeps its own checklist; discussion turns are too short.
     if (!task.roomId) {
@@ -2241,6 +2258,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           image: box.image,
           mounts: containerMounts(manifest, built.req.cwd, [
             ...(shared ? [shared, ...deps.container.codeDirs] : []),
+            ...skillRoots(manifest),
           ]),
         };
       } catch (err) {
