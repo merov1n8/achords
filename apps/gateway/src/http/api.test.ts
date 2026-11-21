@@ -48,8 +48,24 @@ describe("HTTP API", () => {
   let projectsDir: string;
   let budgetDay = 0;
   const heard: number[] = [];
+  let tokenServer: Server;
+  let tokenReply: object = {};
+  const tokenForms: URLSearchParams[] = [];
 
   beforeEach(async () => {
+    // Fake Google token endpoint for the web sign-in.
+    tokenForms.length = 0;
+    tokenServer = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => {
+        body += c;
+      });
+      req.on("end", () => {
+        tokenForms.push(new URLSearchParams(body));
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(tokenReply));
+      });
+    });
+    await new Promise<void>((r) => tokenServer.listen(0, "127.0.0.1", r));
     db = openCoreDatabase(":memory:");
     agentsDir = mkdtempSync(join(tmpdir(), "achords-api-agents-"));
     runDir = mkdtempSync(join(tmpdir(), "achords-api-run-"));
@@ -174,6 +190,7 @@ describe("HTTP API", () => {
             usedBy: ["advertiser"],
             command: "uvx",
             commandFound: true,
+            secrets: ["google-refresh-token"],
             missingSecrets: ["google-refresh-token"],
             perProject: false,
             projectsReady: [],
@@ -193,12 +210,17 @@ describe("HTTP API", () => {
           },
         },
         localModels: async () => ["qwen3:8b"],
+        google: {
+          authUrl: "https://accounts.example/auth",
+          tokenUrl: `http://127.0.0.1:${(tokenServer.address() as AddressInfo).port}/token`,
+        },
         log: (m) => logs.push(m),
       }),
     );
   });
   afterEach(async () => {
     await new Promise((r) => server.close(r));
+    await new Promise((r) => tokenServer.close(r));
     vault.close();
     db.close();
   });
@@ -1259,5 +1281,173 @@ describe("HTTP API", () => {
     expect((await call("/api/nope")).status).toBe(404);
     const t = createThread(db, {});
     expect(listMessages(db, t.id)).toEqual([]);
+  });
+
+  describe("integrations from the web: Google sign-in, revoke, local apps", () => {
+    const CLIENT = JSON.stringify({
+      installed: { client_id: "cid.apps", client_secret: "csecret", project_id: "proj-1" },
+    });
+    const start = async (call: Awaited<ReturnType<typeof pair>>["call"]) => {
+      const res = await call("/api/oauth/google/start", {
+        method: "POST",
+        body: JSON.stringify({ client: CLIENT }),
+      });
+      expect(res.status).toBe(200);
+      const out = (await res.json()) as { url: string; state: string };
+      return { ...out, auth: new URL(out.url) };
+    };
+
+    it("signs in to Google through the gateway's loopback callback, without a cookie", async () => {
+      tokenReply = {
+        refresh_token: "rt-web",
+        scope:
+          "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters",
+      };
+      const { call } = await pair();
+      const { auth, state } = await start(call);
+      const redirect = auth.searchParams.get("redirect_uri") as string;
+      expect(redirect).toBe(`${base}/api/oauth/google/callback`);
+      expect(auth.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(await (await call(`/api/oauth/google/status/${state}`)).json()).toEqual({
+        status: "pending",
+      });
+      // Google redirects the browser: a plain GET, no session cookie.
+      const page = await fetch(`${redirect}?state=${state}&code=c-1`);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toMatch(/text\/html/);
+      expect(await page.text()).toMatch(/Google is connected/);
+      expect(tokenForms[0]?.get("redirect_uri")).toBe(redirect);
+      expect(
+        vault
+          .list()
+          .map((s) => s.id)
+          .sort(),
+      ).toEqual([
+        "google-client-id",
+        "google-client-secret",
+        "google-project-id",
+        "google-refresh-token",
+      ]);
+      expect(await (await call(`/api/oauth/google/status/${state}`)).json()).toEqual({
+        status: "done",
+      });
+      // Single use.
+      expect((await fetch(`${redirect}?state=${state}&code=c-1`)).status).toBe(400);
+      expect(tokenForms).toHaveLength(1);
+      expect(JSON.stringify(logs)).not.toContain("rt-web");
+    });
+
+    it("refuses forged states, other devices, signed-out devices, and escapes Google's error", async () => {
+      tokenReply = { refresh_token: "rt" };
+      const a = await pair("Phone");
+      const b = await pair("Laptop");
+      const { state } = await start(a.call);
+      const cb = `${base}/api/oauth/google/callback`;
+      expect((await fetch(`${cb}?state=forged&code=x`)).status).toBe(400);
+      expect((await b.call(`/api/oauth/google/status/${state}`)).status).toBe(404);
+      const other = await b.call("/api/oauth/google/finish", {
+        method: "POST",
+        body: JSON.stringify({
+          url: `http://127.0.0.1:1/api/oauth/google/callback?state=${state}&code=x`,
+        }),
+      });
+      expect(other.status).toBe(400);
+      // The device that started it is unpaired: the callback no longer accepts it.
+      await a.call("/api/logout", { method: "POST" });
+      const gone = await fetch(`${cb}?state=${state}&code=x`);
+      expect(await gone.text()).toMatch(/signed out/);
+      const evil = await fetch(
+        `${cb}?state=forged&error=${encodeURIComponent("<script>x</script>")}`,
+      );
+      expect(await evil.text()).not.toContain("<script>");
+      expect(tokenForms).toHaveLength(0);
+      expect(vault.list()).toEqual([]);
+      // Needs a session and CSRF like every other change.
+      expect(
+        (
+          await fetch(`${base}/api/oauth/google/start`, {
+            method: "POST",
+            headers: { cookie: b.cookie, origin: base, "content-type": "application/json" },
+            body: JSON.stringify({ client: CLIENT }),
+          })
+        ).status,
+      ).toBe(403);
+      const web = await b.call("/api/oauth/google/start", {
+        method: "POST",
+        body: JSON.stringify({ client: '{"web":{}}' }),
+      });
+      expect(web.status).toBe(400);
+      expect(((await web.json()) as { error: string }).error).toMatch(/Desktop app/);
+    });
+
+    it("finishes from a pasted address (another device), then revokes", async () => {
+      tokenReply = {
+        refresh_token: "rt-2",
+        scope:
+          "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters",
+      };
+      const { call } = await pair();
+      const { state } = await start(call);
+      const bad = await call("/api/oauth/google/finish", {
+        method: "POST",
+        body: JSON.stringify({ url: "not an address" }),
+      });
+      expect(bad.status).toBe(400);
+      const ok = await call("/api/oauth/google/finish", {
+        method: "POST",
+        body: JSON.stringify({
+          url: ` http://127.0.0.1:7420/api/oauth/google/callback?state=${state}&code=c-2&scope=x `,
+        }),
+      });
+      expect(ok.status).toBe(200);
+      expect(tokenForms[0]?.get("code")).toBe("c-2");
+      expect(vault.status("google-refresh-token").set).toBe(true);
+
+      // Revoking GA4 deletes the shared Google ids (Search Console uses them too).
+      const revoke = await call("/api/integrations/ga4/secrets", { method: "DELETE" });
+      expect(((await revoke.json()) as { deleted: string[] }).deleted.sort()).toEqual([
+        "google-client-id",
+        "google-client-secret",
+        "google-project-id",
+        "google-refresh-token",
+      ]);
+      expect(vault.list()).toEqual([]);
+      vault.set("meta-access-token", "token-value-123", "test");
+      await call("/api/integrations/meta/secrets", { method: "DELETE" });
+      expect(vault.status("meta-access-token").set).toBe(false);
+      expect((await call("/api/integrations/blender/secrets", { method: "DELETE" })).status).toBe(
+        404,
+      );
+      expect((await call("/api/integrations/nope/secrets", { method: "DELETE" })).status).toBe(404);
+    });
+
+    it("gives a local app to the chosen agents and removes it from all", async () => {
+      mkdirSync(join(agentsDir, "artist"));
+      writeFileSync(
+        join(agentsDir, "artist", "agent.yaml"),
+        "id: artist\nname: Artist\nrole: r\nworkspace: shared\nmodels:\n  default: cli-claude/sonnet\nmcp: [unity] # 3D\n",
+      );
+      const { call } = await pair();
+      const put = (id: string, agents: unknown) =>
+        call(`/api/integrations/${id}/agents`, {
+          method: "PUT",
+          body: JSON.stringify({ agents }),
+        });
+      expect((await put("blender", ["boss", "artist"])).status).toBe(200);
+      expect(readFileSync(join(agentsDir, "artist", "agent.yaml"), "utf8")).toContain(
+        "mcp: [unity, blender] # 3D",
+      );
+      expect(readFileSync(join(agentsDir, "boss", "agent.yaml"), "utf8")).toContain(
+        "mcp: [blender]",
+      );
+      expect((await put("blender", [])).status).toBe(200);
+      expect(readFileSync(join(agentsDir, "artist", "agent.yaml"), "utf8")).toContain(
+        "mcp: [unity] # 3D",
+      );
+      expect((await put("blender", ["ghost"])).status).toBe(400);
+      // Integrations with credentials are not handed out here.
+      expect((await put("ga4", ["boss"])).status).toBe(400);
+      expect((await put("blender", "boss")).status).toBe(400);
+    });
   });
 });

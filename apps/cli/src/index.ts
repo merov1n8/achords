@@ -12,8 +12,8 @@ import {
   setDraining,
 } from "@achords/core";
 import { t } from "@achords/i18n";
-import { openHomeVault } from "@achords/secrets";
-import { connectGoogle, parseClientJson } from "./connect-google.ts";
+import { openHomeVault, parseClientJson } from "@achords/secrets";
+import { connectGoogle } from "./connect-google.ts";
 import { type ControlContext, kill, resume, start, status, stop } from "./control.ts";
 import { runDoctor, systemDoctorEnv } from "./doctor.ts";
 import { runInit } from "./init.ts";

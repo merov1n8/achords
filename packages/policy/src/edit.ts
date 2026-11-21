@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -19,7 +20,11 @@ function editManifest(path: string, change: (doc: Document) => void): void {
   change(doc);
   const text = doc.toString({ flowCollectionPadding: false }); // [a, b] like hand-written files
   parseManifest(text, path); // throws with field paths if invalid
-  // Atomic replace, same permissions.
+  replaceFile(path, text);
+}
+
+/** Atomic replace, same permissions. */
+function replaceFile(path: string, text: string): void {
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, text, { mode: statSync(path).mode & 0o777 });
   renameSync(tmp, path);
@@ -223,4 +228,29 @@ export function manifestChanges(before: string, after: string): string[] {
     lines.push(`default model: ${a.models.default} → ${b.models.default}`);
   }
   return lines;
+}
+
+/**
+ * Grants an integration to exactly `agents` (their agent.yaml `mcp`) and takes it from every
+ * other agent. Every changed manifest is validated before the first file is written; each file
+ * is replaced atomically. Returns the agents whose file changed.
+ */
+export function setIntegrationAgents(agentsDir: string, id: string, agents: string[]): string[] {
+  const all = readdirSync(agentsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(join(agentsDir, d.name, "agent.yaml")))
+    .map((d) => d.name);
+  const unknown = agents.filter((a) => !all.includes(a));
+  if (unknown.length) throw new Error(`no agent ${unknown.join(", ")}`);
+  const changes: [string, string][] = [];
+  for (const agent of all) {
+    const path = join(agentsDir, agent, "agent.yaml");
+    const before = readFileSync(path, "utf8");
+    const has = parseManifest(before, path).mcp.includes(id);
+    const want = agents.includes(agent);
+    if (has === want) continue;
+    const patch = want ? { add: { mcp: [id] } } : { remove: { mcp: [id] } };
+    changes.push([path, patchManifestText(before, patch, `agents/${agent}/agent.yaml`)]);
+  }
+  for (const [path, text] of changes) replaceFile(path, text);
+  return changes.map(([path]) => path.split("/").at(-2) as string);
 }
