@@ -1,6 +1,15 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { type Db, seedSchedule } from "@achords/core";
+import { type Db, getSetting, seedSchedule, setSetting } from "@achords/core";
+import { isSkillName, isSkillWorkspace, skillPath } from "@achords/policy";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -61,6 +70,31 @@ export function seedSchedules(dir: string, db: Db): string[] {
       ...(s.project ? { project: s.project } : {}),
     });
     if (done) seeded.push(s.id);
+  }
+  return seeded;
+}
+
+/**
+ * Copies `<dir>/<workspace>/<name>.md` skills (ADR-0049) into `skillsDir` once each: never over a
+ * local file, and not again after the owner deleted one. Returns "<workspace>/<name>" seeded.
+ */
+export function seedSkills(dir: string, skillsDir: string, db: Db): string[] {
+  if (!existsSync(dir)) return [];
+  const seeded: string[] = [];
+  for (const ws of readdirSync(dir, { withFileTypes: true })) {
+    if (!ws.isDirectory() || !isSkillWorkspace(ws.name)) continue;
+    for (const file of readdirSync(join(dir, ws.name)).sort()) {
+      const name = file.replace(/\.md$/, "");
+      const key = `skill_seeded:${ws.name}/${name}`;
+      if (name === file || !isSkillName(name) || getSetting(db, key)) continue;
+      const dest = skillPath(skillsDir, ws.name, name);
+      if (!existsSync(dest)) {
+        mkdirSync(join(skillsDir, ws.name), { recursive: true, mode: 0o700 });
+        copyFileSync(join(dir, ws.name, file), dest);
+        seeded.push(`${ws.name}/${name}`);
+      }
+      setSetting(db, key, "1");
+    }
   }
   return seeded;
 }

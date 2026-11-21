@@ -60,6 +60,23 @@ export {
   updateProject,
 } from "./projects.ts";
 export {
+  closestSkills,
+  deleteSkill,
+  findSkill,
+  formatSkill,
+  isSkillName,
+  isSkillWorkspace,
+  listSkills,
+  parseSkillText,
+  readSkill,
+  SHARED_SKILLS,
+  type Skill,
+  skillHash,
+  skillPath,
+  visibleSkills,
+  writeSkill,
+} from "./skills.ts";
+export {
   checkMove,
   DEFAULT_WORKFLOW_YAML,
   loadWorkflow,

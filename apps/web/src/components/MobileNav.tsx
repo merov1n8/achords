@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookOpen,
   Bot,
   CalendarClock,
   Columns3,
@@ -38,6 +39,7 @@ const TITLES: Record<string, string> = {
   monitors: "nav.monitors",
   projects: "nav.projects",
   schedules: "nav.schedules",
+  skills: "nav.skills",
   usage: "nav.usage",
 };
 
@@ -188,6 +190,7 @@ export function MoreSheet(props: {
       <span class="grabber" />
       <div class="grid">
         {tile("#/projects", t("nav.projects"), <FolderKanban class="icon" />)}
+        {tile("#/skills", t("nav.skills"), <BookOpen class="icon" />)}
         {tile("#/schedules", t("nav.schedules"), <CalendarClock class="icon" />)}
         {tile("#/usage", t("nav.usage"), <Gauge class="icon" />)}
         {tile("#/settings/appearance", t("nav.settings"), <SettingsIcon class="icon" />)}

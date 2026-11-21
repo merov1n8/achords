@@ -138,6 +138,7 @@ Default layout, configurable:
 - Markdown skills with progressive disclosure (index, summary, full body) to save tokens.
 - Self-learning: after complex tasks or error recovery, agents propose new skills or targeted patches; the user can require review before a skill is activated.
 - Seed skills and scheduled tasks ship from `seed/`; seeding is idempotent and never overwrites local edits.
+- Implemented (ADR-0049): `$ACHORDS_HOME/skills/<workspace>/<name>.md` (+ `shared/`), frontmatter `name`, `description`, `enabled`, `source`, `updated`. Every hub run's system prompt lists the visible enabled skills (`- name: description`) and the self-learning rule; bodies only through `skill_read`. `skill_fetch` imports from an https link (public addresses only, redirects re-checked, 200 KB, 15 s, marked untrusted) and names the closest existing skills; `skill_propose` files a new skill or a patch (`skill_proposals`), posted with Approve / Reject (`skill:<verb>:<id>`), changes as before/after with a base hash. Mode per workspace (`skills.mode.<ws>`): review (default) or auto for new skills from runs without open-web access; changes always reviewed. A new skill whose link the owner wrote in the same thread is saved directly. Web: Skills page (table, Add/Edit/Delete, Import from link, proposals, mode).
 
 ### 4.10 Scheduler and heartbeat
 
@@ -179,7 +180,7 @@ Default layout, configurable:
 - Credentials never reach the agent: the per-run config starts a launcher with a one-time ticket, the launcher fetches the environment from `/api/agent/mcp-env` once and starts the real server. Resolution is audited per agent and integration. Agents with a shell get no integration that carries secrets (same-user processes can read each other's environment).
 - Default catalog: Google Ads, Analytics, Search Console, AdMob, Google Cloud / Firebase, Meta (Facebook, Instagram), TikTok, Reddit, App Store Connect, Google Play Console, WordPress, ElevenLabs, fal.ai, Meshy, Gmail/Calendar/Drive, Unity MCP.
 - The hub also exposes its own MCP server (tasks, threads, memory search) so external clients can drive it, subject to the policy engine.
-- Agent runs get the hub's MCP server (and only that, plus catalog servers their manifest allows) with a per-run capability token: `delegate`, `ask_owner`, `spawn_worker`, `propose_agent`, later `report_progress` (ADR-0029). The caller's identity comes from the token, never from tool arguments.
+- Agent runs get the hub's MCP server (and only that, plus catalog servers their manifest allows) with a per-run capability token: `delegate`, `ask_owner`, `spawn_worker`, `propose_agent`, `skill_read`, `skill_fetch`, `skill_propose` (ADR-0049), later `report_progress` (ADR-0029). The caller's identity comes from the token, never from tool arguments.
 
 ### 4.15 Secrets vault
 

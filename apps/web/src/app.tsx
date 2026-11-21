@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookOpen,
   Bot,
   CalendarClock,
   ChevronDown,
@@ -34,6 +35,7 @@ import { Pair } from "./views/Pair.tsx";
 import { Projects } from "./views/Projects.tsx";
 import { Rooms } from "./views/Rooms.tsx";
 import { Schedules } from "./views/Schedules.tsx";
+import { Skills } from "./views/Skills.tsx";
 import { Updates } from "./views/Updates.tsx";
 import { Usage } from "./views/Usage.tsx";
 import { Vault } from "./views/Vault.tsx";
@@ -115,6 +117,7 @@ export function App() {
           {section === "agents" && <Agents />}
           {section === "projects" && <Projects />}
           {section === "usage" && <Usage />}
+          {section === "skills" && <Skills />}
           {section === "schedules" && <Schedules />}
           {section === "monitors" && <Monitors />}
           {section === "chats" && <AllChats key={sub ?? ""} project={sub} />}
@@ -226,6 +229,14 @@ function Sidebar(props: {
       >
         <Bot class="icon" />
         <span class="lbl">{t("nav.agents")}</span>
+      </a>
+      <a
+        class={`nav ${section === "skills" ? "active" : ""}`}
+        href="#/skills"
+        title={t("nav.skills")}
+      >
+        <BookOpen class="icon" />
+        <span class="lbl">{t("nav.skills")}</span>
       </a>
       <a
         class={`nav ${section === "schedules" ? "active" : ""}`}
