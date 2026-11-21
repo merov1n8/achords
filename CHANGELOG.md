@@ -36,6 +36,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Project accounts: the type is a dropdown (Git repository included; GitHub and GitLab addresses,
+  https or ssh, are checked); the chat title shows a pencil to show it can be renamed.
 - Chat: your own messages are a plain rounded bubble (as in the design); click the chat title to
   rename it in place; the Telegram chat can be deleted (Telegram starts a new one).
 - Integrations → Per client lists every WordPress site as its own row (site, project, status)
