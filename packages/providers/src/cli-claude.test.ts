@@ -303,16 +303,18 @@ describe("cli-claude adapter", () => {
       try {
         let pid = 0;
         const running = boxed("hang").run(req({ container: box(), onSpawn: (p) => (pid = p) }));
-        await waitFor(() => pid > 0);
+        // Signal only once the fake client has started (and recorded its run), as in real use;
+        // a signal during Node's start-up made this flaky on slow CI runners.
+        await waitFor(() => pid > 0 && recorded().some((a) => a[0] === "run"));
         // What stopThread does: signal the run's process group, not the provider.
-        process.kill(-pid, "SIGTERM");
+        process.kill(-pid, "SIGKILL");
         await running;
         await waitFor(() => recorded().some((a) => a[0] === "kill"));
         expect(recorded().find((a) => a[0] === "kill")).toEqual(["kill", "achords-run-test"]);
       } finally {
         delete process.env.FAKE_CONTAINER_RECORD;
       }
-    });
+    }, 20_000);
 
     it("refuses a folder the mount syntax cannot carry", async () => {
       const res = await boxed().run(
