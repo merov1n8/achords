@@ -116,6 +116,7 @@ describe("integrations in runs (ADR-0034)", () => {
       providers: {
         "cli-claude": p,
         "cli-codex": { ...p, id: "cli-codex" },
+        "cli-gemini": { ...p, id: "cli-gemini" },
         local: {
           id: "local",
           async run(req) {
@@ -598,6 +599,21 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(Object.keys(JSON.parse(seen[0]?.config ?? "{}").mcpServers ?? {})).toContain("blender");
     expect(seen[0]?.req.prompt).toMatch(
       /Not available in this run: site \(needs the project's wordpress account\)/,
+    );
+  });
+
+  it("a Gemini run gets no MCP tools yet and is told so (ADR-0045)", async () => {
+    mkdirSync(join(home, "agents", "gem"), { recursive: true });
+    writeFileSync(
+      join(home, "agents", "gem", "agent.yaml"),
+      "id: gem\nname: gem\nrole: gem\nworkspace: web-clients\nmodels:\n  default: cli-gemini/gemini-x\ntools: [Read]\nmcp: [blender]\n",
+    );
+    orch.syncAgents();
+    const task = await give("gem");
+    expect(task.status).toBe("done");
+    expect(seen[0]?.req.mcpConfigPath).toBeUndefined();
+    expect(seen[0]?.req.prompt).toMatch(
+      /Gemini model without achords tools[\s\S]*\(blender are left out\)/,
     );
   });
 });

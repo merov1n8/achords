@@ -1554,6 +1554,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const unavailable: string[] = [];
     // OpenAI models through codex (ADR-0040): treated like an agent with a shell.
     let codexRun = false;
+    // Gemini (ADR-0045, stage 1): no achords MCP tools at all yet.
+    let geminiRun = false;
     try {
       const all = agents();
       manifest = task.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
@@ -1584,8 +1586,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
       try {
         codexRun = pickModel(manifest, task.sensitivity).startsWith("cli-codex/");
+        geminiRun = pickModel(manifest, task.sensitivity).startsWith("cli-gemini/");
       } catch {
         // toRequest below reports the model problem.
+      }
+      if (geminiRun && manifest.mcp.length) {
+        dropped = [...manifest.mcp];
+        manifest = { ...manifest, mcp: [] };
       }
       // Codex always has a shell, so integrations with credentials stay out (ADR-0034, -0040).
       if (codexRun && manifest.mcp.length && deps.integrations) {
@@ -1727,6 +1734,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ]
         .filter(Boolean)
         .join(" ");
+      const geminiNote = geminiRun
+        ? `\n\nThis run uses a Gemini model without achords tools: you cannot delegate, ask the owner or use integrations${dropped.length ? ` (${dropped.join(", ")} are left out)` : ""}. Do the work with your own tools and put open questions in your report.`
+        : "";
       const codexNote =
         codexRun && dropped.length
           ? `\n\nThis run uses an OpenAI model with a shell, so integrations with client credentials are left out: ${dropped.join(", ")}. Mention in your report if the task needs them.`
@@ -1739,7 +1749,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${discussions}${answer}${resume}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.
@@ -1759,7 +1769,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const revokers: (() => void)[] = [];
     // Every run may ask the owner; only agents allowed to delegate get `delegate` too.
     // Workers (depth 1) get no hub tools at all.
-    if (deps.hub && !task.workerSpec && !task.roomId) {
+    if (deps.hub && !task.workerSpec && !task.roomId && !geminiRun) {
       const hubTools = [
         "ask_owner",
         "propose_agent",
