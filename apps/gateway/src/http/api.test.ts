@@ -380,6 +380,38 @@ describe("HTTP API", () => {
     expect(Array.isArray(list)).toBe(true);
   });
 
+  it("chat run details: summary of the chat's work, and Stop for its tasks", async () => {
+    const { call } = await pair();
+    upsertAgent(db, { id: "coder", name: "Coder", role: "dev", workspace: "shared" });
+    const thread = createThread(db, { title: "Auth" });
+    const task = enqueue(db, { title: "Refactor", threadId: thread.id, assigneeAgentId: "coder" });
+    const run = startRun(db, { provider: "cli-claude", taskId: task.id, agentId: "coder" });
+    finishRun(db, run.id, "succeeded", {
+      costUsd: 0.4,
+      tokens: { input: 10, output: 5, cached: 0 },
+    });
+    budgetDay = 5;
+    expect(await (await call(`/api/threads/${thread.id}/summary`)).json()).toEqual({
+      agentsWorking: 0,
+      agentsTotal: 1,
+      tokensIn: 10,
+      tokensOut: 5,
+      costUsd: 0.4,
+      budgetDayUsd: 5,
+      participants: [{ agent: "coder", name: "Coder", status: "queued" }],
+    });
+    budgetDay = 0;
+    expect(await (await call(`/api/threads/${thread.id}/summary`)).json()).not.toHaveProperty(
+      "budgetDayUsd",
+    );
+    expect((await call("/api/threads/nope/summary")).status).toBe(404);
+
+    const stop = await call(`/api/threads/${thread.id}/stop`, { method: "POST" });
+    expect(await stop.json()).toEqual({ cancelled: 1, stopped: 0 });
+    expect(logs.some((l) => l.includes(`stopped chat ${thread.id}`))).toBe(true);
+    expect((await call("/api/threads/nope/stop", { method: "POST" })).status).toBe(404);
+  });
+
   it("creates local-only threads; there is no way to downgrade them", async () => {
     const { call } = await pair();
     const t = (await (

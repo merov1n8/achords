@@ -36,6 +36,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- The Chat page has its own chat list column (search, Recent / By project, pin, rename, archive,
+  delete, All chats) instead of the list in the sidebar; Chat in the sidebar is a plain menu item.
+  Each chat in the list shows the agent that answered last and how long ago.
 - Modals close after a successful save (project edit, WordPress logins, sign-in tokens, Google
   sign-in). Agent workflow roles are checkboxes of the roles the workflows use, plus your own.
 - Agents have an Effort setting (low to max): passed to Claude as `--effort`, to OpenAI models as
@@ -70,6 +73,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Run details next to each chat: how many of the chat's agents are working, the tokens and cost
+  of its runs (with your daily API budget, if set) and every agent with running, waiting, queued or
+  idle. On narrower screens they open from the info button. **Stop run** cancels the chat's queued
+  and waiting tasks and stops its running agents at once (as the emergency stop does, but only for
+  this chat). Buttons above the message box address one of the chat's agents directly (@agent).
+- Phones: an opened chat fills the screen with a back button, a live status line ("1 of 3 agents
+  working · $0.41") and a thin progress line; the info button opens the run details from below.
 - ElevenLabs (voices, speech, sound effects, music), Meshy (3D models) and fal.ai (image, video
   and audio models) as integrations: Settings → Integrations → **Add sign-in**, paste the API key.
   Anything that costs credits (generating, cloning a voice, downloading a model) waits for your
