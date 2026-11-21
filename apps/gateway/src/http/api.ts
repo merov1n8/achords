@@ -4,11 +4,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import {
   AuthError,
+  addChecklistItem,
+  addComment,
   createMonitor,
   createSchedule,
   createSession,
   createThread,
   type Db,
+  deleteCard,
+  deleteComment,
   deleteMonitor,
   deleteSchedule,
   deleteThread,
@@ -16,8 +20,11 @@ import {
   getRoom,
   getSchedule,
   getSetting,
+  getTask,
   getThread,
   listAgents,
+  listChecklist,
+  listComments,
   listMessages,
   listMonitors,
   listRooms,
@@ -30,14 +37,17 @@ import {
   type MonitorInput,
   occurrences,
   redeemPairingCode,
+  removeChecklistItem,
   revokeSession,
   type ScheduleInput,
   setSetting,
   setThreadProject,
   spendBy,
   spendSince,
+  updateChecklistItem,
   updateMonitor,
   updateSchedule,
+  updateTask,
   updateThread,
   validateSession,
 } from "@achords/core";
@@ -616,6 +626,116 @@ export function createApiHandler(deps: ApiDeps) {
         if (out.override)
           log(`kanban: owner override on task ${params[0]}: ${String(b.from)} → ${String(b.to)}`);
         return out;
+      },
+    ],
+    // Card detail for the edit view; the board list above stays light.
+    [
+      "GET",
+      /^\/api\/tasks\/([\w-]{1,64})$/,
+      ({ params }) => {
+        const id = params[0] as string;
+        const task = getTask(db, id);
+        if (!task) throw new HttpError(404, "no such task");
+        return { ...task, checklist: listChecklist(db, id), comments: listComments(db, id) };
+      },
+    ],
+    [
+      "PATCH",
+      /^\/api\/tasks\/([\w-]{1,64})$/,
+      async ({ params, body }) => {
+        const b = await body();
+        const patch = {
+          ...(b.title !== undefined ? { title: str(b.title, "title", 200) } : {}),
+          ...(b.description !== undefined
+            ? {
+                description:
+                  b.description === null || b.description === ""
+                    ? null
+                    : str(b.description, "description", 20_000),
+              }
+            : {}),
+        };
+        const task = updateTask(db, params[0] as string, patch);
+        if (!task) throw new HttpError(404, "no such task");
+        log(`kanban: owner edited task ${task.id} (${Object.keys(patch).join(", ") || "nothing"})`);
+        return task;
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/tasks\/([\w-]{1,64})$/,
+      ({ params }) => {
+        const id = params[0] as string;
+        const out = deleteCard(db, id);
+        if (!out.ok) {
+          if (out.reason === "no such task") throw new HttpError(404, "no such task");
+          throw new HttpError(
+            409,
+            out.reason === "running"
+              ? "It is running; stop it first or wait until it finishes."
+              : "This is a step inside a card; delete the whole card instead.",
+          );
+        }
+        log(`kanban: owner deleted task ${id} (${out.deleted} task(s) with its steps)`);
+        return out;
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/tasks\/([\w-]{1,64})\/checklist$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        const item = addChecklistItem(db, id, str((await body()).text, "text", 500));
+        if (!item) throw new HttpError(404, "no such task");
+        log(`kanban: owner added checklist item ${item.id} to task ${id}`);
+        return item;
+      },
+    ],
+    [
+      "PATCH",
+      /^\/api\/tasks\/([\w-]{1,64})\/checklist\/(\d{1,15})$/,
+      async ({ params, body }) => {
+        const [id, itemId] = params as [string, string];
+        const b = await body();
+        const item = updateChecklistItem(db, id, Number(itemId), {
+          ...(b.text !== undefined ? { text: str(b.text, "text", 500) } : {}),
+          ...(b.done !== undefined ? { done: b.done === true } : {}),
+        });
+        if (!item) throw new HttpError(404, "no such checklist item");
+        log(`kanban: owner changed checklist item ${itemId} of task ${id}`);
+        return item;
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/tasks\/([\w-]{1,64})\/checklist\/(\d{1,15})$/,
+      ({ params }) => {
+        const [id, itemId] = params as [string, string];
+        if (!removeChecklistItem(db, id, Number(itemId)))
+          throw new HttpError(404, "no such checklist item");
+        log(`kanban: owner removed checklist item ${itemId} of task ${id}`);
+        return { ok: true };
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/tasks\/([\w-]{1,64})\/comments$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        const comment = addComment(db, id, str((await body()).text, "text", 5000));
+        if (!comment) throw new HttpError(404, "no such task");
+        log(`kanban: owner commented on task ${id}`);
+        return comment;
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/tasks\/([\w-]{1,64})\/comments\/(\d{1,15})$/,
+      ({ params }) => {
+        const [id, commentId] = params as [string, string];
+        if (!deleteComment(db, id, Number(commentId))) throw new HttpError(404, "no such comment");
+        log(`kanban: owner deleted comment ${commentId} of task ${id}`);
+        return { ok: true };
       },
     ],
     [

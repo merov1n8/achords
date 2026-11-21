@@ -674,8 +674,8 @@ main > .page {
 /* One row of workflow columns; scrolls sideways when they do not fit (also on phones). */
 .kanban {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(210px, 1fr);
+  /* Every column on screen: as many equal columns as the workflow has (set inline as --cols). */
+  grid-template-columns: repeat(var(--cols, 6), minmax(140px, 1fr));
   overflow-x: auto;
   padding-bottom: 8px;
   gap: 14px;
@@ -717,12 +717,17 @@ main > .page {
   box-shadow: var(--shadow-hover);
   border-color: var(--accent-line);
 }
+.kcard .top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -4px;
+}
 .kcard .t {
   font-weight: 500;
   line-height: 1.4;
-  display: flex;
-  gap: 4px;
-  align-items: flex-start;
+  overflow-wrap: anywhere;
 }
 .kcard .m {
   display: flex;
@@ -885,7 +890,7 @@ main > .page {
     max-width: 95%;
   }
   .kanban {
-    grid-auto-columns: 80%;
+    grid-template-columns: repeat(var(--cols, 6), 80%);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1060,4 +1065,110 @@ main > .page {
 }
 .sub-pad {
   padding-left: 36px;
+}
+
+/* Modals (native <dialog>) and the row-actions popover */
+.modal {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 48px -16px rgb(0 0 0 / 0.35);
+}
+.modal.wide {
+  width: min(720px, calc(100vw - 32px));
+}
+.modal::backdrop {
+  background: rgb(10 10 12 / 0.45);
+}
+.modal-h,
+.modal-f {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+}
+.modal-h h2 {
+  flex: 1;
+  font-size: 15px;
+}
+.modal-h {
+  border-bottom: 1px solid var(--border);
+}
+.modal-b {
+  padding: 18px;
+  overflow: auto;
+}
+.modal-f {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+.btn.danger-solid {
+  background: var(--bad);
+  border-color: transparent;
+  color: var(--surface);
+}
+.modal h3.sec {
+  font-size: 13px;
+  margin: 18px 0 8px;
+}
+.checklist,
+.comments {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.comments li {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px 8px;
+}
+.comments .content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.strike {
+  text-decoration: line-through;
+}
+.row.end {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.card-meta {
+  margin-bottom: 14px;
+}
+.card-meta a {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.kcard .who {
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.kbd-help {
+  visibility: hidden;
+}
+.kanban:focus-within ~ .kbd-help {
+  visibility: visible;
+}
+input[type="checkbox"] {
+  accent-color: var(--accent);
 }

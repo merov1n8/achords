@@ -4,6 +4,7 @@ export const PACKAGE_NAME = "@achords/core";
 export * from "./agents.ts";
 export * from "./auth.ts";
 export * from "./board.ts";
+export * from "./cards.ts";
 export * from "./cron.ts";
 export { type Db, openCoreDatabase, openDatabase, transaction } from "./db/database.ts";
 export { type Migration, migrate, migrationsFromDir } from "./db/migrate.ts";

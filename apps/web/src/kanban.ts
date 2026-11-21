@@ -57,3 +57,17 @@ export function ago(then: number, now = Date.now()): string {
   if (s < 86400) return t("time.hours", { n: Math.floor(s / 3600) });
   return t("time.days", { n: Math.floor(s / 86400) });
 }
+
+/** Columns for the "All" board: every workspace's columns once; a new one goes before the next known one. */
+export function unionColumns(lists: string[][]): string[] {
+  const out: string[] = [];
+  for (const list of lists) {
+    list.forEach((col, i) => {
+      if (out.includes(col)) return;
+      const next = list.slice(i + 1).find((c) => out.includes(c));
+      if (next === undefined) out.push(col);
+      else out.splice(out.indexOf(next), 0, col);
+    });
+  }
+  return out;
+}

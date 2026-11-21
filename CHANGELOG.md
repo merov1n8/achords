@@ -38,6 +38,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Kanban: opens on "All" workspaces with the assignee on every card; all columns fit the screen.
+  A click (or Enter) opens a card: edit title and description, move it, keep sub-items and your
+  own comments (the agent sees them next time), or delete it after a confirmation.
+- Kanban cards can be edited and deleted (gateway API; the web view follows): change a card's title and description, keep a checklist on it and leave your own comments. The agent working on the card sees the checklist and comments. Deleting a card removes it with all its steps; a card that is running is not deleted (stop it first or wait until it finishes).
 - Spend: the Usage page shows today's and this month's cost by provider, agent or project, with API money apart from subscription estimates. Settings → Model access sets a daily and monthly API budget per provider: a note at 80%, and at 100% new API work waits until the next day or month (or until you raise it). Models without a reported cost are priced from ~/.achords/pricing.yaml.
 - Google Gemini (first stage, not tried live yet): agents can run on Gemini models through the official gemini CLI (`cli-gemini/<model>`), on your Google login or an API key (Settings → Model access). For now Gemini runs edit only their own folders, run no shell commands and get no achords tools or integrations.
 - Model access (Settings): Claude and OpenAI can each run on your subscription or on an API key; the key is kept in the vault and given only to that provider's runs, and switching back needs no new sign-in. Not yet tried with real API keys.

@@ -38,7 +38,9 @@ import {
   getThread,
   isDraining,
   isPaused,
+  listChecklist,
   listChildren,
+  listComments,
   listMessages,
   markScheduleRun,
   moveCard,
@@ -1736,6 +1738,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         delegates.length && deps.hub
           ? `\n\nYou can delegate to:\n${delegates.map(teamLine).join("\n")}\nUse the delegate tool only for work outside your own role.`
           : "";
+      // The owner's notes on the card (web edit view): part of the task, like its description.
+      const checklist = listChecklist(db, task.id);
+      const comments = listComments(db, task.id);
+      const ownerNotes = [
+        checklist.length
+          ? `Owner's checklist for this card:\n${checklist.map((i) => `- [${i.done ? "x" : " "}] ${i.text}`).join("\n")}`
+          : "",
+        comments.length
+          ? `Owner's comments on this card:\n${comments.map((c) => `- ${c.text}`).join("\n")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .map((s) => `\n\n${s}`)
+        .join("");
       // Continuing after a planned stop (`achords stop`): files are on disk, the note says where it was.
       const resume = task.resumeNote ? `\n\n${task.resumeNote}` : "";
       const scopes = launches
@@ -1773,7 +1789,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}# Task: ${task.title}\n\n${task.description ?? ""}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.

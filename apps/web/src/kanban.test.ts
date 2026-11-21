@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, boardColumns, columnLabel, dropKind, type Rule } from "./kanban.ts";
+import { ago, boardColumns, columnLabel, dropKind, type Rule, unionColumns } from "./kanban.ts";
 import type { Task } from "./types.ts";
 
 const task = (id: string, over: Partial<Task> = {}): Task => ({
@@ -67,5 +67,17 @@ describe("ago", () => {
     expect(ago(0, 5 * 60_000)).toBe("5m");
     expect(ago(0, 3 * 3600_000)).toBe("3h");
     expect(ago(0, 2 * 86400_000)).toBe("2d");
+  });
+});
+
+describe("unionColumns", () => {
+  it("merges workflow columns of several workspaces, keeping their order", () => {
+    expect(
+      unionColumns([
+        ["backlog", "todo", "in_progress", "review", "done"],
+        ["todo", "in_progress", "qa", "done", "deployed"],
+      ]),
+    ).toEqual(["backlog", "todo", "in_progress", "review", "qa", "done", "deployed"]);
+    expect(unionColumns([])).toEqual([]);
   });
 });
