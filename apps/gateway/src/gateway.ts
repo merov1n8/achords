@@ -1,11 +1,14 @@
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   appendMessage,
+  getSetting,
   homePaths,
   isPaused,
+  listActiveRuns,
   listThreads,
   openCoreDatabase,
   readLivePid,
@@ -29,6 +32,15 @@ import { runMonitors } from "./monitors.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents, seedSchedules } from "./orchestrator/seed.ts";
 import { createTelegramChannel, type TelegramChannel } from "./telegram/telegram.ts";
+import {
+  AUTO_KEY,
+  autoUpdate,
+  LAST_KEY,
+  READY_KEY,
+  reportAfterRestart,
+  type UpdaterDeps,
+  updateTick,
+} from "./updater.ts";
 import { whisperTranscriber } from "./voice/transcribe.ts";
 
 export const HEARTBEAT_KEY = "gateway.heartbeat";
@@ -41,6 +53,12 @@ const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
 const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
 const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
+// launchd names the job in XPC_SERVICE_NAME, our systemd unit sets ACHORDS_SERVICE: only the
+// installed service auto-updates (never tests, CI or a gateway started by hand).
+const AS_SERVICE =
+  process.env.XPC_SERVICE_NAME === "dev.achords.gateway" || process.env.ACHORDS_SERVICE === "1";
+// The git checkout this gateway runs from (auto-update pulls into it).
+const REPO = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const WEB_DIST = new URL("../../web/dist/", import.meta.url).pathname;
 const DEFAULT_PORT = 7420;
 const TELEGRAM_TOKEN_ID = "telegram.bot-token";
@@ -104,6 +122,54 @@ export function runGateway(home: string): Promise<number> {
       });
     }
   };
+
+  const updaterDeps: UpdaterDeps = {
+    db,
+    repo: REPO,
+    running: (() => {
+      try {
+        return execFileSync("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+      } catch {
+        return undefined;
+      }
+    })(),
+    // pnpm next to this Node (the service PATH may not have it), git from the system.
+    pnpm: join(dirname(process.execPath), "pnpm"),
+    node: process.execPath,
+    exec: (cmd, args, opts) =>
+      new Promise((done) => {
+        execFile(
+          cmd,
+          args,
+          {
+            timeout: opts?.timeoutMs ?? 60_000,
+            maxBuffer: 16 * 1024 * 1024,
+            env: { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ""}` },
+          },
+          (err, stdout, stderr) =>
+            done({
+              code: err ? Number((err as { code?: number }).code ?? 1) || 1 : 0,
+              out: `${stdout}${stderr}`,
+            }),
+        );
+      }),
+    fetchJson: async (url) => {
+      const res = await fetch(url, {
+        headers: { accept: "application/vnd.github+json", "user-agent": "achords-updater" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) throw new Error(`GitHub ${res.status}`);
+      return res.json();
+    },
+    isIdle: () =>
+      listActiveRuns(db).length === 0 &&
+      !db.prepare("SELECT 1 FROM tasks WHERE status = 'claimed' LIMIT 1").get(),
+    notify: (text) => notifyOwner(text),
+    exit: (code) => {
+      void stopForUpdate?.(code);
+    },
+  };
+  let stopForUpdate: ((code: number) => Promise<void>) | undefined;
 
   const orchestrator = createOrchestrator({
     db,
@@ -181,9 +247,10 @@ export function runGateway(home: string): Promise<number> {
     let working: Promise<unknown> | undefined;
     let delivering = false;
     let monitoring = false;
+    let updating = false;
     let ticks = 0;
     const cancel = new AbortController();
-    const shutdown = async (reason: string) => {
+    const shutdown = async (reason: string, code = 0) => {
       if (stopped) return;
       stopped = true;
       clearInterval(timer);
@@ -201,7 +268,7 @@ export function runGateway(home: string): Promise<number> {
       // Only remove our own pidfile; a successor may already have written its own.
       if (readLivePid(paths.pidFile) === process.pid) rmSync(paths.pidFile, { force: true });
       log(`stopped (${reason})`);
-      resolve(0);
+      resolve(code);
     };
     const tick = () => {
       if (stopped) return;
@@ -227,6 +294,16 @@ export function runGateway(home: string): Promise<number> {
           log(`scheduler error: ${(err as Error).message}`);
         }
       }
+      // Auto-update from main (owner decision): hourly check, applied when nothing is running.
+      // Only the installed service updates itself; tests and manual runs never touch the repo.
+      if (AS_SERVICE && !updating) {
+        updating = true;
+        updateTick(updaterDeps)
+          .catch((err) => log(`update error: ${(err as Error).message}`))
+          .finally(() => {
+            updating = false;
+          });
+      }
       // Heartbeat monitors (ADR-0039): cheap checks, one pass at a time.
       if (!monitoring) {
         monitoring = true;
@@ -249,6 +326,7 @@ export function runGateway(home: string): Promise<number> {
           });
       }
     };
+    stopForUpdate = (code) => shutdown("update", code);
     const onTerm = () => shutdown("SIGTERM");
     const onInt = () => shutdown("SIGINT");
     process.on("SIGTERM", onTerm);
@@ -272,6 +350,35 @@ export function runGateway(home: string): Promise<number> {
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
           home,
+          update: {
+            status: async () => {
+              const parse = (key: string) => {
+                const raw = getSetting(db, key);
+                return raw ? (JSON.parse(raw) as unknown) : null;
+              };
+              const head = await updaterDeps.exec("git", [
+                "-C",
+                REPO,
+                "log",
+                "-1",
+                "--format=%h %s",
+              ]);
+              return {
+                auto: autoUpdate(db),
+                service: AS_SERVICE,
+                current: head.out.trim(),
+                check: parse("update.check"),
+                ready: parse(READY_KEY),
+                last: parse(LAST_KEY),
+              };
+            },
+            setAuto: (on) => setSetting(db, AUTO_KEY, on ? "1" : "0"),
+            checkNow: async () => {
+              if (!AS_SERVICE)
+                return { status: "blocked", reason: "only the installed service updates itself" };
+              return updateTick(updaterDeps, true);
+            },
+          },
           // The codex CLI's own model list (no login data in it); missing file: no suggestions.
           codexModels: () => {
             try {
@@ -324,6 +431,8 @@ export function runGateway(home: string): Promise<number> {
       // Pidfile last: once it is visible, `achords stop` may SIGTERM us, so handlers must be ready.
       writeFileSync(paths.pidFile, String(process.pid), { mode: 0o600 });
       log(`started (pid ${process.pid}, home ${home}, http://127.0.0.1:${actual})`);
+      // Fully up: an update that led here succeeded.
+      reportAfterRestart(updaterDeps);
       timer = setInterval(tick, TICK_MS);
       tick();
       if (telegram) void pollLoop(telegram);
