@@ -494,8 +494,8 @@ tbody tr:hover {
   background: var(--surface-2);
   color: var(--text);
 }
-/* The icon rail is a desktop feature; phones keep the drawer. */
-@media (min-width: 769px) {
+/* The icon rail is a desktop feature; phones use the bottom tab bar. */
+@media (min-width: 768px) {
   .collapsed .side .lbl,
   .collapsed .side .chev,
   .collapsed .side .grp > :not(summary),
