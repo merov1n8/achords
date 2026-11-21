@@ -31,3 +31,12 @@ tools:
       run_tests,
       read_console,
     ]
+# ADR-0054: achords opens the Unity Editor on the run's working folder (the agent's first own
+# folder) when that folder is a Unity project, and quits it once no active task needs it. Ready
+# when the MCP for Unity bridge listens (6400 unless that port was taken). Several Editor versions
+# installed: copy this entry to ~/.achords/catalog/unity.yaml with the full path of the right one.
+app:
+  name: Unity
+  open: ["-g", "-a", "Unity", "--args", "-projectPath", "{workdir}"]
+  requires: ProjectSettings/ProjectVersion.txt
+  ready: { port: 6400, timeout_s: 180 }

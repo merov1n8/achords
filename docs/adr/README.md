@@ -53,3 +53,4 @@
 - [ADR-0051: Agent runs with any website in an Apple container](0051-agent-runs-in-apple-containers.md)
 - [ADR-0052: Chat run details and Stop per chat](0052-chat-run-details-and-stop.md)
 - [ADR-0053: Skill folders and agent scopes](0053-skill-folders-and-agent-scopes.md)
+- [ADR-0054: Local apps opened and closed by achords](0054-local-apps-opened-by-achords.md)

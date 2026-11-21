@@ -106,6 +106,7 @@ import {
 } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/providers";
 import { z } from "zod";
+import type { Apps } from "../apps.ts";
 import type { Prepared } from "../container.ts";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
 import { describeCall, describeResult } from "./publish-text.ts";
@@ -229,6 +230,8 @@ export interface OrchestratorDeps {
       args: unknown,
     ) => Promise<{ ok: boolean; text: string }>;
   };
+  /** ADR-0054: opens the app an integration needs (Blender, Unity) before a run. */
+  apps?: Pick<Apps, "ensure">;
 }
 
 export interface Orchestrator {
@@ -306,6 +309,11 @@ export interface Orchestrator {
   ): { ok: true; text: string } | { ok: false; reason: string };
   /** Loads manifests and mirrors them into the DB; seeds missing workflows. Returns agent ids. */
   syncAgents(): string[];
+  /**
+   * ADR-0054: names of the catalog apps that tasks still queued, running or waiting need (their
+   * agent uses an integration with that app); achords keeps the apps it opened open for them.
+   */
+  appsInUse(): Set<string>;
   /** An agent moves a kanban card (hub tool move_task), checked against the workflow. */
   moveTask(
     from: { from: "task"; taskId: string },
@@ -965,6 +973,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       });
       enqueueTurn(parent, room, nextTurn(room) as { agentId: string; round: number });
       return { ok: true, roomId: room.id };
+    },
+
+    appsInUse: () => {
+      const catalog = deps.integrations?.catalog();
+      if (!catalog) return new Set();
+      const all = loadAgents(agentsDir);
+      const rows = db
+        .prepare(
+          "SELECT DISTINCT assignee_agent_id AS agent FROM tasks WHERE status IN ('queued', 'claimed') AND parked = 0",
+        )
+        .all() as { agent: string | null }[];
+      return new Set(
+        rows.flatMap((r) =>
+          (all.get(r.agent ?? "")?.mcp ?? []).flatMap((id) => catalog.get(id)?.app?.name ?? []),
+        ),
+      );
     },
 
     syncAgents: () => {
@@ -1894,6 +1918,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let dropped: string[] = [];
     const unscoped: string[] = [];
     const unavailable: string[] = [];
+    // Apps achords opened for this run (ADR-0054).
+    const appsOpened: string[] = [];
     // OpenAI models through codex (ADR-0040): treated like an agent with a shell.
     let codexRun = false;
     // Gemini (ADR-0045, stage 1): no achords MCP tools at all yet.
@@ -1987,17 +2013,25 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         for (const entry of usable) {
           try {
             const skipped: string[] = [];
-            ready.push({
+            const launch = buildLaunch(
               entry,
-              launch: buildLaunch(
-                entry,
-                agentId,
-                accounts,
-                undefined,
-                skipped,
-                workFolder(runManifest),
-              ),
-            });
+              agentId,
+              accounts,
+              undefined,
+              skipped,
+              workFolder(runManifest),
+            );
+            // ADR-0054: the app the server talks to, opened by achords so agents need no shell
+            // for it. Container runs cannot reach apps on this Mac, so nothing is opened for them.
+            if (entry.app && deps.apps && !runManifest.container) {
+              const app = await deps.apps.ensure(entry.app, workFolder(runManifest));
+              if (!app.ok) {
+                unavailable.push(`${entry.name} (${app.reason})`);
+                continue;
+              }
+              if (app.opened) appsOpened.push(entry.app.name);
+            }
+            ready.push({ entry, launch });
             if (skipped.length)
               unavailable.push(`${entry.id} on ${skipped.join(", ")} (no credentials yet)`);
           } catch (err) {
@@ -2090,6 +2124,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         .filter((l) => l.publish)
         .map((l) => `${l.id} (${l.publish?.mode})`);
       const scopeNote = [
+        appsOpened.length
+          ? `achords opened ${appsOpened.join(" and ")} on this Mac for this run and closes ${appsOpened.length > 1 ? "them" : "it"} again when no task needs ${appsOpened.length > 1 ? "them" : "it"}; say so in one line of your report.`
+          : "",
         unavailable.length ? `Not available in this run: ${unavailable.join("; ")}.` : "",
         publishing.length
           ? `Write tools of ${publishing.join(", ")}: in review mode a call is sent to the owner for approval and runs only if approved; in auto mode it runs and is reported. Prepare the final content before calling.`
