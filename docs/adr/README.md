@@ -41,3 +41,4 @@
 - [ADR-0039: Heartbeat monitors](0039-heartbeat-monitors.md)
 - [ADR-0040: OpenAI models through the codex CLI](0040-openai-models-through-codex-cli.md)
 - [ADR-0041: Owner-approved changes to existing agents](0041-owner-approved-agent-changes.md)
+- [ADR-0042: The owner's own accounts for work without a client project](0042-own-accounts.md)

@@ -133,6 +133,7 @@ describe("HTTP API", () => {
         mcpTickets,
         agentsDir,
         projectsDir,
+        home: runDir,
         runDir,
         integrations: () => [
           {
@@ -404,6 +405,24 @@ describe("HTTP API", () => {
     expect((await call(`/api/threads/${a.id}`, { method: "DELETE" })).status).toBe(409);
     expect((await call(`/api/threads/${b.id}`, { method: "DELETE" })).status).toBe(200);
     expect(await ids("?archived=1")).toEqual([]);
+  });
+
+  it("own accounts: read and save lists for work without a client project (ADR-0042)", async () => {
+    const { call } = await pair();
+    expect(await (await call("/api/accounts")).json()).toEqual({ integrations: {} });
+    const put = await call("/api/accounts", {
+      method: "PUT",
+      body: JSON.stringify({ integrations: { facebook: ["1365", ""], instagram: ["1784"] } }),
+    });
+    expect(await put.json()).toEqual({ integrations: { facebook: ["1365"], instagram: ["1784"] } });
+    expect(await (await call("/api/accounts")).json()).toEqual({
+      integrations: { facebook: ["1365"], instagram: ["1784"] },
+    });
+    const bad = await call("/api/accounts", {
+      method: "PUT",
+      body: JSON.stringify({ integrations: { "Bad Key": ["x"] } }),
+    });
+    expect(bad.status).toBe(400);
   });
 
   it("vault is write-only over HTTP", async () => {

@@ -40,7 +40,16 @@ export {
   parseManifest,
 } from "./manifest.ts";
 export { allowRules } from "./permissions.ts";
-export { createProject, loadProjects, type Project, updateProject } from "./projects.ts";
+export {
+  createProject,
+  loadOwnAccounts,
+  loadProjects,
+  OWN,
+  ownProject,
+  type Project,
+  saveOwnAccounts,
+  updateProject,
+} from "./projects.ts";
 export {
   checkMove,
   DEFAULT_WORKFLOW_YAML,

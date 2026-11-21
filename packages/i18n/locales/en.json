@@ -323,6 +323,8 @@
   "secretInput.replace": "set — type to replace",
   "integrations.setSecret": "Set",
   "integrations.test": "Test connection",
+  "integrations.own": "Your own accounts",
+  "integrations.ownHelp": "Used by work that has no client project (your own business). The Google and Meta sign-ins are shared by everything; these rows say which of your pages, properties and sites agents may use outside client work. A client project only ever uses its own accounts. Shown as \"own\" in the lists above.",
   "integrations.testing": "Testing…",
   "projects.docHelp": "Client preferences, stack, conventions, don'ts, deploy rules. Every run of this project gets this text. Files stay in Finder.",
   "schedules.edit": "Edit schedule",

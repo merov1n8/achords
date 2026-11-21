@@ -13,7 +13,13 @@ import {
   setSetting,
 } from "@achords/core";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
-import { integrationStatus, loadAgents, loadCatalog, loadProjects } from "@achords/policy";
+import {
+  integrationStatus,
+  loadAgents,
+  loadCatalog,
+  loadProjects,
+  ownProject,
+} from "@achords/policy";
 import { cliClaude, cliCodex, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApiHandler } from "./http/api.ts";
@@ -265,6 +271,7 @@ export function runGateway(home: string): Promise<number> {
           mcpTickets,
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
+          home,
           // The codex CLI's own model list (no login data in it); missing file: no suggestions.
           codexModels: () => {
             try {
@@ -291,7 +298,8 @@ export function runGateway(home: string): Promise<number> {
             return integrationStatus(
               loadCatalog(SEED_CATALOG, join(home, "catalog")),
               loadAgents(join(home, "agents")).values(),
-              loadProjects(paths.projectsDir).values(),
+              // Own accounts count like a project named "own" (ADR-0042).
+              [...loadProjects(paths.projectsDir).values(), ownProject(home)],
               (id) => ids.has(id),
               (bin) => path.some((dir) => dir && existsSync(join(dir, bin))),
             );
