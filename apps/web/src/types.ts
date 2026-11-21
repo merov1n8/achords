@@ -82,6 +82,8 @@ export interface IntegrationStatus {
   projectsScoped: string[];
   ready: boolean;
   testable: boolean;
+  sites: { project: string; url: string; ready: boolean; missing: string[] }[];
+  kind: "account" | "client" | "local";
 }
 
 /** GET /api/monitors (ADR-0039). */

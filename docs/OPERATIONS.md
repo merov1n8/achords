@@ -64,6 +64,30 @@ and Search Console site, and the one sign-in reaches all of them.
      search-console: ["sc-domain:example.com"] # exactly as Search Console lists it
    ```
 
+## WordPress
+
+A project can have several sites (ADR-0047); each has its own WordPress user and application
+password (Users → Profile → Application Passwords).
+
+1. List the sites in `~/.achords/projects/<slug>/project.yaml` (or through the web / API,
+   `POST /api/projects/<slug>/sites/wordpress` with `{"url": "https://…"}`; own accounts: `own`):
+
+   ```yaml
+   integrations:
+     wordpress: ["https://acme.example", "https://shop.acme.example"]
+   ```
+
+2. Per site, `<site>` being the address without `https://`, lowercased, other characters as dashes
+   (`GET /api/projects/<slug>/sites/wordpress` shows the exact ids and which are missing):
+
+   ```sh
+   pnpm achords secret set wordpress-user-acme-shop-acme-example
+   pnpm achords secret set wordpress-password-acme-shop-acme-example
+   ```
+
+   The older `wordpress-user-<slug>` / `wordpress-password-<slug>` still work for the first site.
+   A site without credentials is left out of runs; the others work.
+
 ## Telegram
 
 1. Create a bot with @BotFather and copy its token.

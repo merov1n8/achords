@@ -51,6 +51,8 @@ describe("integrations in runs (ADR-0034)", () => {
   let callText: string;
   let triage: { news: boolean; summary: string } | undefined;
   let runTokens: ReturnType<typeof createRunTokens>;
+  /** Vault ids that are set; undefined: every id resolves. */
+  let vaultIds: Set<string> | undefined;
 
   const agent = (id: string, extra: string, tools = "[Read]") => {
     mkdirSync(join(home, "agents", id), { recursive: true });
@@ -97,6 +99,7 @@ describe("integrations in runs (ADR-0034)", () => {
     called = [];
     callText = "draft 42 created";
     triage = undefined;
+    vaultIds = undefined;
     runTokens = createRunTokens();
     tickets = createMcpTickets();
     const p: ModelProvider = {
@@ -132,6 +135,8 @@ describe("integrations in runs (ADR-0034)", () => {
         launcherEntry: "/x/launch.ts",
         builtins: { wordpress: "/x/wordpress.ts" },
         resolveSecret: (ref, actor) => {
+          if (vaultIds && !vaultIds.has(ref.slice("vault:".length)))
+            throw new Error(`secret ${ref} is not set`);
           resolved.push([ref, actor]);
           return SECRET;
         },
@@ -600,6 +605,111 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(seen[0]?.req.prompt).toMatch(
       /Not available in this run: site \(needs the project's wordpress account\)/,
     );
+  });
+
+  describe("several WordPress sites per project (ADR-0047)", () => {
+    const capture = () => {
+      const launches: McpLaunch[] = [];
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launches.push(launch);
+        return original(launch);
+      };
+      return launches;
+    };
+    const sites = (where: string, urls: string[]) =>
+      appendFileSync(where, `integrations:\n  wordpress: ${JSON.stringify(urls)}\n`);
+    beforeEach(() => {
+      writeFileSync(
+        join(home, "catalog", "wps.yaml"),
+        `id: wps\nname: WordPress sites\nbuiltin: wordpress\nsites:\n  channel: wordpress\n  env: WP_SITES\n  secrets:\n    user: "vault:wp-user-{project}-{site}"\n    password: "vault:wp-password-{project}-{site}"\n  first:\n    user: "vault:wp-user-{project}"\n    password: "vault:wp-password-{project}"\ntools:\n  read: [site_info]\n  write: [create_draft]\nscope:\n  args: [site]\n  optional: true\ntest:\n  tool: site_info\n  args: { site: "{target}" }\n`,
+      );
+      agent("writer", "mcp: [wps]");
+      orch.syncAgents();
+    });
+    const acmeYaml = () => join(home, "projects", "acme", "project.yaml");
+
+    it("gives the server the sites with credentials; the others are named as not available", async () => {
+      sites(acmeYaml(), ["https://a.example", "https://b.example", "https://c.example"]);
+      // Old single-site ids cover the first site; c has its own.
+      vaultIds = new Set([
+        "wp-user-acme",
+        "wp-password-acme",
+        "wp-user-acme-c-example",
+        "wp-password-acme-c-example",
+      ]);
+      const launches = capture();
+      expect((await give("writer", "acme")).status).toBe("done");
+      expect(JSON.parse(launches[0]?.env.WP_SITES ?? "")).toEqual([
+        { url: "https://a.example", user: SECRET, password: SECRET },
+        { url: "https://c.example", user: SECRET, password: SECRET },
+      ]);
+      expect(launches[0]?.scope).toEqual({
+        args: ["site"],
+        free: [],
+        allowed: ["https://a.example", "https://c.example"],
+      });
+      expect(seen[0]?.req.prompt).toMatch(
+        /Not available in this run: wps on https:\/\/b.example \(no credentials yet\)/,
+      );
+      expect(seen[0]?.req.prompt).toMatch(/wps: https:\/\/a.example, https:\/\/c.example/);
+    });
+
+    it("one site: the site argument may be left out", async () => {
+      sites(acmeYaml(), ["https://a.example"]);
+      vaultIds = new Set(["wp-user-acme-a-example", "wp-password-acme-a-example"]);
+      const launches = capture();
+      await give("writer", "acme");
+      expect(launches[0]?.scope).toMatchObject({ allowed: ["https://a.example"], optional: true });
+      expect(resolved.map(([r]) => r)).toEqual([
+        "vault:wp-user-acme-a-example",
+        "vault:wp-password-acme-a-example",
+      ]);
+    });
+
+    it("no site with credentials: the integration stays out, the run goes on", async () => {
+      sites(acmeYaml(), ["https://a.example"]);
+      vaultIds = new Set();
+      const launches = capture();
+      expect((await give("writer", "acme")).status).toBe("done");
+      expect(launches).toEqual([]);
+      expect(seen[0]?.req.prompt).toMatch(
+        /Not available in this run: wps \(has no credentials yet for https:\/\/a.example\)/,
+      );
+    });
+
+    it("own accounts hold sites under the same rules", async () => {
+      sites(join(home, "accounts.yaml"), ["https://mine.example"]);
+      vaultIds = new Set(["wp-user-own-mine-example", "wp-password-own-mine-example"]);
+      const launches = capture();
+      await give("writer");
+      expect(launches[0]?.scope?.allowed).toEqual(["https://mine.example"]);
+    });
+
+    it("connection test: every site, and which ones still need credentials", async () => {
+      sites(acmeYaml(), ["https://a.example", "https://b.example"]);
+      vaultIds = new Set(["wp-user-acme", "wp-password-acme"]);
+      callText = '{"name":"Acme"}';
+      const r = await orch.testIntegration("wps", "acme");
+      expect(called.map((c) => c.args)).toEqual([{ site: "https://a.example" }]);
+      expect(r).toEqual({
+        ok: false,
+        text: "https://a.example: name: Acme\nhttps://b.example: no credentials yet (set wp-user-acme-b-example and wp-password-acme-b-example in the vault)",
+      });
+    });
+
+    it("an approved draft runs with the run's own accounts when there is no client project", async () => {
+      sites(join(home, "accounts.yaml"), ["https://mine.example"]);
+      const task = await give("writer");
+      orch.requestPublish(
+        { from: "task", taskId: task.id },
+        { integration: "wps", tool: "create_draft", args: { title: "T" } },
+      );
+      const approve = listMessages(db, task.threadId as string).at(-1)?.actions?.[0]?.data ?? "";
+      expect(orch.runAction(approve).ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called[0]?.launch.scope?.allowed).toEqual(["https://mine.example"]);
+    });
   });
 
   it("a Gemini run gets no MCP tools yet and is told so (ADR-0045)", async () => {
