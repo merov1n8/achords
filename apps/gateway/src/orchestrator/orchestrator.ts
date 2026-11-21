@@ -1544,6 +1544,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const until = task.roomId || task.workerSpec ? undefined : elevatedUntil(rootId);
     let dropped: string[] = [];
     const unscoped: string[] = [];
+    const unavailable: string[] = [];
     // OpenAI models through codex (ADR-0040): treated like an agent with a shell.
     let codexRun = false;
     try {
@@ -1625,7 +1626,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           return false;
         });
         const runManifest = manifest;
-        launches = usable.map((entry) => {
+        // Missing account or secret for this run: that integration stays out, the work goes on.
+        const ready: { entry: CatalogEntry; launch: McpLaunch }[] = [];
+        for (const entry of usable) {
+          try {
+            ready.push({ entry, launch: buildLaunch(entry, agentId, accounts) });
+          } catch (err) {
+            unavailable.push(
+              `${entry.id} (${(err as Error).message.replace(/^integration \S+ /, "")})`,
+            );
+          }
+        }
+        launches = ready.map(({ entry, launch }) => {
           // Publishing (ADR-0037): write tools of integrations with credentials go through the
           // launcher, which asks the owner (review) or reports the call (auto).
           const credentials = secretRefs(entry).length > 0;
@@ -1636,7 +1648,6 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // ADR-0038: a run that reads the open web never publishes without the owner.
           const openWeb = runManifest.tools.some((x) => x === "WebFetch" || x === "WebSearch");
           const mode = chosen === "auto" && openWeb ? "review" : chosen;
-          const launch = buildLaunch(entry, agentId, accounts);
           return {
             id: entry.id,
             // Client accounts carry third-party text (comments, queries, posts): marked as data.
@@ -1696,6 +1707,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         .filter((l) => l.publish)
         .map((l) => `${l.id} (${l.publish?.mode})`);
       const scopeNote = [
+        unavailable.length ? `Not available in this run: ${unavailable.join("; ")}.` : "",
         publishing.length
           ? `Write tools of ${publishing.join(", ")}: in review mode a call is sent to the owner for approval and runs only if approved; in auto mode it runs and is reported. Prepare the final content before calling.`
           : "",
