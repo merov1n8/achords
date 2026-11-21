@@ -6,7 +6,6 @@ import {
   Columns3,
   FolderKanban,
   Gauge,
-  Menu,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -16,6 +15,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { ApiError, api, loadSession, logout } from "./api.ts";
 import { Mark } from "./components/Mark.tsx";
+import { MoreSheet, TabBar, TopBar } from "./components/MobileNav.tsx";
 import { t } from "./i18n.ts";
 import { loadCollapsed, saveCollapsed } from "./theme.ts";
 import type { Thread } from "./types.ts";
@@ -50,7 +50,7 @@ export function App() {
   const [state, setState] = useState<"loading" | "unpaired" | "ready" | "error">("loading");
   const [device, setDevice] = useState<string>();
   const [route, setRoute] = useState(parseRoute());
-  const [drawer, setDrawer] = useState(false);
+  const [more, setMore] = useState(false);
   const [collapsed, setCollapsed] = useState(loadCollapsed());
   const toggleCollapsed = () => {
     saveCollapsed(!collapsed);
@@ -69,7 +69,7 @@ export function App() {
     check();
     const onHash = () => {
       setRoute(parseRoute());
-      setDrawer(false);
+      setMore(false);
     };
     addEventListener("hashchange", onHash);
     // A revoked or expired session surfaces as a 401 from any view: back to pairing.
@@ -88,6 +88,10 @@ export function App() {
   if (state === "unpaired") return <Pair onPaired={check} />;
 
   const [section = "chat", sub] = route;
+  const newThread = async () => {
+    const thread = await api<Thread>("/api/threads", { method: "POST", body: {} });
+    go(`chat/${thread.id}`);
+  };
   const doLogout = async () => {
     await logout();
     setState("unpaired");
@@ -95,21 +99,10 @@ export function App() {
 
   return (
     <div class={`layout ${collapsed ? "collapsed" : ""}`}>
-      <div class="topbar">
-        <button
-          type="button"
-          class="btn ghost"
-          onClick={() => setDrawer(!drawer)}
-          aria-label={t("nav.menu")}
-        >
-          <Menu class="icon" />
-        </button>
-        <strong>achords</strong>
-      </div>
+      <TopBar section={section} sub={sub} onNewChat={newThread} />
       <Sidebar
         section={section}
         sub={sub}
-        open={drawer}
         device={device}
         collapsed={collapsed}
         onCollapse={toggleCollapsed}
@@ -135,6 +128,19 @@ export function App() {
         </div>
         <LiveBar />
       </main>
+      <TabBar
+        section={section}
+        chatHref={section === "chat" && sub ? `#/chat/${sub}` : "#/chats"}
+        moreOpen={more}
+        onMore={() => setMore(true)}
+      />
+      <MoreSheet
+        open={more}
+        onClose={() => setMore(false)}
+        section={section}
+        sub={sub}
+        device={device}
+      />
     </div>
   );
 }
@@ -160,7 +166,6 @@ function Group(props: {
 function Sidebar(props: {
   section: string;
   sub?: string | undefined;
-  open: boolean;
   device?: string | undefined;
   collapsed: boolean;
   onCollapse: () => void;
@@ -176,7 +181,7 @@ function Sidebar(props: {
   );
   const { section, sub } = props;
   return (
-    <nav class={`side ${props.open ? "open" : ""}`} aria-label={t("nav.main")}>
+    <nav class="side" aria-label={t("nav.main")}>
       <div class="brand">
         <Mark />
         <span class="lbl">achords</span>

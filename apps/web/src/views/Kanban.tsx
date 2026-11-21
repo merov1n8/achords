@@ -65,6 +65,12 @@ export function Kanban() {
   );
   const board = boardColumns(columns, tasks.data ?? [], inWs);
   const [open, setOpen] = useState<string>();
+  // Phones show one column at a time: the picked one, else the first with cards.
+  const [shown, setShown] = useState<string>();
+  const current =
+    (shown && columns.includes(shown) ? shown : undefined) ??
+    board.find((c) => c.cards.length)?.id ??
+    columns[0];
 
   const move = async (task: Task, from: string, to: string) => {
     if (from === to) return;
@@ -198,9 +204,25 @@ export function Kanban() {
           )}
         </div>
       </div>
+      <fieldset class="kanban-tabs" aria-label={t("kanban.columns")}>
+        {board.map((col) => (
+          <button
+            key={col.id}
+            type="button"
+            aria-pressed={col.id === current}
+            onClick={() => setShown(col.id)}
+          >
+            {columnLabel(col.id)} {col.cards.length}
+          </button>
+        ))}
+      </fieldset>
       <div class="kanban" style={`--cols:${Math.max(columns.length, 1)}`}>
         {board.map((col) => (
-          <section key={col.id} class={`column ${dropClass(col.id)}`} data-col={col.id}>
+          <section
+            key={col.id}
+            class={`column ${dropClass(col.id)} ${col.id === current ? "current" : ""}`}
+            data-col={col.id}
+          >
             <h2>
               {columnLabel(col.id)} <span class="muted">{col.cards.length}</span>
             </h2>
