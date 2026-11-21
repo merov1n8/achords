@@ -1,5 +1,7 @@
 import { LogOut } from "lucide-preact";
+import { useState } from "preact/hooks";
 import { api } from "../api.ts";
+import { Confirm } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
@@ -7,10 +9,7 @@ import type { Device } from "../types.ts";
 
 export function Devices({ onLogout }: { onLogout: () => void }) {
   const devices = usePoll(() => api<Device[]>("/api/devices"), 10000);
-  const revoke = async (id: string) => {
-    await api(`/api/devices/${id}`, { method: "DELETE" });
-    devices.refresh();
-  };
+  const [revoking, setRevoking] = useState<Device>();
   return (
     <>
       <div class="page-head">
@@ -42,7 +41,7 @@ export function Devices({ onLogout }: { onLogout: () => void }) {
                       {t("devices.logout")}
                     </button>
                   ) : (
-                    <button type="button" class="btn danger" onClick={() => revoke(d.id)}>
+                    <button type="button" class="btn danger" onClick={() => setRevoking(d)}>
                       {t("devices.revoke")}
                     </button>
                   )}
@@ -53,6 +52,19 @@ export function Devices({ onLogout }: { onLogout: () => void }) {
         </table>
       </div>
       <p class="muted gap-top">{t("devices.pairHint")}</p>
+      {revoking && (
+        <Confirm
+          title={t("devices.revokeTitle")}
+          message={t("devices.revokeConfirm", { device: revoking.deviceName })}
+          confirmLabel={t("devices.revoke")}
+          danger
+          onConfirm={async () => {
+            await api(`/api/devices/${revoking.id}`, { method: "DELETE" });
+            devices.refresh();
+          }}
+          onClose={() => setRevoking(undefined)}
+        />
+      )}
     </>
   );
 }

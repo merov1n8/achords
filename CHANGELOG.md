@@ -41,6 +41,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - Web UI redesign: Geist fonts, new design tokens with three light and three dark backgrounds and
   four accents per mode (Settings → Appearance), a sidebar that collapses to an icon rail, the
   new achords mark and favicon, and summary boxes on the Usage page.
+- Web UI: Schedules, Monitors and Agents are a table with an Add button at the top right; adding
+  and editing happen in a modal (monitors can now be edited too). Delete asks first in a small
+  dialog (schedules, monitors, chats, devices). Agent room transcripts open in a modal.
+- Schedules: a Repeat picker (every hour, every day, weekdays, weekly on chosen days, monthly,
+  or Custom cron) instead of a raw cron field; the list says "Weekdays at 09:00" instead of
+  `0 9 * * 1-5`. Existing schedules open in the picker when their cron fits it, else as Custom.
+- Chat: the … menu of a chat is a small popover with an icon per action (pin, rename, archive,
+  delete), usable from the keyboard; rename and delete open a dialog.
 - The hub's own MCP server (delegate, ask_owner, …) runs on the official MCP TypeScript SDK (`@modelcontextprotocol/server`) instead of a hand-written JSON-RPC loop; same tools, same run tokens.
 
 - Sub-agents write their final report in the language the owner uses with the boss.

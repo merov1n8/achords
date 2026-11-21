@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { api } from "../api.ts";
+import { Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
@@ -19,7 +20,7 @@ type Room = {
 /** Read-only audit view of agent discussions (ADR-0032); they never appear among chats. */
 export function Rooms() {
   const rooms = usePoll(() => api<Room[]>("/api/rooms"), 15000);
-  const [open, setOpen] = useState<string>();
+  const [open, setOpen] = useState<Room>();
   return (
     <>
       <div class="page-head">
@@ -57,12 +58,8 @@ export function Rooms() {
                       {t(r.closedAt ? "rooms.closed" : "rooms.open")}
                     </span>
                   </td>
-                  <td>
-                    <button
-                      type="button"
-                      class="btn ghost"
-                      onClick={() => setOpen(open === r.id ? undefined : r.id)}
-                    >
+                  <td class="actions">
+                    <button type="button" class="btn ghost" onClick={() => setOpen(r)}>
                       {t("rooms.read")}
                     </button>
                   </td>
@@ -72,7 +69,15 @@ export function Rooms() {
           </table>
         )}
       </div>
-      {open && <Transcript key={open} id={open} />}
+      {open && (
+        <Modal
+          wide
+          title={t("rooms.transcript", { topic: open.topic })}
+          onClose={() => setOpen(undefined)}
+        >
+          <Transcript key={open.id} id={open.id} />
+        </Modal>
+      )}
       {rooms.error && <p class="error">{rooms.error}</p>}
     </>
   );
@@ -81,7 +86,7 @@ export function Rooms() {
 function Transcript({ id }: { id: string }) {
   const messages = usePoll(() => api<Message[]>(`/api/rooms/${id}/messages`), 10000, [id]);
   return (
-    <div class="panel gap-top messages">
+    <div class="messages">
       {messages.data?.map((m) => (
         <div key={m.id} class="msg agent">
           <div class="meta">{m.author}</div>
