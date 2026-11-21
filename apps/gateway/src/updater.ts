@@ -136,7 +136,9 @@ export async function applyUpdate(
     if (r.code !== 0) {
       const step =
         `${cmd.split("/").at(-1)} ${args.find((a) => !a.startsWith("-") && a !== deps.repo) ?? ""}`.trim();
-      deps.log?.(`update: ${step} failed (exit ${r.code}):\n${r.out.trim().split("\n").slice(-20).join("\n")}`);
+      deps.log?.(
+        `update: ${step} failed (exit ${r.code}):\n${r.out.trim().split("\n").slice(-20).join("\n")}`,
+      );
       // Once per commit: idle ticks come every few seconds, and the same commit would fail again.
       setSetting(deps.db, READY_KEY, "");
       setSetting(deps.db, FAILED_KEY, sha);
@@ -190,7 +192,10 @@ export async function updateTick(
     result = await checkForUpdate(deps);
     setSetting(deps.db, "update.check", JSON.stringify({ at: now, ...result }));
     // A commit that already failed is retried only on "Check now" (or when a newer one lands).
-    if (result.status === "available" && (force || getSetting(deps.db, FAILED_KEY) !== result.sha)) {
+    if (
+      result.status === "available" &&
+      (force || getSetting(deps.db, FAILED_KEY) !== result.sha)
+    ) {
       setSetting(deps.db, READY_KEY, JSON.stringify({ sha: result.sha, summary: result.summary }));
     }
   }
