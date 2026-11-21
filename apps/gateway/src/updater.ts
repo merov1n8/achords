@@ -145,7 +145,7 @@ export async function applyUpdate(
       await rollback(deps, prev);
       const text = `update to ${sha.slice(0, 7)} failed at "${step}"; stayed on ${prev.slice(0, 7)}`;
       record(deps, false, text);
-      deps.notify(`⚠️ achords ${text}.`);
+      deps.notify(`⚠️ Achords ${text}.`);
       return { ok: false, text };
     }
   }
@@ -173,7 +173,7 @@ export function reportAfterRestart(deps: Pick<UpdaterDeps, "db" | "notify" | "no
   const lines = p.summary.split("\n").filter(Boolean).slice(0, 5);
   const text = `updated to ${p.next.slice(0, 7)}`;
   setSetting(deps.db, LAST_KEY, JSON.stringify({ at: deps.now?.() ?? Date.now(), ok: true, text }));
-  deps.notify(`✅ achords ${text}:\n${lines.map((l) => `- ${l}`).join("\n")}`);
+  deps.notify(`✅ Achords ${text}:\n${lines.map((l) => `- ${l}`).join("\n")}`);
 }
 
 /**

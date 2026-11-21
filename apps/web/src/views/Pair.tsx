@@ -27,7 +27,7 @@ export function Pair({ onPaired }: { onPaired: () => void }) {
     <main class="pair panel">
       <div class="brand">
         <Mark />
-        <span class="lbl">achords</span>
+        <span class="lbl">Achords</span>
       </div>
       <p class="muted">{t("pair.intro")}</p>
       <form onSubmit={submit}>

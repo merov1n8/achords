@@ -1671,7 +1671,7 @@ export function createApiHandler(deps: ApiDeps) {
         }
         res.writeHead(status, { ...securityHeaders, "content-type": "text/html; charset=utf-8" });
         res.end(
-          `<!doctype html><meta charset="utf-8"><title>achords</title><p>${escapeHtml(msg)}</p>`,
+          `<!doctype html><meta charset="utf-8"><title>Achords</title><p>${escapeHtml(msg)}</p>`,
         );
         return;
       }

@@ -36,6 +36,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- The product is written Achords in the web UI, notices and docs. The agent list shows the name
+  with @id under it instead of a separate id column.
 - The Chat page has its own chat list column (search, Recent / By project, pin, rename, archive,
   delete, All chats) instead of the list in the sidebar; Chat in the sidebar is a plain menu item.
   Each chat in the list shows the agent that answered last and how long ago.

@@ -85,7 +85,7 @@ describe("auto-update from main", () => {
     });
     // The new code reports what changed.
     reportAfterRestart(deps());
-    expect(told[0]).toBe("✅ achords updated to bbb2222:\n- feat: one\n- fix: two");
+    expect(told[0]).toBe("✅ Achords updated to bbb2222:\n- feat: one\n- fix: two");
     expect(getSetting(db, PENDING_KEY)).toBe("");
   });
 
