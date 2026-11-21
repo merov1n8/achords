@@ -46,7 +46,9 @@ import {
   createProject,
   type IntegrationStatus,
   loadManifest,
+  loadOwnAccounts,
   loadProjects,
+  saveOwnAccounts,
   updateManifestModels,
   updateManifestName,
   updateProject,
@@ -105,6 +107,8 @@ export interface ApiDeps {
   /** Local speech to text for web voice notes (ADR-0014) and its scratch folder. */
   transcriber?: Transcriber;
   runDir?: string;
+  /** $ACHORDS_HOME (own accounts file, ADR-0042). */
+  home?: string;
   /** Projects ($ACHORDS_HOME/projects, ADR-0031). */
   projectsDir?: string;
   /** Agent manifests ($ACHORDS_HOME/agents) for the model settings. */
@@ -644,6 +648,16 @@ export function createApiHandler(deps: ApiDeps) {
     ],
     ["GET", /^\/api\/agents$/, () => listAgents(db)],
     ["GET", /^\/api\/integrations$/, () => deps.integrations?.() ?? []],
+    // The owner's own accounts (ADR-0042): for work without a client project.
+    ["GET", /^\/api\/accounts$/, () => ({ integrations: loadOwnAccounts(homeOrThrow()) })],
+    [
+      "PUT",
+      /^\/api\/accounts$/,
+      async ({ body }) => {
+        const lists = accountLists((await body()).integrations);
+        return { integrations: attempt(() => saveOwnAccounts(homeOrThrow(), lists)) };
+      },
+    ],
     [
       "POST",
       /^\/api\/integrations\/([a-z0-9][a-z0-9-]{0,63})\/test$/,
@@ -872,6 +886,10 @@ export function createApiHandler(deps: ApiDeps) {
         strList(list, `integrations.${key}`),
       ]),
     );
+  };
+  const homeOrThrow = () => {
+    if (!deps.home) throw new HttpError(404, "home is not configured");
+    return deps.home;
   };
   const projectsDirOrThrow = () => {
     if (!deps.projectsDir) throw new HttpError(404, "projects are not configured");

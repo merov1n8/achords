@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Your own accounts (Settings → Integrations): pages, properties, sites and your own WordPress for work that has no client project. Google and Meta sign-ins were already shared by everything; now your own business can use them too, while a client project still only reaches that client's accounts.
 - Talk to an agent directly: a message starting with @agent (e.g. "@social write a post about…") goes straight to that agent, without the boss, in the web chat and on Telegram; the agent answers in the same chat.
 - OpenAI agents, second stage: runs on GPT models can now delegate, ask you and use Blender and Unity, and they only read their own folders (your home folder, SSH keys and the codex login are off limits); client integrations with credentials stay with Claude-run agents. Checked with live codex runs.
 - Change agents by asking: tell the boss "give social access to Meta" or "let web-dev read the WordPress docs"; it posts the exact change in plain words (+ meta, − npm test) with Approve / Reject, and only an approved change is written to agent.yaml, keeping your comments. A proposal made before you edited the file by hand is refused.

@@ -1,8 +1,9 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
 import type { IntegrationStatus } from "../types.ts";
+import { Accounts, type Row, toLists, toRows, WordPressConnection } from "./Projects.tsx";
 import { SecretInput } from "./SecretInput.tsx";
 
 /** What each integration still needs; secrets are set in the vault, accounts per project. */
@@ -78,6 +79,44 @@ function TestButton(props: { s: IntegrationStatus }) {
   );
 }
 
+/** The owner's own accounts (ADR-0042): what work without a client project may use. */
+function OwnAccounts(props: { onSaved: () => void }) {
+  const [rows, setRows] = useState<Row[]>();
+  const [status, setStatus] = useState<{ ok: boolean; text: string }>();
+  useEffect(() => {
+    api<{ integrations: Record<string, string[]> }>("/api/accounts")
+      .then((r) => setRows(toRows(r.integrations)))
+      .catch((err: Error) => setStatus({ ok: false, text: err.message }));
+  }, []);
+  if (!rows) return status ? <p class="error">{status.text}</p> : null;
+  const save = async (e: Event) => {
+    e.preventDefault();
+    try {
+      const out = await api<{ integrations: Record<string, string[]> }>("/api/accounts", {
+        method: "PUT",
+        body: { integrations: toLists(rows) },
+      });
+      setRows(toRows(out.integrations));
+      setStatus({ ok: true, text: t("projects.saved") });
+      props.onSaved();
+    } catch (err) {
+      setStatus({ ok: false, text: (err as Error).message });
+    }
+  };
+  return (
+    <form class="panel gap-top" onSubmit={save}>
+      <h2>{t("integrations.own")}</h2>
+      <p class="muted small">{t("integrations.ownHelp")}</p>
+      <Accounts rows={rows} onChange={setRows} />
+      <WordPressConnection slug="own" />
+      <button type="submit" class="btn primary">
+        {t("common.save")}
+      </button>
+      {status && <span class={status.ok ? "muted" : "error"}> {status.text}</span>}
+    </form>
+  );
+}
+
 export function Integrations() {
   const list = usePoll(() => api<IntegrationStatus[]>("/api/integrations"), 30000);
   return (
@@ -145,6 +184,7 @@ export function Integrations() {
         </table>
       </div>
       <p class="muted small">{t("integrations.hint")}</p>
+      <OwnAccounts onSaved={list.refresh} />
       {list.error && <p class="error">{list.error}</p>}
     </>
   );

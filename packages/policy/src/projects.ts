@@ -6,17 +6,19 @@ import { z } from "zod";
 // ADR-0031: a project = $ACHORDS_HOME/projects/<slug>/ with project.yaml, PROJECT.md, files/.
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
+const accountLists = z
+  .record(
+    z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, "lowercase letters, digits and dashes"),
+    z.array(z.string().min(1).max(200)).min(1).max(50),
+  )
+  .default({});
+
 const projectSchema = z
   .object({
     name: z.string().min(1),
     workspace: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
     // Catalog id → this client's own properties/sites/pages (ADR-0036).
-    integrations: z
-      .record(
-        z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, "lowercase letters, digits and dashes"),
-        z.array(z.string().min(1).max(200)).min(1).max(50),
-      )
-      .default({}),
+    integrations: accountLists,
     // ADR-0037: a client can forbid agents publishing (off) or force review; never loosen.
     publish: z.enum(["review", "off"]).optional(),
   })
@@ -70,6 +72,7 @@ export function createProject(
   p: { slug: string; name: string; workspace: string },
 ): Project {
   if (!SLUG.test(p.slug)) throw new Error("slug: lowercase letters, digits and dashes");
+  if (p.slug === OWN) throw new Error(`slug: "${OWN}" is reserved for your own accounts`);
   const data = projectSchema.parse({ name: p.name.trim(), workspace: p.workspace.trim() });
   const dir = join(projectsDir, p.slug);
   if (existsSync(dir)) throw new Error(`project ${p.slug} already exists`);
@@ -126,4 +129,48 @@ function cleanLists(lists: Record<string, string[]>): Record<string, string[]> {
     if (kept.length) out[key.trim()] = kept;
   }
   return out;
+}
+
+/** The owner's own accounts (ADR-0042): used by work that has no client project. */
+export const OWN = "own";
+
+const ownSchema = z.object({ integrations: accountLists }).strict();
+
+export function loadOwnAccounts(home: string): Record<string, string[]> {
+  const path = join(home, "accounts.yaml");
+  if (!existsSync(path)) return {};
+  const parsed = ownSchema.safeParse(parseYaml(readFileSync(path, "utf8")) ?? {});
+  if (!parsed.success) {
+    throw new Error(
+      `${path}: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+    );
+  }
+  return parsed.data.integrations;
+}
+
+export function saveOwnAccounts(
+  home: string,
+  lists: Record<string, string[]>,
+): Record<string, string[]> {
+  const data = ownSchema.parse({ integrations: cleanLists(lists) });
+  writeFileSync(
+    join(home, "accounts.yaml"),
+    `# Your own accounts: used by work that has no client project.\n${Object.keys(data.integrations).length ? stringifyYaml(data) : "integrations: {}\n"}`,
+    { mode: 0o600 },
+  );
+  return data.integrations;
+}
+
+/** Own accounts as a project-shaped value, for integration resolution only. */
+export function ownProject(home: string, workspace = "shared"): Project {
+  return {
+    slug: OWN,
+    name: "Own accounts",
+    workspace,
+    integrations: loadOwnAccounts(home),
+    dir: home,
+    filesDir: join(home, "work"),
+    doc: "",
+    workflowPath: "",
+  };
 }

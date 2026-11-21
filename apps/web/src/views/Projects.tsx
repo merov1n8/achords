@@ -159,10 +159,10 @@ const CHANNELS = [
   { id: "wordpress", label: t("projects.channel.wordpress") },
 ];
 
-type Row = { channel: string; value: string };
-const toRows = (lists: Record<string, string[]>): Row[] =>
+export type Row = { channel: string; value: string };
+export const toRows = (lists: Record<string, string[]>): Row[] =>
   Object.entries(lists).flatMap(([channel, values]) => values.map((value) => ({ channel, value })));
-const toLists = (rows: Row[]): Record<string, string[]> => {
+export const toLists = (rows: Row[]): Record<string, string[]> => {
   const out: Record<string, string[]> = {};
   for (const r of rows) {
     const channel = r.channel.trim().toLowerCase();
@@ -172,7 +172,7 @@ const toLists = (rows: Row[]): Record<string, string[]> => {
 };
 
 /** One list per channel; a client can have several of each (two Instagram accounts, …). */
-function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }) {
+export function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }) {
   const set = (i: number, patch: Partial<Row>) =>
     props.onChange(props.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
@@ -227,7 +227,7 @@ function Accounts(props: { rows: Row[]; onChange: (rows: Row[]) => void }) {
 }
 
 /** Per-project WordPress credentials (ADR-0034): written to the vault, never read back. */
-function WordPressConnection(props: { slug: string }) {
+export function WordPressConnection(props: { slug: string }) {
   const secrets = usePoll(() => api<SecretStatus[]>("/api/vault"), 30000);
   const isSet = (id: string) => secrets.data?.some((s) => s.id === id && s.set) ?? false;
   const field = (part: "user" | "password", label: string, type: "text" | "password") => {
