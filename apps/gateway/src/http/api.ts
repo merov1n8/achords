@@ -53,13 +53,17 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
+  type Catalog,
+  type CatalogEntry,
   createAgentFiles,
   createProject,
   type IntegrationStatus,
   loadManifest,
   loadOwnAccounts,
   loadProjects,
+  OWN,
   saveOwnAccounts,
+  siteStatus,
   updateManifestModels,
   updateManifestName,
   updateProject,
@@ -142,6 +146,8 @@ export interface ApiDeps {
   agentsDir?: string;
   /** Integration status for the web Integrations page (ADR-0034); never secret values. */
   integrations?: () => IntegrationStatus[];
+  /** Integration catalog (ADR-0034), for the per-project site lists (ADR-0047). */
+  catalog?: () => Catalog;
   /** Chat models pulled in the local model server (suggestions only). */
   localModels?: () => Promise<string[]>;
   /** OpenAI models the codex CLI offers (ADR-0040), as `cli-codex/<slug>`. */
@@ -886,6 +892,44 @@ export function createApiHandler(deps: ApiDeps) {
         return { integrations: attempt(() => saveOwnAccounts(homeOrThrow(), lists)) };
       },
     ],
+    // Sites of a project with their own credentials (ADR-0047), e.g. WordPress; "own" is the
+    // owner's own accounts. Credential values are set through /api/vault, never shown here.
+    [
+      "GET",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})\/sites\/([a-z0-9][a-z0-9-]{0,63})$/,
+      ({ params }) => sitesView(params[0] as string, siteEntry(params[1] as string)),
+    ],
+    [
+      "POST",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})\/sites\/([a-z0-9][a-z0-9-]{0,63})$/,
+      async ({ params, res, body }) => {
+        const slug = params[0] as string;
+        const entry = siteEntry(params[1] as string);
+        const url = siteUrl((await body()).url);
+        const lists = accountsOf(slug);
+        const channel = entry.sites?.channel as string;
+        const urls = lists[channel] ?? [];
+        if (urls.includes(url)) throw new HttpError(409, `${url} is already listed`);
+        attempt(() => saveAccounts(slug, { ...lists, [channel]: [...urls, url] }));
+        send(res, 201, sitesView(slug, entry));
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})\/sites\/([a-z0-9][a-z0-9-]{0,63})\/([^/]+)$/,
+      ({ params }) => {
+        const slug = params[0] as string;
+        const entry = siteEntry(params[1] as string);
+        const url = decodeURIComponent(params[2] as string);
+        const lists = accountsOf(slug);
+        const channel = entry.sites?.channel as string;
+        const urls = lists[channel] ?? [];
+        if (!urls.includes(url)) throw new HttpError(404, `${url} is not listed`);
+        // The site's vault entries stay; the owner removes them on the vault page if wanted.
+        attempt(() => saveAccounts(slug, { ...lists, [channel]: urls.filter((u) => u !== url) }));
+        return sitesView(slug, entry);
+      },
+    ],
     [
       "POST",
       /^\/api\/integrations\/([a-z0-9][a-z0-9-]{0,63})\/test$/,
@@ -1114,6 +1158,45 @@ export function createApiHandler(deps: ApiDeps) {
         strList(list, `integrations.${key}`),
       ]),
     );
+  };
+  const siteEntry = (id: string): CatalogEntry => {
+    const entry = deps.catalog?.().get(id);
+    if (!entry?.sites) throw new HttpError(404, `integration ${id} has no sites`);
+    return entry;
+  };
+  /** Account lists of a project, or of the owner's own accounts ("own"). */
+  const accountsOf = (slug: string): Record<string, string[]> => {
+    if (slug === OWN) return loadOwnAccounts(homeOrThrow());
+    const p = loadProjects(projectsDirOrThrow()).get(slug);
+    if (!p) throw new HttpError(404, "no such project");
+    return p.integrations;
+  };
+  const saveAccounts = (slug: string, lists: Record<string, string[]>) =>
+    slug === OWN
+      ? saveOwnAccounts(homeOrThrow(), lists)
+      : updateProject(projectsDirOrThrow(), slug, { integrations: lists });
+  const sitesView = (slug: string, entry: CatalogEntry) => {
+    const channel = entry.sites?.channel as string;
+    const urls = accountsOf(slug)[channel] ?? [];
+    return {
+      integration: entry.id,
+      channel,
+      sites: siteStatus(entry, slug, urls, (id) => vault().status(id).set),
+    };
+  };
+  /** A site address as stored: http(s), no login, query or fragment, no trailing slash. */
+  const siteUrl = (v: unknown): string => {
+    let u: URL;
+    try {
+      u = new URL(str(v, "url", 200));
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(400, "url: not an address");
+    }
+    if (!/^https?:$/.test(u.protocol) || u.username || u.password || u.search || u.hash) {
+      throw new HttpError(400, "url: an http(s) site address without login, query or #");
+    }
+    return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
   };
   const homeOrThrow = () => {
     if (!deps.home) throw new HttpError(404, "home is not configured");

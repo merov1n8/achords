@@ -419,6 +419,7 @@ export function runGateway(home: string): Promise<number> {
           agentsDir: join(home, "agents"),
           projectsDir: paths.projectsDir,
           home,
+          catalog: () => loadCatalog(SEED_CATALOG, join(home, "catalog")),
           billing: {
             list: () =>
               Object.entries(BILLING).map(([provider, p]) => ({

@@ -1172,3 +1172,19 @@ main > .page {
 input[type="checkbox"] {
   accent-color: var(--accent);
 }
+td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+td.actions > * {
+  display: inline-flex;
+  vertical-align: middle;
+}
+.pre {
+  white-space: pre-wrap;
+}
+.test {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}

@@ -148,6 +148,8 @@ describe("doctor", () => {
       projectsScoped: [],
       ready: true,
       testable: false,
+      sites: [],
+      kind: "local" as const,
     };
     const checks = integrationChecks([
       { ...base, id: "unused", usedBy: [] },
