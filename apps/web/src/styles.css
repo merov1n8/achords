@@ -586,12 +586,13 @@ main > .page {
   background: var(--surface-2);
   line-height: 1.55;
 }
+/* Your own messages are neutral, never the accent colour (owner's choice): a shade apart from
+   the agents' bubbles in both modes. */
 .msg.user {
   margin-left: auto;
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--border);
+  color: var(--text);
 }
-.msg.user a,
 .msg.user .meta {
   color: inherit;
   opacity: 0.85;

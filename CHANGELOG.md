@@ -36,6 +36,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Chat: your own messages use a neutral colour instead of the accent colour.
 - Project accounts: the type is a dropdown (Git repository included; GitHub and GitLab addresses,
   https or ssh, are checked); the chat title shows a pencil to show it can be renamed.
 - Chat: your own messages are a plain rounded bubble (as in the design); click the chat title to
