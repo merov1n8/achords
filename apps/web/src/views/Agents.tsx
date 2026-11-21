@@ -1,6 +1,7 @@
-import { Plus } from "lucide-preact";
-import { useEffect, useState } from "preact/hooks";
+import { Pencil, Plus } from "lucide-preact";
+import { useEffect, useId, useState } from "preact/hooks";
 import { api } from "../api.ts";
+import { Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
 import type { Agent } from "../types.ts";
@@ -41,9 +42,15 @@ export function Agents() {
                 <td>{a.name}</td>
                 <td>{a.role}</td>
                 <td>{a.workspace}</td>
-                <td>
-                  <button type="button" class="btn ghost" onClick={() => setEditing(a.id)}>
-                    {t("agents.settings")}
+                <td class="actions">
+                  <button
+                    type="button"
+                    class="iconbtn"
+                    aria-label={t("common.edit")}
+                    title={t("common.edit")}
+                    onClick={() => setEditing(a.id)}
+                  >
+                    <Pencil class="icon" />
                   </button>
                 </td>
               </tr>
@@ -99,7 +106,13 @@ function ModelEditor({
       .catch((err: Error) => setStatus({ ok: false, text: err.message }));
   }, [id]);
 
-  if (!detail || !models) return status ? <p class="error">{status.text}</p> : null;
+  if (!detail || !models) {
+    return (
+      <Modal title={t("agents.settingsOf", { agent: id })} onClose={onClose}>
+        <p class={status ? "error" : "muted"}>{status?.text ?? t("app.loading")}</p>
+      </Modal>
+    );
+  }
 
   // Everything the owner can pick: the agent's current models, aliases and pulled local models.
   const options = [...new Set([...models.allowed, models.default, ...detail.suggestions])];
@@ -135,13 +148,21 @@ function ModelEditor({
   };
 
   return (
-    <div class="panel gap-top narrow">
-      <div class="page-head">
-        <h2>{t("agents.settingsOf", { agent: id })}</h2>
-        <button type="button" class="btn ghost" onClick={onClose}>
-          {t("common.close")}
-        </button>
-      </div>
+    <Modal
+      title={t("agents.settingsOf", { agent: id })}
+      onClose={onClose}
+      footer={
+        <>
+          {status && <span class={`grow ${status.ok ? "muted" : "error"}`}>{status.text}</span>}
+          <button type="button" class="btn ghost" onClick={onClose}>
+            {t("common.close")}
+          </button>
+          <button type="button" class="btn primary" onClick={save}>
+            {t("common.save")}
+          </button>
+        </>
+      }
+    >
       <label class="field">
         {t("agents.name")}
         <input class="input" value={name} onInput={(e) => setName(e.currentTarget.value)} />
@@ -181,13 +202,7 @@ function ModelEditor({
           {t("agents.add")}
         </button>
       </form>
-      <div class="gap-top">
-        <button type="button" class="btn primary" onClick={save}>
-          {t("common.save")}
-        </button>
-        {status && <span class={status.ok ? "muted" : "error"}> {status.text}</span>}
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -226,6 +241,7 @@ function NewAgentForm({
     budget: "",
   });
   const [error, setError] = useState<string>();
+  const formId = useId();
   useEffect(() => {
     api<{ tools: string[]; models: string[] }>("/api/agent-options")
       .then(setOpts)
@@ -291,115 +307,120 @@ function NewAgentForm({
   };
 
   return (
-    <form class="panel gap-top narrow" onSubmit={submit}>
-      <div class="page-head">
-        <h2>{t("agents.new")}</h2>
-        <button type="button" class="btn ghost" onClick={onClose}>
-          {t("common.close")}
-        </button>
-      </div>
-      {text("id", t("agents.form.id"), t("agents.form.idHelp"))}
-      {text("name", t("agents.name"))}
-      {text("role", t("agents.form.role"), t("agents.form.roleHelp"))}
-      <label class="field">
-        {t("agents.workspace")}
-        <input
-          class="input"
-          list="workspaces"
-          value={f.workspace}
-          onInput={(e) => set({ workspace: e.currentTarget.value })}
-        />
-        <datalist id="workspaces">
-          {workspaces.map((w) => (
-            <option key={w} value={w} />
-          ))}
-        </datalist>
-      </label>
-      <label class="field">
-        {t("agents.form.description")}
-        <textarea
-          class="input"
-          rows={3}
-          value={f.description}
-          onInput={(e) => set({ description: e.currentTarget.value })}
-        />
-        <span class="muted small">{t("agents.form.descriptionHelp")}</span>
-      </label>
-      {text("roles", t("agents.form.roles"), t("agents.form.rolesHelp"))}
-      <label class="field">
-        {t("agents.form.model")}
-        <select
-          class="input"
-          value={f.model}
-          onChange={(e) => set({ model: e.currentTarget.value })}
-        >
-          {(opts?.models ?? [f.model]).map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-      </label>
+    <Modal
+      wide
+      title={t("agents.new")}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" class="btn ghost" onClick={onClose}>
+            {t("common.cancel")}
+          </button>
+          <button type="submit" form={formId} class="btn primary">
+            {t("agents.form.create")}
+          </button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={submit}>
+        {text("id", t("agents.form.id"), t("agents.form.idHelp"))}
+        {text("name", t("agents.name"))}
+        {text("role", t("agents.form.role"), t("agents.form.roleHelp"))}
+        <label class="field">
+          {t("agents.workspace")}
+          <input
+            class="input"
+            list="workspaces"
+            value={f.workspace}
+            onInput={(e) => set({ workspace: e.currentTarget.value })}
+          />
+          <datalist id="workspaces">
+            {workspaces.map((w) => (
+              <option key={w} value={w} />
+            ))}
+          </datalist>
+        </label>
+        <label class="field">
+          {t("agents.form.description")}
+          <textarea
+            class="input"
+            rows={3}
+            value={f.description}
+            onInput={(e) => set({ description: e.currentTarget.value })}
+          />
+          <span class="muted small">{t("agents.form.descriptionHelp")}</span>
+        </label>
+        {text("roles", t("agents.form.roles"), t("agents.form.rolesHelp"))}
+        <label class="field">
+          {t("agents.form.model")}
+          <select
+            class="input"
+            value={f.model}
+            onChange={(e) => set({ model: e.currentTarget.value })}
+          >
+            {(opts?.models ?? [f.model]).map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <h2 class="gap-top">{t("agents.form.permissions")}</h2>
-      <p class="muted">{t("agents.form.permissionsHelp")}</p>
-      <div class="field">
-        {t("agents.form.tools")}
-        <div class="row wrap">
-          {(opts?.tools ?? []).map((tool) => (
-            <label key={tool} class="row">
-              <input
-                type="checkbox"
-                checked={f.tools.includes(tool)}
-                onChange={() => set({ tools: toggle(f.tools, tool) })}
-              />
-              <code>{tool}</code>
-            </label>
-          ))}
+        <h3 class="sec">{t("agents.form.permissions")}</h3>
+        <p class="muted">{t("agents.form.permissionsHelp")}</p>
+        <div class="field">
+          {t("agents.form.tools")}
+          <div class="row wrap">
+            {(opts?.tools ?? []).map((tool) => (
+              <label key={tool} class="row">
+                <input
+                  type="checkbox"
+                  checked={f.tools.includes(tool)}
+                  onChange={() => set({ tools: toggle(f.tools, tool) })}
+                />
+                <code>{tool}</code>
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
-      {area("write", t("agents.form.write"), t("agents.form.pathsHelp"))}
-      {area("read", t("agents.form.read"), t("agents.form.pathsHelp"))}
-      {f.tools.includes("Bash") &&
-        area("shell", t("agents.form.shell"), t("agents.form.shellHelp"))}
-      {area("network", t("agents.form.network"), t("agents.form.networkHelp"))}
-      <div class="field">
-        {t("agents.form.acceptsFrom")}
-        <div class="row wrap">
-          {agents.map((a) => (
-            <label key={a.id} class="row">
-              <input
-                type="checkbox"
-                checked={f.acceptsFrom.includes(a.id)}
-                onChange={() => set({ acceptsFrom: toggle(f.acceptsFrom, a.id) })}
-              />
-              <code>{a.id}</code>
-            </label>
-          ))}
+        {area("write", t("agents.form.write"), t("agents.form.pathsHelp"))}
+        {area("read", t("agents.form.read"), t("agents.form.pathsHelp"))}
+        {f.tools.includes("Bash") &&
+          area("shell", t("agents.form.shell"), t("agents.form.shellHelp"))}
+        {area("network", t("agents.form.network"), t("agents.form.networkHelp"))}
+        <div class="field">
+          {t("agents.form.acceptsFrom")}
+          <div class="row wrap">
+            {agents.map((a) => (
+              <label key={a.id} class="row">
+                <input
+                  type="checkbox"
+                  checked={f.acceptsFrom.includes(a.id)}
+                  onChange={() => set({ acceptsFrom: toggle(f.acceptsFrom, a.id) })}
+                />
+                <code>{a.id}</code>
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
-      <div class="field">
-        {t("agents.form.delegatesTo")}
-        <div class="row wrap">
-          {agents.map((a) => (
-            <label key={a.id} class="row">
-              <input
-                type="checkbox"
-                checked={f.delegatesTo.includes(a.id)}
-                onChange={() => set({ delegatesTo: toggle(f.delegatesTo, a.id) })}
-              />
-              <code>{a.id}</code>
-            </label>
-          ))}
+        <div class="field">
+          {t("agents.form.delegatesTo")}
+          <div class="row wrap">
+            {agents.map((a) => (
+              <label key={a.id} class="row">
+                <input
+                  type="checkbox"
+                  checked={f.delegatesTo.includes(a.id)}
+                  onChange={() => set({ delegatesTo: toggle(f.delegatesTo, a.id) })}
+                />
+                <code>{a.id}</code>
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
-      {text("budget", t("agents.form.budget"), t("agents.form.budgetHelp"))}
-      <div class="gap-top">
-        <button type="submit" class="btn primary">
-          {t("agents.form.create")}
-        </button>
+        {text("budget", t("agents.form.budget"), t("agents.form.budgetHelp"))}
         {error && <p class="error">{error}</p>}
-      </div>
-    </form>
+      </form>
+    </Modal>
   );
 }

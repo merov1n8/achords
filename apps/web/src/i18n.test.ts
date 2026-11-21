@@ -42,6 +42,10 @@ describe("i18n", () => {
       "appearance.theme.dark",
       "appearance.accent.violet",
       "appearance.accent.teal",
+      ...["hourly", "daily", "weekdays", "weekly", "monthly", "custom"].map(
+        (k) => `repeat.kind.${k}`,
+      ),
+      ...[0, 1, 2, 3, 4, 5, 6].map((d) => `repeat.day.${d}`),
     ])
       used.add(k);
     const missing = [...used].filter((k) => !(k in en));
