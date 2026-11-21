@@ -87,7 +87,7 @@ export function Monitors() {
                       }
                     />
                   </td>
-                  <td class="row-actions">
+                  <td class="actions">
                     <button
                       type="button"
                       class="iconbtn"

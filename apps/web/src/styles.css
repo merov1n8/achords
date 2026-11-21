@@ -1148,12 +1148,6 @@ main > .page {
   overflow-x: auto;
 }
 /* Last table column: Edit/Delete icon buttons, kept right */
-td.row-actions {
-  text-align: right;
-  white-space: nowrap;
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
 /* Schedule repeat picker */
 fieldset.repeat {
   border: 0;
@@ -1244,6 +1238,8 @@ input[type="checkbox"] {
 td.actions {
   text-align: right;
   white-space: nowrap;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 td.actions > * {
   display: inline-flex;

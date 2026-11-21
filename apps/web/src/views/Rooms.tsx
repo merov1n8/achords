@@ -58,7 +58,7 @@ export function Rooms() {
                       {t(r.closedAt ? "rooms.closed" : "rooms.open")}
                     </span>
                   </td>
-                  <td class="row-actions">
+                  <td class="actions">
                     <button type="button" class="btn ghost" onClick={() => setOpen(r)}>
                       {t("rooms.read")}
                     </button>

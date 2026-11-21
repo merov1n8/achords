@@ -42,7 +42,7 @@ export function Agents() {
                 <td>{a.name}</td>
                 <td>{a.role}</td>
                 <td>{a.workspace}</td>
-                <td class="row-actions">
+                <td class="actions">
                   <button
                     type="button"
                     class="iconbtn"

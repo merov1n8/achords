@@ -140,7 +140,7 @@ export function AllChats(props: { project?: string | undefined }) {
                   </td>
                   <td>{th.project ? (names.get(th.project) ?? th.project) : "–"}</td>
                   <td class="muted small">{ago(th.updatedAt)}</td>
-                  <td class="row-actions">
+                  <td class="actions">
                     <ThreadMenu thread={th} onChange={threads.refresh} />
                   </td>
                 </tr>
