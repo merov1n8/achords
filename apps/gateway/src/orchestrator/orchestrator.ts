@@ -301,7 +301,12 @@ export interface Orchestrator {
     previous: string | null,
   ): Promise<{ state: "ok" | "alert"; detail: string; result?: string; news: boolean }>;
   /** Connection test from the web (one read call); project for per-client integrations. */
-  testIntegration(id: string, project?: string): Promise<{ ok: boolean; text: string }>;
+  /** One read call; with `site`, only that site of a several-site entry (ADR-0047). */
+  testIntegration(
+    id: string,
+    project?: string,
+    site?: string,
+  ): Promise<{ ok: boolean; text: string }>;
   /** A write call that ran in auto mode: reported in the task's thread. */
   logPublish(
     from: { from: "task"; taskId: string },
@@ -1378,7 +1383,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return { ok: true };
     },
 
-    async testIntegration(id, slug) {
+    async testIntegration(id, slug, site) {
       const entry = deps.integrations?.catalog().get(id);
       if (!deps.integrations?.call || !entry)
         return { ok: false, text: `integration ${id} is not available` };
@@ -1396,10 +1401,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         } catch (err) {
           return { ok: false, text: (err as Error).message.replace(/^integration \S+ /, "It ") };
         }
-        const urls = project.integrations[entry.sites.channel] ?? [];
+        const all = project.integrations[entry.sites.channel] ?? [];
+        if (site && !all.includes(site)) {
+          return { ok: false, text: `${site} is not one of this project's sites` };
+        }
+        const urls = site ? [site] : all;
         const lines = await Promise.all(
-          urls.map(async (url, i) => {
+          urls.map(async (url) => {
             if (skipped.includes(url)) {
+              const i = all.indexOf(url);
               const ids = Object.values(siteCredentials(entry, project.slug, url, i)[0] ?? {});
               return {
                 ok: false,
@@ -1413,6 +1423,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             return { ok: r.ok, line: `${url}: ${plainLine(redact(r.text)).slice(0, 300)}` };
           }),
         );
+        // One site: its line without the address (the row shows it).
+        if (site && lines[0]) {
+          return { ok: lines[0].ok, text: lines[0].line.slice(site.length + 2) };
+        }
         return { ok: lines.every((l) => l.ok), text: lines.map((l) => l.line).join("\n") };
       }
       const target = scopeTargets(entry, project?.integrations)[0];

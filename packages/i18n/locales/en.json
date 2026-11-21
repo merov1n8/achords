@@ -730,5 +730,6 @@
   "projects.deleteTitle": "Delete {name}?",
   "projects.deleteConfirm": "The project disappears from Achords. Its files and PROJECT.md are not deleted: the folder is moved aside so you can check it and delete it by hand. Chats keep their history.",
   "projects.removedTitle": "Project removed",
-  "projects.removedText": "Its folder was moved here. Check it and delete it in Finder when you no longer need it:"
+  "projects.removedText": "Its folder was moved here. Check it and delete it in Finder when you no longer need it:",
+  "sites.site": "Site"
 }

@@ -1343,6 +1343,7 @@ export function createApiHandler(deps: ApiDeps) {
         return deps.orchestrator.testIntegration(
           params[0] as string,
           b.project ? str(b.project, "project", 64) : undefined,
+          b.site ? str(b.site, "site", 300) : undefined,
         );
       },
     ],
