@@ -70,6 +70,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- ElevenLabs (voices, speech, sound effects, music), Meshy (3D models) and fal.ai (image, video
+  and audio models) as integrations: Settings → Integrations → **Add sign-in**, paste the API key.
+  Anything that costs credits (generating, cloning a voice, downloading a model) waits for your
+  approval in the chat, or runs and is reported there when the agent's publish mode is `auto`.
+  Phone calls and ElevenLabs voice agents are not available. Generated audio lands in the agent's
+  working folder. fal.ai is reached directly over HTTPS, nothing to install.
+
 - Skills: short how-tos your agents follow (Skills page in the sidebar and in the phone's More menu). Agents see each skill's name and description and read the full text when they need it. After a task that took several attempts or a correction from you, an agent can propose a new skill or a change; you get it in the chat with Approve / Reject, changes shown as before and after. Per workspace you can let new skills be saved automatically; changes always wait for you. Send a link in chat ("found a good skill, build it in") and it is built in directly, or proposed as a change to a similar skill you already have. On the Skills page you can also add, edit, switch off, delete and import skills from a link yourself. Two starter skills ship: writing the final report in plain language, and a self-check before reporting done.
 
 - Settings → Integrations can set up everything that needed the terminal before: **Add sign-in**

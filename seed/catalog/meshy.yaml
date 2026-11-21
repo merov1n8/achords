@@ -1,0 +1,51 @@
+# Meshy's official server (meshy-dev/meshy-mcp-server, MIT). 3D models from text or images,
+# texturing, remeshing, rigging, animation, 3D-print preparation, images. Every tool that
+# starts a task costs credits, so it is a write tool and the owner sees each call (publishing
+# review or auto, ADR-0037); so is downloading (it writes files, at any save_to path) and
+# cancelling or deleting a task. Not listed: meshy_send_to_slicer (returns shell commands that
+# open local slicer apps; agents with this key have no shell).
+# Downloads land in meshy_output/ of the server's working folder (the run's folder).
+# achords secret set meshy-api-key   (meshy.ai/settings/api)
+id: meshy
+name: Meshy
+description: 3D models, textures, rigs and animations (generation needs the owner's approval or report).
+command: npx
+args: ["-y", "@meshy-ai/meshy-mcp-server@0.6.12"]
+env:
+  MESHY_API_KEY: "vault:meshy-api-key"
+install: Install Node.js 22 or newer so `npx` is on the PATH.
+hosts: [api.meshy.ai]
+tools:
+  read:
+    - meshy_check_balance
+    - meshy_list_usage
+    - meshy_list_models
+    - meshy_list_tasks
+    - meshy_get_task_status
+    - meshy_list_animations
+    # Free by its own description: reports whether a model is printable.
+    - meshy_analyze_printability
+  write:
+    - meshy_text_to_3d
+    - meshy_text_to_3d_refine
+    - meshy_image_to_3d
+    - meshy_multi_image_to_3d
+    - meshy_text_to_image
+    - meshy_image_to_image
+    - meshy_creative_lab
+    - meshy_remesh
+    - meshy_retexture
+    - meshy_rig
+    - meshy_animate
+    - meshy_text_to_motion
+    - meshy_convert
+    - meshy_resize
+    - meshy_uv_unwrap
+    - meshy_repair_printability
+    - meshy_process_multicolor
+    - meshy_auto_split
+    - meshy_download_model
+    - meshy_cancel_task
+# Connection test (web Integrations page).
+test:
+  tool: meshy_check_balance

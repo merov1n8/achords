@@ -1,0 +1,43 @@
+# ElevenLabs' official server (elevenlabs/elevenlabs-mcp, MIT). Speech, sound effects, music,
+# voice design and cloning, transcription. Every tool that spends credits or creates or clones
+# a voice is a write tool, so the owner sees each call (publishing review or auto, ADR-0037).
+# Not listed at all: conversational agents, their conversations and knowledge bases, phone
+# numbers and outbound calls (make_outbound_call), and play_audio (plays sound on this Mac).
+# Generated files go to the run's working folder ({workdir}); the server also only reads input
+# files from there. An explicit absolute output_directory is shown in the call the owner sees.
+# achords secret set elevenlabs-api-key   (elevenlabs.io/app/settings/api-keys)
+id: elevenlabs
+name: ElevenLabs
+description: Voices, speech, sound effects and music (generation needs the owner's approval or report).
+command: uvx
+args: ["--from", "elevenlabs-mcp==0.12.2", "elevenlabs-mcp"]
+env:
+  ELEVENLABS_API_KEY: "vault:elevenlabs-api-key"
+  ELEVENLABS_MCP_BASE_PATH: "{workdir}"
+  ELEVENLABS_MCP_OUTPUT_MODE: files
+install: Install uv (https://docs.astral.sh/uv/) so `uvx` is on the PATH.
+hosts: [api.elevenlabs.io]
+tools:
+  read:
+    - check_subscription
+    - list_models
+    - search_voices
+    - get_voice
+    - search_voice_library
+    # Free by its own description (rate-limited only).
+    - create_composition_plan
+  write:
+    - text_to_speech
+    - speech_to_text
+    - text_to_sound_effects
+    - speech_to_speech
+    - isolate_audio
+    - text_to_voice
+    - create_voice_from_preview
+    - voice_clone
+    - compose_music
+    - video_to_music
+    - upload_music_for_inpainting
+# Connection test (web Integrations page).
+test:
+  tool: check_subscription
