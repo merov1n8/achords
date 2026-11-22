@@ -10,7 +10,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { type Document, parseDocument, stringify } from "yaml";
-import { parseManifest } from "./manifest.ts";
+import { containerModelProblem } from "./check.ts";
+import { type Manifest, parseManifest } from "./manifest.ts";
 
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -19,8 +20,14 @@ function editManifest(path: string, change: (doc: Document) => void): void {
   const doc = parseDocument(readFileSync(path, "utf8"));
   change(doc);
   const text = doc.toString({ flowCollectionPadding: false }); // [a, b] like hand-written files
-  parseManifest(text, path); // throws with field paths if invalid
+  refuseUnrunnable(parseManifest(text, path)); // throws with field paths if invalid
   replaceFile(path, text);
+}
+
+/** A saved agent must be able to run: a container next to a model that cannot run there is not. */
+function refuseUnrunnable(m: Manifest): void {
+  const problem = containerModelProblem(m);
+  if (problem) throw new Error(problem);
 }
 
 /** Atomic replace, same permissions. */
@@ -149,7 +156,7 @@ export function createAgentFiles(agentsDir: string, a: NewAgent): { id: string }
     ...(a.effort ? { effort: a.effort } : {}),
   };
   const text = stringify(manifest, { flowCollectionPadding: false });
-  parseManifest(text, `${a.id}/agent.yaml`); // throws with field paths if invalid
+  refuseUnrunnable(parseManifest(text, `${a.id}/agent.yaml`)); // throws with field paths if invalid
   mkdirSync(dir, { recursive: false, mode: 0o700 });
   try {
     writeFileSync(join(dir, "AGENT.md"), `# ${manifest.name}\n\n${a.description.trim()}\n`);

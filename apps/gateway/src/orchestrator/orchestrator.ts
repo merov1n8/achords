@@ -87,6 +87,7 @@ import {
   checkFs,
   checkModel,
   checkMove,
+  containerModelProblem,
   DEFAULT_WORKFLOW_YAML,
   grantedIntegrations,
   isLocalModel,
@@ -2004,6 +2005,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       db.prepare("UPDATE tasks SET max_attempts = attempts WHERE id = ?").run(task.id);
       fail(db, task.id, WORKER_ID, msg);
       report(true, t("thread.failed", { title: task.title, error: msg }));
+      // A setup problem only the owner can fix (model, container, budget, account): delegated
+      // work says so in the chat as well, not only to its caller.
+      if (task.parentId && task.threadId && !task.roomId) {
+        post(
+          task.threadId,
+          t("thread.cannotRun", {
+            agent: task.assigneeAgentId ?? "?",
+            title: task.title,
+            error: msg,
+          }),
+        );
+      }
     };
     const remaining = remainingBudget(db, rootId);
     if (remaining <= 0) {
@@ -2312,7 +2325,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       try {
         if (built.provider.id !== "cli-claude") {
           throw new Error(
-            `${manifest.id} runs in an Apple container, which works with Claude models only for now (the ${built.provider.id === "cli-codex" ? "OpenAI" : "Gemini"} CLI and its sign-in are not available there). Choose a Claude model for this agent, or switch its container off.`,
+            containerModelProblem(manifest) ??
+              `${manifest.id} runs in an Apple container, where only Claude models work for now.`,
           );
         }
         if (!deps.container) throw new Error("this install cannot run agents in a container");

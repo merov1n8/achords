@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- An agent in an Apple container with an OpenAI or Gemini default model could be saved and then
+  failed at run time, and when it was delegated work only its caller heard why. The agent form
+  now warns at once and refuses to save that combination, and work that cannot run for a setup
+  reason (model, container, budget, account) tells the owner in the chat at any depth.
 - Agents asked again what the owner had already answered: an agent working for the owner (a
   card, @agent, or work handed over by the boss) only saw its one instruction. It now also sees
   the chat so far (last messages), like the boss.

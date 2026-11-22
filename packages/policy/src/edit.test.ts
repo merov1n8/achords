@@ -300,29 +300,82 @@ describe("updateAgent (web: edit with the same form as create)", () => {
 
   it('writes the container choice only next to "*" (ADR-0051)', () => {
     const path = join(dir, "social", "agent.yaml");
-    updateAgent(dir, "social", { ...fields, network: { allow: ["*"] } });
+    // Container runs need a Claude model; the fixture's default is an OpenAI one.
+    const claude = { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] };
+    updateAgent(dir, "social", { ...fields, models: claude, network: { allow: ["*"] } });
     expect(readFileSync(path, "utf8")).toMatch(/container: true/);
-    updateAgent(dir, "social", { ...fields, network: { allow: ["*"] }, container: false });
+    updateAgent(dir, "social", {
+      ...fields,
+      models: claude,
+      network: { allow: ["*"] },
+      container: false,
+    });
     expect(loadManifest(path).container).toBe(false);
     // Without "*" or a shell the key goes, whatever the form sent.
-    updateAgent(dir, "social", { ...fields, container: false });
+    updateAgent(dir, "social", { ...fields, models: claude, container: false });
     expect(readFileSync(path, "utf8")).not.toMatch(/container/);
     // ADR-0055: next to a shell it is written only when switched on (off is the default).
-    updateAgent(dir, "social", { ...fields, shell: { allow: ["ffmpeg"] }, container: true });
+    updateAgent(dir, "social", {
+      ...fields,
+      models: claude,
+      shell: { allow: ["ffmpeg"] },
+      container: true,
+    });
     expect(loadManifest(path).container).toBe(true);
-    updateAgent(dir, "social", { ...fields, shell: { allow: ["ffmpeg"] }, container: false });
+    updateAgent(dir, "social", {
+      ...fields,
+      models: claude,
+      shell: { allow: ["ffmpeg"] },
+      container: false,
+    });
     expect(readFileSync(path, "utf8")).not.toMatch(/container/);
     createAgentFiles(dir, {
       id: "web",
       name: "Web",
       role: "r",
       workspace: "w",
-      models: fields.models,
+      models: claude,
       network: { allow: ["*"] },
       container: false,
       description: "x",
     });
     expect(loadManifest(join(dir, "web", "agent.yaml")).container).toBe(false);
+  });
+
+  it("refuses a container next to a model that cannot run there, with what to do", () => {
+    const path = join(dir, "social", "agent.yaml");
+    const before = readFileSync(path, "utf8");
+    // The fixture's default model is an OpenAI one.
+    expect(() =>
+      updateAgent(dir, "social", { ...fields, network: { allow: ["*"] }, container: true }),
+    ).toThrow(/only Claude models work.*Claude model as its default.*container off/);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    // Container off, or a Claude default: fine.
+    updateAgent(dir, "social", { ...fields, network: { allow: ["*"] }, container: false });
+    updateAgent(dir, "social", {
+      ...fields,
+      models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+      shell: { allow: ["ls"] },
+      container: true,
+    });
+    // Switching the model page to OpenAI while the container is on is refused too.
+    expect(() =>
+      updateManifestModels(path, {
+        default: "cli-codex/gpt-6.2-sol",
+        allowed: ["cli-codex/gpt-6.2-sol"],
+      }),
+    ).toThrow(/only Claude models work/);
+    expect(() =>
+      createAgentFiles(dir, {
+        id: "boxed",
+        name: "Boxed",
+        role: "r",
+        workspace: "w",
+        models: fields.models,
+        network: { allow: ["*"] },
+        description: "x",
+      }),
+    ).toThrow(/only Claude models work/);
   });
 
   it("refuses invalid values and leaves both files untouched", () => {

@@ -26,6 +26,21 @@ export function checkMcp(m: Manifest, server: string): Decision {
 export const isLocalModel = (model: string) => /^local(-[a-z0-9-]+)?\//.test(model);
 
 /**
+ * ADR-0051: an Apple container has only the claude CLI and its token; codex and gemini cannot
+ * sign in there yet. Local models get no tools, so they never use the container.
+ */
+export function containerModelProblem(m: Manifest): string | undefined {
+  const model = m.models.default;
+  if (!m.container || model.startsWith("cli-claude/") || isLocalModel(model)) return undefined;
+  const maker = model.startsWith("cli-codex/")
+    ? "OpenAI"
+    : model.startsWith("cli-gemini/")
+      ? "Gemini"
+      : model;
+  return `${m.id} runs in an Apple container, where only Claude models work for now (${maker} cannot sign in there yet). Choose a Claude model as its default model, or switch its container off.`;
+}
+
+/**
  * Model choice. `local-only` (on the agent or on the data) restricts to local models and never
  * falls back to a frontier model (ADR-0007): the caller waits instead.
  */

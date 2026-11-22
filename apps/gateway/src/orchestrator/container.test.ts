@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createThread, getTask, openCoreDatabase } from "@achords/core";
+import { createThread, getTask, listMessages, openCoreDatabase } from "@achords/core";
 import { runContainerPrefix } from "@achords/platform";
 import { loadCatalog } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
@@ -77,7 +77,7 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     );
   };
 
-  const start = (over: Partial<OrchestratorDeps> = {}) => {
+  const startFor = (target: string, over: Partial<OrchestratorDeps> = {}) => {
     const run = async (req: RunRequest) => {
       const cfg = req.mcpConfigPath
         ? JSON.parse(readFileSync(req.mcpConfigPath, "utf8")).mcpServers
@@ -118,11 +118,12 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     const thread = createThread(db, {});
     const r = orch.delegate(
       { from: "boss", threadId: thread.id },
-      { agent: "web", title: "research", instructions: "go" },
+      { agent: target, title: "research", instructions: "go" },
     );
     if (!r.ok) throw new Error(r.reason);
-    return { orch, taskId: r.taskId };
+    return { orch, taskId: r.taskId, threadId: thread.id };
   };
+  const start = (over: Partial<OrchestratorDeps> = {}) => startFor("web", over);
 
   it('runs a "*" agent in a container: own folders only, hub on the container network, token by env', async () => {
     agent('network: {allow: ["*"]}');
@@ -268,7 +269,27 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     await orch.workOnce();
     expect(calls).toEqual([]);
     expect(getTask(db, taskId)?.error).toMatch(
-      /Claude models only for now.*switch its container off/,
+      /only Claude models work for now \(OpenAI cannot sign in there yet\).*switch its container off/,
     );
+  });
+
+  it("delegated work that cannot run tells the owner in the chat too, not only its caller", async () => {
+    agent('network: {allow: ["*"]}\ndelegation: {accepts_from: [lead]}', "cli-codex/gpt-6");
+    mkdirSync(join(home, "agents", "lead"), { recursive: true });
+    writeFileSync(
+      join(home, "agents", "lead", "agent.yaml"),
+      "id: lead\nname: Lead\nrole: lead\nworkspace: shared\nmodels: {default: cli-claude/sonnet}\ndelegation: {can_delegate_to: [web]}\n",
+    );
+    const { orch, threadId, taskId } = startFor("lead");
+    const child = orch.delegate(
+      { from: "task", taskId },
+      { agent: "web", title: "Research", instructions: "go" },
+    );
+    if (!child.ok) throw new Error(child.reason);
+    await orch.workOnce();
+    const posted = listMessages(db, threadId).map((m) => m.content);
+    expect(
+      posted.some((c) => /^web could not run "Research"[\s\S]*only Claude models/.test(c)),
+    ).toBe(true);
   });
 });

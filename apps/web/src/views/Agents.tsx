@@ -427,6 +427,11 @@ function AgentForm({
             {!f.container && lines(f.network).includes("*") && (
               <p class="error">{t("agents.form.containerOff")}</p>
             )}
+            {f.container &&
+              !f.models.default.startsWith("cli-claude/") &&
+              !/^local(-[a-z0-9-]+)?\//.test(f.models.default) && (
+                <p class="error">{t("agents.form.containerModel")}</p>
+              )}
           </div>
         )}
         <div class="field">
