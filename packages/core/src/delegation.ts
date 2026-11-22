@@ -60,6 +60,88 @@ export function enqueueChild(
   });
 }
 
+/**
+ * Handoff (ADR-0055): the successor of `caller` continues its work as a sibling (same parent,
+ * root and depth), so a pipeline does not use up delegation depth. The caller joins the chain, so
+ * no earlier step of the line can be handed back to. A waiting parent now also waits for the
+ * successor; the caller's own finish releases its place as before.
+ */
+export function enqueueSuccessor(
+  db: Db,
+  caller: Task,
+  input: { title: string; description?: string; assigneeAgentId?: string; caller: string },
+  now = Date.now(),
+): Task {
+  return transaction(db, () => {
+    const row = db
+      .prepare(
+        `INSERT INTO tasks (id, thread_id, parent_id, root_id, depth, agent_chain, title,
+           description, assignee_agent_id, max_attempts, sensitivity, project, continues_from,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(
+        randomUUID(),
+        caller.threadId,
+        caller.parentId,
+        caller.rootId ?? caller.id,
+        caller.depth,
+        JSON.stringify([...caller.agentChain, input.caller]),
+        input.title,
+        input.description ?? null,
+        input.assigneeAgentId ?? null,
+        caller.maxAttempts,
+        caller.sensitivity,
+        caller.project,
+        caller.id,
+        now,
+        now,
+      );
+    if (caller.parentId) {
+      db.prepare("UPDATE tasks SET waiting_children = waiting_children + 1 WHERE id = ?").run(
+        caller.parentId,
+      );
+    }
+    return getTask(db, String(row?.id)) as Task;
+  });
+}
+
+/** Stores the handoff a running task asked for; the run's end turns it into the successor. */
+export function requestHandoff(
+  db: Db,
+  id: string,
+  handoff: NonNullable<Task["handoff"]>,
+  now = Date.now(),
+): void {
+  db.prepare("UPDATE tasks SET handoff = ?, updated_at = ? WHERE id = ?").run(
+    JSON.stringify(handoff),
+    now,
+    id,
+  );
+}
+
+/** How many handoffs led to this task along its line. */
+export function handoffHops(db: Db, task: Task): number {
+  let hops = 0;
+  let from = task.continuesFrom;
+  while (from) {
+    hops++;
+    from = getTask(db, from)?.continuesFrom ?? null;
+  }
+  return hops;
+}
+
+/** Delegated and handed-off tasks under one root, the root included (helpers and turns not). */
+export function lineTaskCount(db: Db, rootId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM tasks
+       WHERE (id = ? OR root_id = ?) AND worker_spec IS NULL AND room_id IS NULL`,
+    )
+    .get(rootId, rootId);
+  return Number(row?.n ?? 0);
+}
+
 /** Called once a child is done or finally failed: the parent becomes claimable again. */
 export function childFinished(db: Db, childId: string): void {
   db.prepare(

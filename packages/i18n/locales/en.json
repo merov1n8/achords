@@ -64,6 +64,7 @@
   "time.hours": "{n}h",
   "time.days": "{n}d",
   "thread.done": "Done: {title}\n\n{result}",
+  "thread.handedOff": "{title}: {agent} handed over to {to} ({next}).\n\n{result}",
   "thread.failed": "Failed: {title}\n\n{error}",
   "thread.bossError": "Sorry, I could not handle that ({reason}).",
   "thread.accessRequest": "{agent} asks for full access ({title}): {reason}\nFor 4 hours: any website, web search, and the write tools of local integrations (Blender, Unity). Integrations with client credentials are left out meanwhile.",

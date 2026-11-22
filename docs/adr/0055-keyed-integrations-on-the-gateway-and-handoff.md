@@ -1,0 +1,47 @@
+# ADR-0055: Keyed integrations hosted by the gateway, and handoff between agents
+
+Status: Accepted (2026-11-22). Part 2 (handoff) implemented first; part 1 follows.
+
+- Context: Two limits now press on each other.
+  - **Shell or keys, not both.** ADR-0034 refuses integrations that carry secrets to any agent with a shell, because the launcher and the server it starts are children of the agent's run: the resolved secret sits in the environment (or request headers) of a process the shell's user can inspect. ADR-0054 removed one reason for a shell (opening Blender and Unity), but agents that really need one (web-dev, wp-maintainer, game-dev, video-producer, 3d-designer with headless Blender) still cannot hold Meshy, ElevenLabs, fal.ai, WordPress or Google. The workaround is a keyed agent without a shell (audio, image) that the shell agent delegates to.
+  - **Depth 3.** Every such workaround costs one delegation level (ADR-0029: max depth 3, never higher). Real chains already sit on the limit: boss → marketing → video-producer → audio. Most of that work is not nested at all, it is a pipeline (script → voice → edit → upload) that is forced into parent and child because `delegate` is the only way to pass work on.
+  - Known limit of the current rule, as far as the ADRs show: it is checked per agent. A shell agent on the host runs as the same user as another agent's keyed server during a concurrent run.
+  - Considered and rejected: raising the depth limit with the boss reviewing every few rounds. Ping-pong is already impossible (cycle refusal), runaway cost is already bounded (one budget per root, fan-out 5), and a model judging "is this still progress" is expensive, lacks the chain's context and is not deterministic. It treats the symptom; the two decisions below remove the cause.
+
+- Decision, part 1: keyed integrations run on the gateway's side
+  - **Where the secret lives.** For a catalog entry with secrets (`env` with `vault:` values, `files:`, `authorization:`), the gateway starts and owns the server process or the remote HTTP bridge (ADR-0050). The secret is resolved inside the gateway and never enters the run's process tree, config file, environment or mounts. Entries without secrets (Blender, Unity, other local apps) keep today's launcher path.
+  - **What the run gets.** The per-run MCP config starts the same launcher, but for a keyed entry the launcher is only a relay: it sends each JSON-RPC line to `/api/agent/mcp/<catalog id>` with the run token and passes the answer back. No ticket, no `mcp-env` fetch, nothing secret to hold. The run token already lists the granted integrations and tools; the gateway refuses anything else.
+    - MCP is not only request and answer: a server may send notifications and requests of its own (progress, logging, list changes). The relay therefore also keeps one open event stream from the gateway for lines the server sends on its own, the same shape as MCP's streamable HTTP transport.
+  - **Same proxy rules, now in one place.** Scope, read and write split, publishing review and auto (ADR-0037), data marking (ADR-0038) and audit move from the launcher into the gateway handler. Owner-approved calls and connection tests use the same handler.
+  - **Lifecycle.** A server is started on the run's first call to it and stopped when the run ends or its token is revoked (timeout, cancel, kill). One server per run and integration, never shared between runs, so per-project credentials (`vault:<name>-{project}`) stay separated. Working folder and `{workdir}` are the run's working folder as today, so files a server saves land where the agent can read them. Credential files stay in the gateway's private temp folder.
+  - **The rule that replaces "no shell next to secrets".** A keyed integration is granted to an agent with a shell only when that shell cannot reach the gateway's processes or `~/.achords`:
+    - Stage 1: the run is in an Apple container (ADR-0051). `container: true` becomes valid for any agent with a shell, not only next to `"*"` in `network.allow`. A manifest with `shell:` and a keyed `mcp` entry must have `container: true`, otherwise validation fails with that reason.
+    - Stage 2: host runs under a dedicated macOS user (`run_as:` in the manifest, the "optional dedicated macOS user" of the architecture document). Needed for shells that must stay on the host: headless Blender, Unity batch mode, Xcode builds. Until stage 2 exists, shell on the host next to keys stays refused.
+  - **Unchanged.** Credentials never share a run with the open web unless the owner elevated it (ADR-0035). Codex and Gemini runs stay without keyed integrations until they run in a container (ADR-0040, -0045, -0051). Agents without a shell work as before, only the server moves.
+  - **Not covered.** Shell commands that need a credential themselves (ssh, `git push`, remote WP-CLI, cloud CLIs). Those need use-without-read mechanisms (an ssh-agent socket, a git credential helper answered by the gateway) and get their own ADR.
+
+- Decision, part 2: `handoff`, a tail call next to `delegate`
+  - **Tool.** `handoff(agent, title, instructions)` on the hub MCP server. The caller's run ends as done; its report is stored as a step. The gateway creates the successor as a sibling: same `parent_id`, same `root_id`, same `depth` as the caller. The successor's prompt gets the caller's report and the instructions.
+    - The call only records the handoff on the task (`tasks.handoff`); the successor is created when the caller's run ends well, so it never starts before the report exists. A failed run leaves no successor, and a retry starts without the earlier request.
+    - The caller joins the successor's agent chain (`agent_chain`), which is what makes earlier steps of the line refused as targets; the step link is `tasks.continues_from`.
+  - **Result flow.** The successor stands in for the caller. Its result (with the earlier steps' reports attached, oldest first) goes where the caller's would have gone: to the waiting parent, or to the owner when the caller was the root.
+  - **Policy.** Same switches as delegation: the caller's `delegation.can_delegate_to` and the target's `accepts_from` must both allow it. No new manifest key. The target runs with its own manifest; tools, paths, models and secrets cannot be passed; sensitivity can only tighten.
+  - **Guards.**
+    - Terminal: one handoff per run, and none while the task has unfinished children or an open question to the owner. After a handoff the run may not delegate, spawn workers, open discussions or ask the owner.
+    - No cycles: the target must not be in the chain, where the chain includes every earlier step of the same line (A ⇒ B ⇒ A is refused). Rework after review stays a kanban transition (ADR-0030), not a handoff back.
+    - Hop limit: at most 6 handoffs along one line (a constant for now; a setting when someone needs it lower).
+    - Task limit: at most 20 tasks per root, delegations and handoffs together. A mechanical stop for anything the other guards miss.
+    - Budget: the root's shared budget, as for delegation. Exhausted means the remaining work fails with a report to the owner.
+    - The boss does not get `handoff`: it must stay the root that reports.
+    - `MAX_DELEGATION_DEPTH` stays 3.
+  - **Kanban.** The successor is the next card under the same parent, linked "continues from" to the previous step. A root's successor gets a card of its own in the workflow's start column; the caller's card is finished. `ask_owner` routing is unchanged.
+  - **Owner.** When a root hands off, the owner sees that step's report at once ("handed over to …"), and the last step's result as the usual "Done". Earlier steps under a parent reach that parent as its children's results, oldest first.
+
+- Consequences:
+  - An agent can have a shell and keyed integrations. The hops that existed only to reach a key (shell agent → audio or image) become a choice (separate budget, cheaper model) instead of a requirement.
+  - Pipelines stop consuming depth: boss → marketing, then video-producer ⇒ social as one line at depth 2. Depth 3 is left for work that is truly nested.
+  - The threat changes from stealing a key (lasting, usable elsewhere) to misusing a granted tool during one run (bound to the run token, scoped, audited, revoked at run end). Write tools stay behind publishing review.
+  - The gateway now holds live secrets in its children's environments, so its isolation from agent shells is the whole guarantee. Stage 1 gets it from the VM boundary. Until stage 2, agents that need a host shell (3d-designer with headless Blender, game-dev with Unity batch mode) keep today's restriction.
+  - More container runs: a VM start per run (about a second), up to 4 CPUs and 4 GB each while running, Claude models only for now.
+  - Gateway work: MCP relay endpoint, per-run server supervisor (start on first call, stop on run end, restart after a crash), moving the proxy rules out of the launcher. Schema: step link and line position on tasks, per-root task counter.
+  - Tests: no secret in the run's environment, config or mounts for keyed entries; run token cannot call an ungranted integration or tool; server stops with the run; per-project credentials never cross runs; shell plus keyed entry refused without `container: true`; handoff result reaches the parent or the owner; cycle across steps refused; hop and task limits; no handoff with open children; sensitivity and budget carried over; boss has no `handoff`.

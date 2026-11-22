@@ -31,6 +31,7 @@ import {
   dueSchedules,
   enqueueChild,
   enqueueRoot,
+  enqueueSuccessor,
   extendLease,
   fail,
   finishRun,
@@ -38,8 +39,10 @@ import {
   getSetting,
   getTask,
   getThread,
+  handoffHops,
   isDraining,
   isPaused,
+  lineTaskCount,
   listChecklist,
   listChildren,
   listComments,
@@ -53,6 +56,7 @@ import {
   recordTurn,
   recordUsageWindows,
   remainingBudget,
+  requestHandoff,
   requeueInterrupted,
   roomsOf,
   runProgressItems,
@@ -370,6 +374,15 @@ export interface Orchestrator {
     opts?: { budgetUsd?: number },
   ): { ok: true; taskId: string } | { ok: false; reason: string };
   /**
+   * Handoff (ADR-0055): the calling task's run ends and `agent` continues the work as its
+   * successor at the same level (same parent and depth). Same switches as delegation; one per
+   * run, never while the task waits for children. Created when the caller's run ends well.
+   */
+  handoff(
+    from: { from: "task"; taskId: string },
+    request: { agent: string; title: string; instructions: string },
+  ): { ok: true } | { ok: false; reason: string };
+  /**
    * A card the owner makes by hand, with a chat of its own for results and questions. Not
    * started, it is parked (never claimed); `start` hands it to the agent at once, the same way
    * as "@agent" in a chat.
@@ -388,6 +401,9 @@ export interface Orchestrator {
 
 export const MAX_DELEGATION_DEPTH = 3;
 export const MAX_CHILDREN_PER_TASK = 5;
+/** ADR-0055: handoffs along one line, and delegated plus handed-off tasks under one root. */
+export const MAX_HANDOFF_HOPS = 6;
+export const MAX_LINE_TASKS = 20;
 export const MAX_WORKERS_PER_TASK = 3;
 export const MAX_ROOM_PARTICIPANTS = 3;
 // Quota warnings to the owner, once per window and level (step 6).
@@ -404,6 +420,7 @@ const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
 // Owner-granted full access (ADR-0035) lasts this long for the whole task chain.
 export const ELEVATION_MS = 4 * 60 * 60_000;
 const WORKER_REFUSAL = "workers cannot spawn workers or delegate (depth 1)";
+const HANDED_OFF = "you already handed this work off; end your turn now";
 // ADR-0051: what the agent finds inside its container.
 const CONTAINER_NOTE =
   "This run executes in an isolated Linux container: only your own folders exist there, at the same paths. Apps, files and services elsewhere on the owner's Mac are not reachable.";
@@ -600,6 +617,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (parent && remainingBudget(db, parent.rootId ?? parent.id) <= 0) {
       return "the delegation chain has used up its budget";
     }
+    if (parent && lineTaskCount(db, parent.rootId ?? parent.id) >= MAX_LINE_TASKS) {
+      return `task limit: at most ${MAX_LINE_TASKS} tasks per piece of work (delegations and handoffs)`;
+    }
+    if (parent?.handoff) return HANDED_OFF;
     return undefined;
   };
 
@@ -962,6 +983,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (parent.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
       if (parent.roomId)
         return { ok: false, reason: "a discussion turn cannot open another discussion" };
+      if (parent.handoff) return { ok: false, reason: HANDED_OFF };
       const ps = request.participants;
       if (ps.length < 1 || ps.length > MAX_ROOM_PARTICIPANTS || new Set(ps).size !== ps.length) {
         return { ok: false, reason: `1 to ${MAX_ROOM_PARTICIPANTS} different participants` };
@@ -1192,6 +1214,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const found = parent?.assigneeAgentId ? agents().get(parent.assigneeAgentId) : undefined;
       if (!parent || !found) return { ok: false, reason: "unknown calling task" };
       if (parent.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
+      if (parent.handoff) return { ok: false, reason: HANDED_OFF };
       // A project task's caller may hand its project folder to a worker.
       const caller = withProject(
         found,
@@ -1377,6 +1400,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
     askOwner(from, question) {
       const task = getTask(db, from.taskId);
+      if (task?.handoff) return { ok: false, reason: HANDED_OFF };
       if (!task?.threadId || !task.assigneeAgentId) {
         return { ok: false, reason: "this task has no conversation with the owner" };
       }
@@ -1600,6 +1624,56 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           { label: t("action.reject"), data: `access:reject:${task.id}` },
         ],
       });
+      return { ok: true };
+    },
+
+    handoff(from, request) {
+      const all = agents();
+      const task = getTask(db, from.taskId);
+      const caller = task?.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
+      if (!task || !caller) return { ok: false, reason: "unknown calling task" };
+      if (task.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
+      if (task.roomId) return { ok: false, reason: "a discussion turn cannot hand off" };
+      if (task.handoff) return { ok: false, reason: "only one handoff per run" };
+      if (task.waitingChildren > 0 || task.waitingOwner) {
+        return { ok: false, reason: "this task has unfinished delegated work or an open question" };
+      }
+      const target = all.get(request.agent);
+      if (!target) return { ok: false, reason: `no agent ${request.agent}` };
+      if (target.id === BOSS_ID) return { ok: false, reason: "the boss cannot be handed work" };
+      const chain = [...task.agentChain, caller.id];
+      if (chain.includes(target.id)) {
+        return {
+          ok: false,
+          reason: `cycle: ${target.id} is already in the line ${chain.join(" → ")}`,
+        };
+      }
+      if (!caller.delegation.can_delegate_to.includes(target.id)) {
+        return {
+          ok: false,
+          reason: `${caller.id} may not hand off to ${target.id} (delegation.can_delegate_to)`,
+        };
+      }
+      if (!target.delegation.accepts_from.includes(caller.id)) {
+        return {
+          ok: false,
+          reason: `${target.id} does not accept work from ${caller.id} (delegation.accepts_from)`,
+        };
+      }
+      if (handoffHops(db, task) + 1 > MAX_HANDOFF_HOPS) {
+        return { ok: false, reason: `hop limit: at most ${MAX_HANDOFF_HOPS} handoffs in a row` };
+      }
+      const rootId = task.rootId ?? task.id;
+      if (lineTaskCount(db, rootId) >= MAX_LINE_TASKS) {
+        return {
+          ok: false,
+          reason: `task limit: at most ${MAX_LINE_TASKS} tasks per piece of work (delegations and handoffs)`,
+        };
+      }
+      if (remainingBudget(db, rootId) <= 0) {
+        return { ok: false, reason: "the delegation chain has used up its budget" };
+      }
+      requestHandoff(db, task.id, request);
       return { ok: true };
     },
 
@@ -1908,6 +1982,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   async function runTask(task: Task, signal?: AbortSignal) {
     const rootId = task.rootId ?? task.id;
+    // A handoff belongs to one run: an earlier run that failed after asking leaves none behind.
+    if (task.handoff) db.prepare("UPDATE tasks SET handoff = NULL WHERE id = ?").run(task.id);
     // Quiet output (ADR-0029): only root tasks talk to the owner; children report to their parent.
     const report = (finalFailure: boolean, text: string) => {
       if (!finalFailure) return;
@@ -2117,13 +2193,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             )
             .join("\n")}\nUse these results and finish the task.`
         : "";
+      const previous = task.continuesFrom ? getTask(db, task.continuesFrom) : undefined;
+      const handedOver = previous
+        ? `\n\nThis continues the work of ${previous.assigneeAgentId} ("${previous.title}"), who handed it to you. Their report:\n${previous.result ?? ""}`
+        : "";
       const answer =
         task.ownerQuestion && task.ownerAnswer
           ? `\n\nYou asked the owner: ${task.ownerQuestion}\nOwner's answer: ${task.ownerAnswer}\nContinue the task with this answer.`
           : "";
       const team =
         delegates.length && deps.hub
-          ? `\n\nYou can delegate to:\n${delegates.map(teamLine).join("\n")}\nUse the delegate tool only for work outside your own role.`
+          ? `\n\nYou can delegate to:\n${delegates.map(teamLine).join("\n")}\nUse the delegate tool only for work outside your own role. When your part is done and the next step belongs to one of them, use handoff instead: they continue the work and you end.`
           : "";
       // The owner's notes on the card (web edit view): part of the task, like its description.
       const checklist = listChecklist(db, task.id);
@@ -2201,7 +2281,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       // One shared budget per chain: never more than what is left.
@@ -2261,7 +2341,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         "skill_read",
         "skill_fetch",
         "skill_propose",
-        ...(delegates.length ? ["delegate", "open_room"] : []),
+        ...(delegates.length ? ["delegate", "open_room", "handoff"] : []),
         ...(manifest.tools.length ? ["spawn_worker"] : []),
       ];
       const { token, revoke } = deps.hub.tokens.issue(task.id, manifest.id, hubTools);
@@ -2416,6 +2496,36 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const opener = task.parentId ? getTask(db, task.parentId) : undefined;
         if (room && next && opener) enqueueTurn(opener, room, next);
         childFinished(db, task.id);
+      } else if (res.ok && getTask(db, task.id)?.handoff) {
+        // Handoff (ADR-0055): the successor takes this task's place; its result goes where this
+        // one's would have gone. The owner sees each step's report as it happens.
+        const asked = getTask(db, task.id) as Task;
+        const h = asked.handoff as NonNullable<Task["handoff"]>;
+        complete(db, task.id, WORKER_ID, res.text);
+        if (task.resumeNote) clearResumeNote(db, task.id);
+        const next = enqueueSuccessor(db, asked, {
+          title: h.title,
+          description: h.instructions,
+          assigneeAgentId: h.agent,
+          caller: manifest.id,
+        });
+        if (task.parentId) childFinished(db, task.id);
+        else {
+          finishCard(task);
+          placeCard(db, next.id, workflowForTask(next).start, "system");
+          if (task.threadId) {
+            post(
+              task.threadId,
+              t("thread.handedOff", {
+                agent: manifest.id,
+                to: h.agent,
+                title: task.title,
+                next: h.title,
+                result: res.text,
+              }),
+            );
+          }
+        }
       } else if (res.ok) {
         complete(db, task.id, WORKER_ID, res.text);
         if (task.resumeNote) clearResumeNote(db, task.id);

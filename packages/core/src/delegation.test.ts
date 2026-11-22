@@ -6,9 +6,13 @@ import {
   askOwner,
   childFinished,
   enqueueChild,
+  enqueueSuccessor,
+  handoffHops,
+  lineTaskCount,
   listChildren,
   openQuestion,
   remainingBudget,
+  requestHandoff,
 } from "./delegation.ts";
 import { claim, complete, enqueue, getTask } from "./queue.ts";
 import { createThread } from "./threads.ts";
@@ -93,5 +97,58 @@ describe("questions to the owner", () => {
     expect(claim(db, { workerId: "w", leaseMs: LEASE })?.id).toBe(a.id);
     expect(openQuestion(db, thread.id)?.id).toBe(b.id);
     expect(answerOwnerQuestion(db, createThread(db, {}).id, "x")).toBeUndefined();
+  });
+});
+
+describe("handoff (ADR-0055)", () => {
+  it("the successor is a sibling: same parent, root and depth; the caller joins its chain", () => {
+    const db = openCoreDatabase(":memory:");
+    const root = enqueue(db, { title: "root", sensitivity: "local-only" });
+    const step = enqueueChild(db, root, { title: "script", caller: "marketing" });
+    expect(getTask(db, root.id)?.waitingChildren).toBe(1);
+    const next = enqueueSuccessor(db, step, {
+      title: "voice",
+      description: "record it",
+      caller: "video-producer",
+    });
+    expect(next).toMatchObject({
+      parentId: root.id,
+      rootId: root.id,
+      depth: step.depth,
+      agentChain: ["marketing", "video-producer"],
+      continuesFrom: step.id,
+      sensitivity: "local-only",
+      description: "record it",
+    });
+    // The parent now waits for the successor as well; the caller's own finish releases one.
+    expect(getTask(db, root.id)?.waitingChildren).toBe(2);
+    childFinished(db, step.id);
+    expect(getTask(db, root.id)?.waitingChildren).toBe(1);
+    expect(handoffHops(db, next)).toBe(1);
+    const third = enqueueSuccessor(db, next, { title: "edit", caller: "audio" });
+    expect(handoffHops(db, third)).toBe(2);
+  });
+
+  it("a root's successor is a root-level task in the same thread under the same budget", () => {
+    const db = openCoreDatabase(":memory:");
+    const thread = createThread(db, {});
+    const root = enqueue(db, { title: "root", threadId: thread.id, project: "acme" });
+    const next = enqueueSuccessor(db, root, { title: "next", caller: "web-dev" });
+    expect(next).toMatchObject({
+      parentId: null,
+      rootId: root.id,
+      threadId: thread.id,
+      project: "acme",
+      depth: root.depth,
+    });
+    expect(lineTaskCount(db, root.id)).toBe(2);
+  });
+
+  it("a requested handoff is stored on the task until its run ends", () => {
+    const db = openCoreDatabase(":memory:");
+    const t = enqueue(db, { title: "t" });
+    expect(getTask(db, t.id)?.handoff).toBeNull();
+    requestHandoff(db, t.id, { agent: "seo", title: "x", instructions: "y" });
+    expect(getTask(db, t.id)?.handoff).toEqual({ agent: "seo", title: "x", instructions: "y" });
   });
 });

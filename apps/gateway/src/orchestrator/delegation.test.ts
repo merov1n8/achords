@@ -421,4 +421,154 @@ describe("inter-agent delegation (ADR-0029)", () => {
     const posted = listMessages(db, thread.id).map((m) => m.content);
     expect(posted).toEqual([expect.stringMatching(/^Done: root for a\n\nfinal answer using X/)]);
   });
+
+  describe("handoff (ADR-0055)", () => {
+    const handoff = (t: Task, agent: string, title = agent) =>
+      orch.handoff({ from: "task", taskId: t.id }, { agent, title, instructions: `do ${title}` });
+
+    it("a pipeline does not use up depth: the successor continues at the caller's level", async () => {
+      writeAgents(home, {
+        top: { to: ["mid"] },
+        mid: { to: ["a"], from: ["top"] },
+        a: { to: ["b"], from: ["mid"] },
+        b: { to: ["c"], from: ["a"] },
+        c: { from: ["b"] },
+      });
+      start();
+      const outcomes: string[] = [];
+      behave.top = (req, t) => {
+        if (req.prompt.includes("Results from delegated tasks"))
+          return result({ text: "top done" });
+        orch.delegate(
+          { from: "task", taskId: t.id },
+          { agent: "mid", title: "m", instructions: "x" },
+        );
+        return result({ text: "waiting" });
+      };
+      behave.mid = (req, t) => {
+        if (req.prompt.includes("Results from delegated tasks")) {
+          outcomes.push(req.prompt.includes("c finished the line") ? "mid got c" : "mid without c");
+          return result({ text: "mid done" });
+        }
+        orch.delegate(
+          { from: "task", taskId: t.id },
+          { agent: "a", title: "a", instructions: "x" },
+        );
+        return result({ text: "waiting" });
+      };
+      // a is at depth 3: delegating is refused, handing off works.
+      behave.a = (_req, t) => {
+        const d = orch.delegate(
+          { from: "task", taskId: t.id },
+          { agent: "b", title: "b", instructions: "x" },
+        );
+        outcomes.push(d.ok ? "a delegated" : "a delegate refused");
+        const h = handoff(t, "b");
+        outcomes.push(h.ok ? "a handed off" : `a refused: ${h.reason}`);
+        return result({ text: "a report" });
+      };
+      behave.b = (req, t) => {
+        outcomes.push(req.prompt.includes("a report") ? "b saw a's report" : "b blind");
+        expect(t.depth).toBe(3);
+        handoff(t, "c");
+        return result({ text: "b report" });
+      };
+      behave.c = () => result({ text: "c finished the line" });
+      const { task } = root("top");
+      await drain();
+      expect(outcomes).toEqual([
+        "a delegate refused",
+        "a handed off",
+        "b saw a's report",
+        "mid got c",
+      ]);
+      expect(getTask(db, task.id)?.status).toBe("done");
+      // mid resumed only once, after the whole line finished.
+      expect(calls.filter((c) => c.agent === "mid")).toHaveLength(2);
+    });
+
+    it("from a root task: each step reports to the owner and the last one finishes", async () => {
+      writeAgents(home, { a: { to: ["b"] }, b: { from: ["a"] } });
+      start();
+      behave.a = (_req, t) => {
+        handoff(t, "b", "Edit");
+        return result({ text: "script written" });
+      };
+      behave.b = () => result({ text: "video edited" });
+      const { thread, task } = root("a");
+      await drain();
+      const posted = listMessages(db, thread.id).map((m) => m.content);
+      expect(posted[0]).toMatch(/a handed over to b[\s\S]*script written/);
+      expect(posted[1]).toMatch(/^Done: Edit\n\nvideo edited/);
+      expect(getTask(db, task.id)?.status).toBe("done");
+    });
+
+    it("refuses cycles across steps, a second handoff, and handoff with open children", async () => {
+      writeAgents(home, {
+        a: { to: ["b", "c"] },
+        b: { to: ["a", "c"], from: ["a"] },
+        c: { from: ["a", "b"] },
+      });
+      start();
+      const out: string[] = [];
+      behave.a = (_req, t) => {
+        out.push(handoff(t, "b").ok ? "a>b" : "a>b refused");
+        const again = handoff(t, "c");
+        out.push(again.ok ? "a>c" : `second: ${again.reason}`);
+        return result({ text: "a" });
+      };
+      behave.b = (req, t) => {
+        if (req.prompt.includes("Results from delegated tasks")) return result({ text: "b" });
+        const back = handoff(t, "a");
+        out.push(back.ok ? "b>a" : `back: ${back.reason}`);
+        orch.delegate(
+          { from: "task", taskId: t.id },
+          { agent: "c", title: "c", instructions: "x" },
+        );
+        const busy = handoff(t, "c");
+        out.push(busy.ok ? "b>c" : `busy: ${busy.reason}`);
+        return result({ text: "b" });
+      };
+      root("a");
+      await drain();
+      expect(out[0]).toBe("a>b");
+      expect(out[1]).toMatch(/^second: .*one handoff/);
+      expect(out[2]).toMatch(/^back: cycle/);
+      expect(out[3]).toMatch(/^busy: .*unfinished/);
+    });
+
+    it("respects delegation switches and the hop limit", async () => {
+      const ring = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7"];
+      writeAgents(
+        home,
+        Object.fromEntries(
+          ring.map((id, i) => [id, { to: ring.slice(i + 1), from: ring.slice(0, i) }]),
+        ),
+      );
+      start();
+      const out: string[] = [];
+      for (const [i, id] of ring.entries()) {
+        behave[id] = (_req, t) => {
+          const next = ring[i + 1];
+          if (next) {
+            const h = handoff(t, next);
+            out.push(h.ok ? `${id}>${next}` : `${id} refused: ${h.reason}`);
+          }
+          return result({ text: id });
+        };
+      }
+      root("s0");
+      await drain(40);
+      expect(out.filter((o) => !o.includes("refused"))).toHaveLength(6);
+      expect(out.at(-1)).toMatch(/s6 refused: .*hop limit/);
+    });
+
+    it("the boss and agents without delegation targets get no handoff tool", async () => {
+      writeAgents(home, { solo: {} });
+      start();
+      const { task } = root("solo");
+      const r = handoff(task, "boss");
+      expect(r.ok).toBe(false);
+    });
+  });
 });

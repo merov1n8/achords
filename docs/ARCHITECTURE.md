@@ -71,6 +71,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - The target runs with its own manifest, never the caller's; callers cannot pass tools, paths, models or secrets. Sensitivity only tightens (`local-only` propagates to every descendant), budget only shrinks.
 - Policy: `delegation.can_delegate_to` (caller) and `delegation.accepts_from` (target), both deny by default; the boss may delegate to all.
 - Guards: max depth 3, no cycles (A→B→A), fan-out limit, one budget per root task shared across the chain.
+- Handoff (ADR-0055): `handoff` passes the work on as a tail call. The caller's run ends; the successor is its sibling (same parent and depth) and gets the caller's report, and its result goes where the caller's would have gone. Pipelines (script → voice → edit → post) so do not use up depth. Guards: same delegation switches, one per run and none with open children, no earlier step of the line as target, at most 6 handoffs in a row, at most 20 delegated and handed-off tasks per root.
 - Async: the parent waits; when children finish it is re-queued with their results. The owner sees only the final result or a question; `ask_owner` from any depth goes to the original thread and the reply is routed back to the asking task.
 - Agent rooms (ADR-0032): `open_room` starts a bounded discussion (≤ 3 participants the opener may delegate to, ≤ 3 rounds) run as sequential read-only child turns; the opener resumes with the transcript and its result closes the room as the decision. Rooms are hidden threads (kind `room`): not in chats, not on Telegram; readable in the web audit view.
 - Ephemeral workers: `spawn_worker` with a subset of the caller's permissions (max 3 per task, depth 1, shared budget); a new persistent agent needs owner approval (`propose_agent`).
@@ -183,7 +184,7 @@ Default layout, configurable:
 - Credentials never reach the agent: the per-run config starts a launcher with a one-time ticket, the launcher fetches the environment from `/api/agent/mcp-env` once and starts the real server. Resolution is audited per agent and integration. Agents with a shell get no integration that carries secrets (same-user processes can read each other's environment).
 - Default catalog: Google Ads, Analytics, Search Console, AdMob, Google Cloud / Firebase, Meta (Facebook, Instagram), TikTok, Reddit, App Store Connect, Google Play Console, WordPress, ElevenLabs, fal.ai, Meshy, Gmail/Calendar/Drive, Unity MCP.
 - The hub also exposes its own MCP server (tasks, threads, memory search) so external clients can drive it, subject to the policy engine.
-- Agent runs get the hub's MCP server (and only that, plus catalog servers their manifest allows) with a per-run capability token: `delegate`, `ask_owner`, `spawn_worker`, `propose_agent`, `skill_read`, `skill_fetch`, `skill_propose` (ADR-0049), later `report_progress` (ADR-0029). The caller's identity comes from the token, never from tool arguments.
+- Agent runs get the hub's MCP server (and only that, plus catalog servers their manifest allows) with a per-run capability token: `delegate`, `handoff` (ADR-0055), `ask_owner`, `spawn_worker`, `propose_agent`, `skill_read`, `skill_fetch`, `skill_propose` (ADR-0049), later `report_progress` (ADR-0029). The caller's identity comes from the token, never from tool arguments.
 
 ### 4.15 Secrets vault
 

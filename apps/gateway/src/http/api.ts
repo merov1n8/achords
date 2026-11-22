@@ -126,6 +126,7 @@ export interface ApiDeps {
     Orchestrator,
     | "handleMessage"
     | "delegate"
+    | "handoff"
     | "askOwner"
     | "spawnWorker"
     | "proposeAgent"
@@ -1837,6 +1838,7 @@ export function createApiHandler(deps: ApiDeps) {
         }
         const AGENT_TOOLS = [
           "delegate",
+          "handoff",
           "ask_owner",
           "spawn_worker",
           "propose_agent",
@@ -1853,8 +1855,8 @@ export function createApiHandler(deps: ApiDeps) {
         const from = { from: "task" as const, taskId: caller.taskId };
         const o = deps.orchestrator;
         const out =
-          tool === "delegate"
-            ? o.delegate(from, {
+          tool === "delegate" || tool === "handoff"
+            ? o[tool](from, {
                 agent: str(b.agent, "agent", 64),
                 title: str(b.title, "title", 200),
                 instructions: str(b.instructions, "instructions", 20_000),

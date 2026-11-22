@@ -93,6 +93,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Handoff between agents (ADR-0055): when its part is done, an agent can pass the work to the
+  next one instead of delegating it. The next agent continues at the same level with the report,
+  so pipelines (script, voice, edit, post) no longer use up the three delegation levels. Limits:
+  one handoff per run, no handing back to an earlier step, at most 6 in a row, at most 20 tasks
+  per piece of work.
 - Projects can list their git repositories (account type "repository", several rows): agents of
   the project are told to work only in these and to clone them into the project folder.
 - Projects can be deleted (Projects → Edit → Delete, with a confirmation). Nothing is erased:

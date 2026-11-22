@@ -40,7 +40,7 @@ describe("HTTP API", () => {
   let base: string;
   let host: string;
   const handled: { threadId: string; text: string }[] = [];
-  const delegations: { from: unknown; request: unknown }[] = [];
+  const delegations: { from: unknown; request: unknown; handoff?: boolean }[] = [];
   const questions: { from: unknown; question: string }[] = [];
   const workerCalls: { from: unknown; request: unknown }[] = [];
   const decisions: { id: string; approve: boolean }[] = [];
@@ -178,6 +178,10 @@ describe("HTTP API", () => {
             return taskId === "started"
               ? { ok: false, reason: "This card has already started." }
               : { ok: true };
+          },
+          handoff: (from, request) => {
+            delegations.push({ from, request, handoff: true });
+            return { ok: true };
           },
           delegate: (from, request) => {
             delegations.push({ from, request });
@@ -855,6 +859,29 @@ describe("HTTP API", () => {
     expect(
       (await post("/api/agent/delegate", { agent: "a", title: "b", instructions: "c" })).status,
     ).toBe(403);
+    expect(
+      (await post("/api/agent/handoff", { agent: "a", title: "b", instructions: "c" })).status,
+    ).toBe(403);
+    const next = tokens.issue("task-10", "writer", ["handoff"]);
+    delegations.length = 0;
+    const handed = await fetch(`${base}/api/agent/handoff`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${next.token}` },
+      body: JSON.stringify({
+        agent: "social",
+        title: "Post",
+        instructions: "post it",
+        taskId: "x",
+      }),
+    });
+    expect(await handed.json()).toEqual({ ok: true });
+    expect(delegations).toEqual([
+      {
+        from: { from: "task", taskId: "task-10" },
+        request: { agent: "social", title: "Post", instructions: "post it" },
+        handoff: true,
+      },
+    ]);
   });
 
   it("agent endpoint: request_access reaches the orchestrator only when granted", async () => {

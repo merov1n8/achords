@@ -46,6 +46,7 @@ describe("static web UI", () => {
         orchestrator: {
           handleMessage: async () => "answer",
           delegate: () => ({ ok: false, reason: "n/a" }),
+          handoff: () => ({ ok: false, reason: "n/a" }),
           askOwner: () => ({ ok: false, reason: "n/a" }),
           requestAccess: () => ({ ok: false, reason: "n/a" }),
           requestPublish: () => ({ ok: false, reason: "n/a" }),

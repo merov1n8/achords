@@ -31,6 +31,20 @@ const TOOLS = [
     done: "Delegated as task {taskId}. End your turn now; you will be resumed with the result.",
   },
   {
+    name: "handoff",
+    description:
+      "Pass the work on when your part is done and the next step belongs to another agent: it continues with your report and its result goes where yours would have gone. Your run ends; you are not resumed. Use delegate instead when you need the result back. Only agents your manifest allows; one per run.",
+    input: z.object({
+      agent: text.describe("Target agent id"),
+      title: text.describe("Short title of the next step"),
+      instructions: text.describe(
+        "What the next agent should do; your final answer is passed on as your report",
+      ),
+    }),
+    endpoint: "/api/agent/handoff",
+    done: "Handed off. Write your report as your final answer and end your turn now.",
+  },
+  {
     name: "ask_owner",
     description:
       "Ask the owner a question you cannot answer yourself (missing decision or information). It reaches them in the original conversation; your task resumes with their answer.",
