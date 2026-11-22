@@ -294,6 +294,28 @@ describe("telegram channel", () => {
     ]);
   });
 
+  it("sends a long agent message in parts at line breaks, buttons on the last part only", async () => {
+    await pairOwner();
+    tg.sent.length = 0;
+    const threadId = getSetting(db, "telegram.thread_id") as string;
+    const para = `${"x".repeat(1500)}\n`;
+    const content = `${para.repeat(6)}end`;
+    appendMessage(db, {
+      threadId,
+      role: "agent",
+      author: "dev",
+      channel: "system",
+      content,
+      actions: [{ label: "OK", data: "proposal:approve:abc" }],
+    });
+    await channel.deliver();
+    expect(tg.sent.length).toBeGreaterThan(1);
+    for (const s of tg.sent) expect(s.text.length).toBeLessThanOrEqual(4000);
+    expect(tg.sent.map((s) => s.text).join("\n")).toBe(content);
+    expect(tg.sent.slice(0, -1).every((s) => !s.reply_markup)).toBe(true);
+    expect(tg.sent.at(-1)?.reply_markup).toBeDefined();
+  });
+
   it("delivers message actions as buttons and acts on the owner's press only", async () => {
     await pairOwner();
     tg.sent.length = 0;

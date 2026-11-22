@@ -108,6 +108,7 @@ const GIT_REPO =
 const REMOTE_HOST_KEY = "web.remote_host";
 const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/;
 const BODY_LIMIT = 64 * 1024;
+const MESSAGE_LIMIT = 1024 * 1024;
 // About 10 minutes of Opus audio, like the Telegram voice limit.
 const AUDIO_LIMIT = 10 * 1024 * 1024;
 // Tools the claude CLI knows; an agent gets none unless the owner ticks it.
@@ -462,10 +463,11 @@ export function createApiHandler(deps: ApiDeps) {
     [
       "POST",
       /^\/api\/threads\/([\w-]+)\/messages$/,
-      async ({ res, params, body }) => {
+      async ({ req, res, params }) => {
         const id = params[0] as string;
         if (!getThread(db, id)) throw new HttpError(404, "no such thread");
-        const text = str((await body()).text, "text");
+        // The owner may paste a whole document; it reaches the agents in full.
+        const text = str((await readJson(req, MESSAGE_LIMIT)).text, "text", MESSAGE_LIMIT);
         // The boss may take a while; the reply appears in the thread when ready.
         deps.orchestrator
           .handleMessage(id, text, "web")
@@ -782,12 +784,12 @@ export function createApiHandler(deps: ApiDeps) {
     [
       "POST",
       /^\/api\/tasks$/,
-      async ({ res, body }) => {
-        const b = await body();
+      async ({ req, res }) => {
+        const b = await readJson(req, MESSAGE_LIMIT);
         if (b.start !== undefined && typeof b.start !== "boolean") {
           throw new HttpError(400, "start must be true or false");
         }
-        const description = optStr(b.description, "description", 20_000);
+        const description = optStr(b.description, "description", MESSAGE_LIMIT);
         const agent = optStr(b.agent, "agent", 64);
         const project = optStr(b.project, "project", 64);
         const column = optStr(b.column, "column", 32);
@@ -831,8 +833,8 @@ export function createApiHandler(deps: ApiDeps) {
     [
       "PATCH",
       /^\/api\/tasks\/([\w-]{1,64})$/,
-      async ({ params, body }) => {
-        const b = await body();
+      async ({ req, params }) => {
+        const b = await readJson(req, MESSAGE_LIMIT);
         const patch = {
           ...(b.title !== undefined ? { title: str(b.title, "title", 200) } : {}),
           ...(b.description !== undefined
@@ -840,7 +842,7 @@ export function createApiHandler(deps: ApiDeps) {
                 description:
                   b.description === null || b.description === ""
                     ? null
-                    : str(b.description, "description", 20_000),
+                    : str(b.description, "description", MESSAGE_LIMIT),
               }
             : {}),
         };

@@ -30,6 +30,30 @@ const CURSOR = "telegram.delivered_seq";
 const MAX_TEXT = 4000; // Bot API limit is 4096
 const MAX_VOICE_S = 600;
 
+/** Cuts text into parts of at most `max` chars, at a paragraph or line break when there is one. */
+export function splitText(text: string, max: number): string[] {
+  const parts: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    const window = rest.slice(0, max + 1);
+    let cut = window.lastIndexOf("\n\n");
+    let gap = 2;
+    if (cut < max / 2) {
+      cut = window.lastIndexOf("\n");
+      gap = 1;
+    }
+    if (cut < max / 2) {
+      parts.push(rest.slice(0, max));
+      rest = rest.slice(max);
+      continue;
+    }
+    parts.push(rest.slice(0, cut));
+    rest = rest.slice(cut + gap);
+  }
+  parts.push(rest);
+  return parts;
+}
+
 export interface TelegramDeps {
   db: Db;
   paths: HomePaths;
@@ -92,18 +116,27 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     return json.result as T;
   }
 
-  const send = (chatId: number, text: string, actions?: { label: string; data: string }[] | null) =>
-    call("sendMessage", {
-      chat_id: chatId,
-      text: text.slice(0, MAX_TEXT),
-      ...(actions?.length
-        ? {
-            reply_markup: {
-              inline_keyboard: [actions.map((a) => ({ text: a.label, callback_data: a.data }))],
-            },
-          }
-        : {}),
-    });
+  // Long messages go out in parts; buttons belong to the last part.
+  const send = async (
+    chatId: number,
+    text: string,
+    actions?: { label: string; data: string }[] | null,
+  ) => {
+    const parts = splitText(text, MAX_TEXT);
+    for (const [i, part] of parts.entries()) {
+      await call("sendMessage", {
+        chat_id: chatId,
+        text: part,
+        ...(actions?.length && i === parts.length - 1
+          ? {
+              reply_markup: {
+                inline_keyboard: [actions.map((a) => ({ text: a.label, callback_data: a.data }))],
+              },
+            }
+          : {}),
+      });
+    }
+  };
 
   /** Runs a button action; same effect as the matching text command. */
   const runAction = (data: string): string => deps.orchestrator.runAction(data).message;

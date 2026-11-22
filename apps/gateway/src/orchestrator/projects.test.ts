@@ -1,7 +1,14 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendMessage, createThread, getTask, openCoreDatabase, type Task } from "@achords/core";
+import {
+  appendMessage,
+  createThread,
+  getTask,
+  listMessages,
+  openCoreDatabase,
+  type Task,
+} from "@achords/core";
 import type { Memory } from "@achords/memory";
 import { createProject, updateProject } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
@@ -163,6 +170,45 @@ describe("projects in runs (ADR-0031)", () => {
     expect(prompt.indexOf("Conversation in this chat so far")).toBeLessThan(
       prompt.indexOf("# Task: Answer"),
     );
+  });
+
+  it("long chat messages reach the agent whole; past the total budget the oldest drop out", async () => {
+    const thread = createThread(db, { project: "acme" });
+    const say = (role: "user" | "agent", content: string) =>
+      appendMessage(db, {
+        threadId: thread.id,
+        role,
+        ...(role === "agent" ? { author: "web-dev" } : {}),
+        channel: "web",
+        content,
+      });
+    say("user", `OLDEST ${"o".repeat(30_000)}`);
+    say("user", `PASTED ${"p".repeat(25_000)} END-OF-PASTE`);
+    say("agent", `REPLY ${"r".repeat(9_000)} END-OF-REPLY`);
+    const r = orch.delegate(
+      { from: "boss", threadId: thread.id },
+      { agent: "web-dev", title: "Answer", instructions: "Go on." },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    await drain();
+    const prompt = calls[0]?.req.prompt ?? "";
+    expect(prompt).toContain("END-OF-PASTE");
+    expect(prompt).toContain("END-OF-REPLY");
+    expect(prompt).not.toContain("OLDEST");
+  });
+
+  it("posts a long agent reply to the chat in full", async () => {
+    const thread = createThread(db, { project: "acme" });
+    const long = `${"a".repeat(9_000)} END`;
+    behave = () => result({ text: long });
+    const r = orch.delegate(
+      { from: "boss", threadId: thread.id },
+      { agent: "web-dev", title: "Write", instructions: "Write a lot." },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    await drain();
+    const posted = listMessages(db, thread.id).map((m) => m.content);
+    expect(posted.some((c) => c.includes(long))).toBe(true);
   });
 
   it("lists the project's git repositories as the only ones to work in", async () => {

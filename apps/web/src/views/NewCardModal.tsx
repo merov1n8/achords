@@ -106,7 +106,6 @@ export function NewCardModal(props: {
           <textarea
             class="input"
             rows={4}
-            maxLength={20000}
             value={f.description}
             onInput={(e) => setF({ ...f, description: e.currentTarget.value })}
           />

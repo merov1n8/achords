@@ -9,7 +9,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - Agents asked again what the owner had already answered: an agent working for the owner (a
   card, @agent, or work handed over by the boss) only saw its one instruction. It now also sees
-  the chat so far (last messages, shortened), like the boss.
+  the chat so far (last messages), like the boss.
+- Long texts were cut: agent replies stopped at 4000 characters in the chat (no mark of the cut),
+  the chat context an agent saw kept only the first 3000 characters of each message, and the web
+  chat refused messages over 10,000 characters (cards: 20,000). Replies now show in full on the
+  web and arrive in several parts on Telegram; agents see chat messages whole (oldest drop out
+  past about 60,000 characters in total); a message or card description may be up to 1 MB.
 - Forms in modals (e.g. Projects → Edit) closed when a text selection started in a field and the
   mouse was released outside the modal; only a real click on the backdrop closes them now.
 - Pinned chats show the pin icon of the app instead of an emoji.

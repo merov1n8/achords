@@ -138,10 +138,11 @@ const LEASE_MS = 10 * 60_000;
 const BOSS_TIMEOUT_MS = 3 * 60_000;
 const RUN_TIMEOUT_MS = 30 * 60_000;
 const HISTORY = 20;
-/** Chat context for an agent working for the owner: last messages, each cut to a length. */
+/** Chat context for an agent working for the owner: last messages, whole, within a total. */
 const CHAT_CONTEXT = 16;
-const CHAT_CHARS = 3000;
-const MAX_POST = 4000;
+const CHAT_TOTAL = 60_000;
+/** Only a guard against runaway output; real messages are posted whole. */
+const MAX_POST = 100_000;
 const MEMORY_HITS = 5;
 const DEFER_MS = 60_000;
 const BUDGET_DEFER_MS = 30 * 60_000;
@@ -2143,18 +2144,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // Work for the owner (a card, @agent, or the boss handing it over) continues a chat: the
       // agent sees that chat so far, so a follow-up does not lose what was asked and answered.
       // Delegated steps get their caller's instructions instead.
-      const chat =
-        !task.parentId && task.threadId && !task.roomId
-          ? listMessages(db, task.threadId)
-              .filter((m) => m.visibility === "normal" && m.createdAt <= task.createdAt)
-              .slice(-CHAT_CONTEXT)
-              .map((m) => {
-                const who = m.role === "user" ? "owner" : (m.author ?? m.role);
-                const text =
-                  m.content.length > CHAT_CHARS ? `${m.content.slice(0, CHAT_CHARS)} …` : m.content;
-                return `${who}: ${text}`;
-              })
-          : [];
+      // Messages stay whole (a pasted document must arrive complete); past the total the
+      // oldest drop out, but the latest one is always there.
+      const chat: string[] = [];
+      if (!task.parentId && task.threadId && !task.roomId) {
+        let total = 0;
+        const recent = listMessages(db, task.threadId)
+          .filter((m) => m.visibility === "normal" && m.createdAt <= task.createdAt)
+          .slice(-CHAT_CONTEXT)
+          .reverse();
+        for (const m of recent) {
+          const line = `${m.role === "user" ? "owner" : (m.author ?? m.role)}: ${m.content}`;
+          if (chat.length && total + line.length > CHAT_TOTAL) break;
+          total += line.length;
+          chat.unshift(line);
+        }
+      }
       const chatBlock = chat.length
         ? `Conversation in this chat so far (latest last; the task below is what to do now):\n${chat.join("\n\n")}\n\n`
         : "";

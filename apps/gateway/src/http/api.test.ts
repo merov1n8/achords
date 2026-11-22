@@ -430,6 +430,16 @@ describe("HTTP API", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(handled).toEqual([{ threadId: t.id, text: "szia" }]);
 
+    // A pasted document (well over the usual form limits) arrives whole.
+    const doc = `# Spec\n${"lorem ipsum ".repeat(20_000)}END`;
+    const big = await call(`/api/threads/${t.id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ text: doc }),
+    });
+    expect(big.status).toBe(202);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(handled.at(-1)?.text).toBe(doc);
+
     expect(
       (await call("/api/threads/nope/messages", { method: "POST", body: '{"text":"x"}' })).status,
     ).toBe(404);
@@ -978,7 +988,6 @@ describe("HTTP API", () => {
     for (const [body, error] of [
       [{}, /title/],
       [{ title: "x".repeat(201) }, /title/],
-      [{ title: "x", description: "d".repeat(20_001) }, /description/],
       [{ title: "x", agent: 5 }, /agent/],
       [{ title: "x", start: "yes" }, /start/],
       [{ title: "x", agent: "nobody" }, /^There is no agent called nobody\.$/],
@@ -995,6 +1004,17 @@ describe("HTTP API", () => {
       body: '{"title":"x"}',
     });
     expect(noCsrf.status).toBe(403);
+    // A pasted document as the card's description is accepted whole.
+    const long = await call("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({ title: "Spec", description: "d".repeat(200_000) }),
+    });
+    expect(long.status).toBe(201);
+    const huge = await call("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({ title: "x", description: "d".repeat(1024 * 1024 + 1) }),
+    });
+    expect(huge.status).toBe(413);
 
     const card = enqueue(db, { title: "later", parked: true });
     const start = await call(`/api/tasks/${card.id}/start`, {
