@@ -66,7 +66,8 @@ export const manifestSchema = z
       .strict()
       .default({ allow: [] }),
     // ADR-0051: with "*" in network.allow the run executes in an Apple container unless the
-    // owner sets false (own risk). Absent = true with "*", false otherwise.
+    // owner sets false (own risk). Absent = true with "*", false otherwise. ADR-0055: an agent
+    // with a shell may be put in a container too (required next to keyed integrations).
     container: z.boolean().optional(),
     // Claude --effort (codex reasoning effort, capped at high); absent = the CLI's default.
     effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
@@ -98,9 +99,9 @@ export const manifestSchema = z
       .default({ can_delegate_to: [], accepts_from: [] }),
   })
   .strict()
-  .refine((m) => m.container === undefined || m.network.allow.includes("*"), {
+  .refine((m) => m.container === undefined || m.network.allow.includes("*") || m.shell, {
     path: ["container"],
-    message: 'only with "*" in network.allow (any website)',
+    message: 'only with "*" in network.allow (any website) or a shell',
   })
   .transform((m) => ({
     ...m,

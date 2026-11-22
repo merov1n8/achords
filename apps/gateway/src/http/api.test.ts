@@ -50,6 +50,21 @@ describe("HTTP API", () => {
   let synced = 0;
   const tokens = createRunTokens();
   const mcpTickets = createMcpTickets();
+  // ADR-0055: the relay route, against a fake host that knows one token for "fal".
+  const relayed: string[] = [];
+  const mcpHost = {
+    write: (token: string, id: string, line: string) => {
+      if (token !== "relay-ok" || id !== "fal") return false;
+      relayed.push(line);
+      return true;
+    },
+    stream: (token: string, id: string, res: import("node:http").ServerResponse) => {
+      if (token !== "relay-ok" || id !== "fal") return false;
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.end('{"id":1,"result":{}}\n');
+      return true;
+    },
+  };
   const logs: string[] = [];
   let agentsDir: string;
   let runDir: string;
@@ -202,6 +217,7 @@ describe("HTTP API", () => {
         },
         runTokens: tokens,
         mcpTickets,
+        mcpHost,
         agentsDir,
         projectsDir,
         home: runDir,
@@ -798,6 +814,28 @@ describe("HTTP API", () => {
     expect((await redeem(`Bearer ${ticket}`)).status).toBe(401);
     const run = tokens.issue("task-1", "web-dev", ["ask_owner"]);
     expect((await redeem(`Bearer ${run.token}`)).status).toBe(401);
+  });
+
+  it("relay route: only the run's own token for that integration reaches its server", async () => {
+    const at = (id: string, token: string, init: RequestInit = {}) =>
+      fetch(`${base}/api/agent/mcp/${id}`, {
+        ...init,
+        headers: { authorization: `Bearer ${token}` },
+      });
+    const line = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect((await at("fal", "relay-ok", { method: "POST", body: line })).status).toBe(202);
+    expect(relayed).toEqual([line]);
+    const stream = await at("fal", "relay-ok");
+    expect(await stream.text()).toBe('{"id":1,"result":{}}\n');
+    expect((await at("fal", "forged", { method: "POST", body: line })).status).toBe(401);
+    expect((await at("elevenlabs", "relay-ok")).status).toBe(401);
+    // A run token of the hub tools is no relay token.
+    const run = tokens.issue("task-1", "web-dev", ["delegate"]);
+    expect((await at("fal", run.token)).status).toBe(401);
+    // One message per request: a second line could slip past the launcher's checks.
+    expect((await at("fal", "relay-ok", { method: "POST", body: `${line}\n${line}` })).status).toBe(
+      400,
+    );
   });
 
   it("agent endpoint: caller identity comes only from the run token (no cookie, no CSRF)", async () => {

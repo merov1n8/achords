@@ -34,7 +34,8 @@ import { createApps } from "./apps.ts";
 import { containerHost } from "./container.ts";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
-import { createMcpTickets, createRunTokens } from "./mcp/tokens.ts";
+import { createMcpHost } from "./mcp/host.ts";
+import { createMcpTickets, createRunTokens, type McpLaunch } from "./mcp/tokens.ts";
 import { runMonitors } from "./monitors.ts";
 import { createOrchestrator } from "./orchestrator/orchestrator.ts";
 import { seedAgents, seedSchedules, seedSkills } from "./orchestrator/seed.ts";
@@ -59,6 +60,7 @@ const SEED_SCHEDULES = new URL("../../../seed/schedules/", import.meta.url).path
 const SEED_SKILLS = new URL("../../../seed/skills/", import.meta.url).pathname;
 const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
+const MCP_RELAY = new URL("./mcp/relay.ts", import.meta.url).pathname;
 const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
 const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
 const SEED_CONTAINER = new URL("../../../seed/container/", import.meta.url).pathname;
@@ -124,6 +126,21 @@ export function runGateway(home: string): Promise<number> {
   const runTokens = createRunTokens();
   const hub = { url: "", tokens: runTokens, serverEntry: HUB_MCP_SERVER };
   const mcpTickets = createMcpTickets();
+  // ADR-0055: integration servers with secrets run here, as the launcher with a fresh ticket.
+  const mcpHost = createMcpHost({
+    processFor: (launch: McpLaunch) => {
+      const { ticket, revoke } = mcpTickets.issue(launch);
+      return {
+        spec: {
+          command: process.execPath,
+          args: ["--disable-warning=ExperimentalWarning", MCP_LAUNCHER],
+          env: { ACHORDS_HUB_URL: hub.url, ACHORDS_MCP_TICKET: ticket },
+        },
+        release: revoke,
+      };
+    },
+    log,
+  });
 
   // Quota warnings, monitors etc.: the owner's Telegram thread (web shows it too), else the
   // latest chat. `telegram` is assigned below, before the first tick.
@@ -293,6 +310,8 @@ export function runGateway(home: string): Promise<number> {
       catalog: () => loadCatalog(SEED_CATALOG, join(home, "catalog")),
       tickets: mcpTickets,
       launcherEntry: MCP_LAUNCHER,
+      host: mcpHost,
+      relayEntry: MCP_RELAY,
       builtins: BUILTIN_MCP,
       resolveSecret: (ref, actor) => getVault().resolveRef(ref, actor),
       // Owner-approved publishing: the same launcher, with a fresh one-time ticket.
@@ -476,6 +495,7 @@ export function runGateway(home: string): Promise<number> {
         vault: getVault,
         runTokens,
         mcpTickets,
+        mcpHost,
         agentsDir: join(home, "agents"),
         projectsDir: paths.projectsDir,
         home,

@@ -228,6 +228,14 @@ export interface OrchestratorDeps {
     catalog: () => Catalog;
     tickets: McpTickets;
     launcherEntry: string;
+    /**
+     * ADR-0055: integrations with secrets run on the gateway's side; the run starts `relayEntry`
+     * with a token for that one server. Without a host they start through the launcher as before.
+     */
+    host?:
+      | { register(id: string, launch: McpLaunch): { token: string; revoke: () => void } }
+      | undefined;
+    relayEntry?: string;
     /** Entry files of the MCP servers shipped with achords, by catalog `builtin` name. */
     builtins: Record<string, string>;
     resolveSecret: (ref: string, actor: string) => string;
@@ -2009,6 +2017,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // Integration servers of this run, environments resolved (secrets included, in memory only).
     let launches: {
       id: string;
+      /** Carries secrets: its server runs on the gateway's side (ADR-0055). */
+      keyed: boolean;
       launch: McpLaunch;
       tools: string[];
       publish?: { mode: "review" | "auto"; tools: string[] };
@@ -2153,6 +2163,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           const mode = chosen === "auto" && openWeb ? "review" : chosen;
           return {
             id: entry.id,
+            keyed: credentials,
             // Client accounts carry third-party text (comments, queries, posts): marked as data.
             launch: credentials ? { ...launch, untrusted: entry.name } : launch,
             tools: [
@@ -2361,12 +2372,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       for (const l of launches) {
         // The launcher reports write calls with a run token that only grants publish:<id>.
         let launch = l.launch;
-        // Builtin servers run on the gateway's Node on the host, on the image's in the VM.
-        if (box && launch.command === process.execPath) launch = { ...launch, command: "node" };
+        const host = l.keyed ? deps.integrations.host : undefined;
+        // Builtin servers run on the gateway's Node on the host, on the image's in the VM; a
+        // server on the gateway's side always on the host.
+        if (box && !host && launch.command === process.execPath) {
+          launch = { ...launch, command: "node" };
+        }
         if (l.publish) {
           const pub = deps.hub.tokens.issue(task.id, manifest.id, [`publish:${l.id}`]);
           revokers.push(pub.revoke);
           launch = { ...launch, publish: { integration: l.id, ...l.publish, token: pub.token } };
+        }
+        if (host && deps.integrations.relayEntry) {
+          // ADR-0055: the secret never enters this run; it talks to the server through a relay.
+          const { token, revoke } = host.register(l.id, launch);
+          revokers.push(revoke);
+          servers[l.id] = {
+            command: node,
+            args: ["--disable-warning=ExperimentalWarning", deps.integrations.relayEntry],
+            env: { ACHORDS_HUB_URL: hubUrl, ACHORDS_MCP_ID: l.id, ACHORDS_MCP_TOKEN: token },
+          };
+          granted.push(...l.tools);
+          continue;
         }
         // Only a ticket goes into the file; the launcher trades it for the environment once.
         const { ticket, revoke } = deps.integrations.tickets.issue(launch);

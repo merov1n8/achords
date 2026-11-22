@@ -214,7 +214,9 @@ function AgentForm({
         fs: { write: lines(f.write), read: lines(f.read) },
         ...(f.tools.includes("Bash") ? { shell: { allow: lines(f.shell) } } : {}),
         network: { allow: lines(f.network) },
-        ...(lines(f.network).includes("*") ? { container: f.container } : {}),
+        ...(lines(f.network).includes("*") || f.tools.includes("Bash")
+          ? { container: f.container }
+          : {}),
         delegation: { can_delegate_to: f.delegatesTo, accepts_from: f.acceptsFrom },
         ...(Number(f.budget) > 0 ? { budget: { per_run_usd: Number(f.budget) } } : {}),
       };
@@ -405,7 +407,7 @@ function AgentForm({
         {f.tools.includes("Bash") &&
           area("shell", t("agents.form.shell"), t("agents.form.shellHelp"))}
         {area("network", t("agents.form.network"), t("agents.form.networkHelp"))}
-        {lines(f.network).includes("*") && (
+        {(lines(f.network).includes("*") || f.tools.includes("Bash")) && (
           <div class="field">
             <label class="row">
               <input
@@ -415,8 +417,16 @@ function AgentForm({
               />
               {t("agents.form.container")}
             </label>
-            <span class="muted small">{t("agents.form.containerHelp")}</span>
-            {!f.container && <p class="error">{t("agents.form.containerOff")}</p>}
+            <span class="muted small">
+              {t(
+                lines(f.network).includes("*")
+                  ? "agents.form.containerHelp"
+                  : "agents.form.containerShellHelp",
+              )}
+            </span>
+            {!f.container && lines(f.network).includes("*") && (
+              <p class="error">{t("agents.form.containerOff")}</p>
+            )}
           </div>
         )}
         <div class="field">

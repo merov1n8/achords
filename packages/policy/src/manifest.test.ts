@@ -43,9 +43,13 @@ describe("parseManifest", () => {
     expect(parseManifest(`${base}network: {allow: ["*"]}\ncontainer: false\n`, "x").container).toBe(
       false,
     );
-    // Only meaningful with "*": anything else is a mistake that must not pass silently.
+    // Only meaningful with "*" or a shell: anything else is a mistake that must not pass silently.
     expect(() => parseManifest(`${base}container: true\n`, "x")).toThrow(/container/);
     expect(() => parseManifest(`${base}container: false\n`, "x")).toThrow(/container/);
+    // ADR-0055: a shell may run in a container too (needed next to keyed integrations).
+    const shell = `${base}shell: {allow: [ffmpeg]}\n`;
+    expect(parseManifest(shell, "x").container).toBe(false);
+    expect(parseManifest(`${shell}container: true\n`, "x").container).toBe(true);
   });
 
   it("delegation is deny by default and accepts explicit lists", () => {

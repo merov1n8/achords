@@ -57,6 +57,8 @@ describe("integrations in runs (ADR-0034)", () => {
   /** ADR-0054: what the app fake answers, and the apps it was asked for (name, working folder). */
   let appResult: Ensured;
   let ensured: [string, string][];
+  /** ADR-0055: the gateway-side host fake; undefined = servers start through the launcher. */
+  let hosted: { id: string; launch: McpLaunch; revoked: boolean }[] | undefined;
 
   const agent = (id: string, extra: string, tools = "[Read]") => {
     mkdirSync(join(home, "agents", id), { recursive: true });
@@ -106,6 +108,7 @@ describe("integrations in runs (ADR-0034)", () => {
     vaultIds = undefined;
     appResult = { ok: true, opened: false };
     ensured = [];
+    hosted = undefined;
     runTokens = createRunTokens();
     tickets = createMcpTickets();
     const p: ModelProvider = {
@@ -145,6 +148,19 @@ describe("integrations in runs (ADR-0034)", () => {
         catalog: () => loadCatalog(join(home, "no-seed"), catalogDir),
         tickets,
         launcherEntry: "/x/launch.ts",
+        relayEntry: "/x/relay.ts",
+        get host() {
+          const list = hosted;
+          return list
+            ? {
+                register: (id: string, launch: McpLaunch) => {
+                  const h = { id, launch, revoked: false };
+                  list.push(h);
+                  return { token: `relay-${id}`, revoke: () => (h.revoked = true) };
+                },
+              }
+            : undefined;
+        },
         builtins: { wordpress: "/x/wordpress.ts" },
         resolveSecret: (ref, actor) => {
           if (vaultIds && !vaultIds.has(ref.slice("vault:".length)))
@@ -298,6 +314,42 @@ describe("integrations in runs (ADR-0034)", () => {
       untrusted: "WordPress",
     });
     expect(resolved.map(([ref]) => ref).sort()).toEqual(["vault:google", "vault:wp-acme"]);
+  });
+
+  describe("servers with secrets on the gateway's side (ADR-0055)", () => {
+    it("the run gets a relay and a token; secret, ticket and launch stay with the gateway", async () => {
+      hosted = [];
+      const task = await give("marketer", "acme");
+      expect(task.status).toBe("done");
+      const config = seen[0]?.config ?? "";
+      expect(config).not.toContain(SECRET);
+      const wp = JSON.parse(config).mcpServers.wp;
+      expect(wp.args).toContain("/x/relay.ts");
+      expect(wp.env).toEqual({
+        ACHORDS_HUB_URL: "http://127.0.0.1:7420",
+        ACHORDS_MCP_ID: "wp",
+        ACHORDS_MCP_TOKEN: "relay-wp",
+      });
+      expect(hosted).toEqual([
+        {
+          id: "wp",
+          launch: expect.objectContaining({
+            env: expect.objectContaining({ WP_PASSWORD: SECRET }),
+          }),
+          revoked: true,
+        },
+      ]);
+      // Same tools as before: the launcher's rules run on the gateway's side now.
+      expect(seen[0]?.req.allowedTools).toContain("mcp__wp__create_post");
+    });
+
+    it("servers without secrets keep the launcher in the run", async () => {
+      hosted = [];
+      await give("artist");
+      const blender = JSON.parse(seen[0]?.config ?? "{}").mcpServers.blender;
+      expect(blender.args).toContain("/x/launch.ts");
+      expect(hosted).toEqual([]);
+    });
   });
 
   it("allows integrations without secrets next to a shell", async () => {

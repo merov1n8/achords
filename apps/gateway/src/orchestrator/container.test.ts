@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createThread, getTask, openCoreDatabase } from "@achords/core";
 import { runContainerPrefix } from "@achords/platform";
+import { loadCatalog } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Prepared } from "../container.ts";
-import { createRunTokens } from "../mcp/tokens.ts";
+import { createMcpTickets, createRunTokens, type McpLaunch } from "../mcp/tokens.ts";
 import { createOrchestrator, type OrchestratorDeps } from "./orchestrator.ts";
 
 const result = (): RunResult => ({
@@ -152,6 +153,53 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     expect(existsSync(shared)).toBe(false); // removed after the run
     expect(call?.req.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oauth-token-value" });
     expect(call?.req.appendSystemPrompt).toMatch(/isolated Linux container/);
+  });
+
+  it("a shell with keyed integrations runs in a container; the server stays on the host (ADR-0055)", async () => {
+    agent('mcp: [gen]\nshell: {allow: ["ffmpeg"]}\ncontainer: true');
+    const catalogDir = join(home, "catalog");
+    mkdirSync(catalogDir);
+    writeFileSync(
+      join(catalogDir, "gen.yaml"),
+      `id: gen\nname: Gen\nbuiltin: wordpress\nenv:\n  KEY: "vault:gen-key"\ntools:\n  read: [run]\n`,
+    );
+    const hosted: { id: string; launch: McpLaunch }[] = [];
+    const { orch, taskId } = start({
+      integrations: {
+        catalog: () => loadCatalog(join(home, "no-seed"), catalogDir),
+        tickets: createMcpTickets(),
+        launcherEntry: "/repo/launch.ts",
+        relayEntry: "/repo/relay.ts",
+        builtins: { wordpress: "/repo/wp.ts" },
+        resolveSecret: () => "sk-secret",
+        host: {
+          register: (id, launch) => {
+            hosted.push({ id, launch });
+            return { token: "relay-token", revoke: () => {} };
+          },
+        },
+      },
+    });
+    await orch.workOnce();
+    expect(getTask(db, taskId)?.error ?? "").toBe("");
+    const call = calls[0];
+    expect(call?.req.container).toBeDefined();
+    // In the VM: only the relay, on the image's Node, talking to the hub on the container network.
+    expect(call?.mcp?.gen).toEqual({
+      command: "node",
+      args: ["--disable-warning=ExperimentalWarning", "/repo/relay.ts"],
+      env: {
+        ACHORDS_HUB_URL: "http://192.168.64.1:7420",
+        ACHORDS_MCP_ID: "gen",
+        ACHORDS_MCP_TOKEN: "relay-token",
+      },
+    });
+    // On the host: the gateway's own Node runs the builtin server with the key.
+    expect(hosted[0]?.launch).toMatchObject({
+      command: process.execPath,
+      env: { KEY: "sk-secret" },
+    });
+    expect(JSON.stringify(call?.mcp)).not.toContain("sk-secret");
   });
 
   it("shares the run's skill folders read-only (ADR-0053), never another agent's", async () => {

@@ -91,6 +91,7 @@ import {
   writeSkill,
 } from "@achords/policy";
 import { createGoogleSignins, parseClientJson, type Vault } from "@achords/secrets";
+import type { McpHost } from "../mcp/host.ts";
 import type { McpTickets, RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import { fetchSkillSource } from "../orchestrator/skill-fetch.ts";
@@ -151,6 +152,8 @@ export interface ApiDeps {
   runTokens?: RunTokens;
   /** One-time tickets of integration MCP servers (ADR-0034), redeemed by the launcher. */
   mcpTickets?: McpTickets;
+  /** ADR-0055: integration servers with secrets, run on the gateway's side for agent runs. */
+  mcpHost?: Pick<McpHost, "write" | "stream">;
   /** Opened lazily: the master key is only fetched when the vault is actually used. */
   vault?: () => Vault;
   /** Exact Host header values accepted (DNS-rebinding protection). */
@@ -1370,7 +1373,7 @@ export function createApiHandler(deps: ApiDeps) {
           fs: m.fs,
           ...(m.shell ? { shell: m.shell } : {}),
           network: m.network,
-          ...(m.network.allow.includes("*") ? { container: m.container } : {}),
+          ...(m.network.allow.includes("*") || m.shell ? { container: m.container } : {}),
           delegation: m.delegation,
           ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
           ...(m.effort ? { effort: m.effort } : {}),
@@ -1766,6 +1769,26 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!launch) throw new HttpError(401, "invalid ticket");
         send(res, 200, launch);
+        return;
+      }
+      // ADR-0055: a run's relay to its integration server on the gateway's side. The relay's
+      // token is good for that one run and integration only.
+      const relay = /^\/api\/agent\/mcp\/([\w.-]{1,64})$/.exec(path);
+      if (relay && (method === "GET" || method === "POST")) {
+        const auth = req.headers.authorization ?? "";
+        const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const id = relay[1] as string;
+        if (!deps.mcpHost || !token) throw new HttpError(401, "invalid token");
+        if (method === "GET") {
+          if (!deps.mcpHost.stream(token, id, res)) throw new HttpError(401, "invalid token");
+          return;
+        }
+        // One JSON-RPC message per request (tool arguments may be a whole page).
+        const line = (await readBody(req, MESSAGE_LIMIT)).toString("utf8").trim();
+        if (!line || line.includes("\n"))
+          throw new HttpError(400, "one JSON-RPC message per request");
+        if (!deps.mcpHost.write(token, id, line)) throw new HttpError(401, "invalid token");
+        send(res, 202, { ok: true });
         return;
       }
       // Agent runs (not browsers): authenticated by their run token only; no cookie, no CSRF.

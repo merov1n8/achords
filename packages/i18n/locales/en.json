@@ -162,6 +162,7 @@
   "agents.form.networkHelp": "Allowed hosts, one per line. Empty = none. * = any website.",
   "agents.form.container": "Run in an Apple container",
   "agents.form.containerHelp": "With * the agent works in a small Linux virtual machine on this Mac: it sees only its own folders and nothing else of your computer.",
+  "agents.form.containerShellHelp": "The agent's shell runs in a small Linux virtual machine on this Mac and sees only its own folders. Needed to give an agent with a shell integrations that use keys (WordPress, fal.ai, ElevenLabs …). Apps on this Mac (Xcode, Unity) are not reachable from there.",
   "agents.form.containerOff": "Warning: without the container this agent reaches any website while running directly on your Mac, with your user's rights in its folders. A malicious page could steer it. Switch this off only if you accept that risk.",
   "agents.form.acceptsFrom": "Accepts work from",
   "agents.form.delegatesTo": "May delegate to",

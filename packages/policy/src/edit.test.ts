@@ -304,8 +304,13 @@ describe("updateAgent (web: edit with the same form as create)", () => {
     expect(readFileSync(path, "utf8")).toMatch(/container: true/);
     updateAgent(dir, "social", { ...fields, network: { allow: ["*"] }, container: false });
     expect(loadManifest(path).container).toBe(false);
-    // Without "*" the key goes, whatever the form sent.
+    // Without "*" or a shell the key goes, whatever the form sent.
     updateAgent(dir, "social", { ...fields, container: false });
+    expect(readFileSync(path, "utf8")).not.toMatch(/container/);
+    // ADR-0055: next to a shell it is written only when switched on (off is the default).
+    updateAgent(dir, "social", { ...fields, shell: { allow: ["ffmpeg"] }, container: true });
+    expect(loadManifest(path).container).toBe(true);
+    updateAgent(dir, "social", { ...fields, shell: { allow: ["ffmpeg"] }, container: false });
     expect(readFileSync(path, "utf8")).not.toMatch(/container/);
     createAgentFiles(dir, {
       id: "web",

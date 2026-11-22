@@ -85,11 +85,15 @@ describe("integration catalog (ADR-0034)", () => {
     const granted = grantedIntegrations(noShell, catalog);
     expect(granted.ok && granted.entries.map((e) => e.id)).toEqual(["wordpress"]);
 
-    // The fixture has a shell: WordPress carries a password, so it is refused.
+    // The fixture has a shell on the Mac: WordPress carries a password, so it is refused.
     expect(grantedIntegrations(parseManifest(WEB_DEV, "t"), catalog)).toEqual({
       ok: false,
-      reason: "integration wordpress uses credentials and agent web-dev has a shell",
+      reason:
+        "integration wordpress uses credentials and agent web-dev has a shell on this Mac; switch its Apple container on to give it both",
     });
+    // ADR-0055: in a container the shell cannot reach the gateway's servers, so both are fine.
+    const boxed = parseManifest(`${WEB_DEV}\ncontainer: true\n`, "t");
+    expect(grantedIntegrations(boxed, catalog).ok).toBe(true);
     // Blender has no secrets: fine with a shell.
     const blender = parseManifest(WEB_DEV.replace("mcp: [wordpress]", "mcp: [blender]"), "t");
     expect(grantedIntegrations(blender, catalog).ok).toBe(true);

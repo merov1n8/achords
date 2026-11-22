@@ -93,6 +93,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- An agent with a shell can now also use integrations that hold keys (WordPress, fal.ai,
+  ElevenLabs, Meshy, Google), if it runs in an Apple container (new checkbox next to the shell in
+  the agent form). The integration's server runs on Achords' side; the agent's run only gets a
+  relay and never sees the key (ADR-0055). On this Mac without a container it stays refused.
 - Handoff between agents (ADR-0055): when its part is done, an agent can pass the work to the
   next one instead of delegating it. The next agent continues at the same level with the report,
   so pipelines (script, voice, edit, post) no longer use up the three delegation levels. Limits:

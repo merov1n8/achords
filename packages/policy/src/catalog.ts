@@ -233,10 +233,11 @@ export function grantedIntegrations(
   for (const id of manifest.mcp) {
     const entry = catalog.get(id);
     if (!entry) return { ok: false, reason: `integration ${id} is not in the catalog` };
-    if (manifest.shell && secretRefs(entry).length) {
+    // ADR-0055: the server runs on the gateway's side; only a shell on this Mac could reach it.
+    if (manifest.shell && !manifest.container && secretRefs(entry).length) {
       return {
         ok: false,
-        reason: `integration ${id} uses credentials and agent ${manifest.id} has a shell`,
+        reason: `integration ${id} uses credentials and agent ${manifest.id} has a shell on this Mac; switch its Apple container on to give it both`,
       };
     }
     entries.push(entry);
