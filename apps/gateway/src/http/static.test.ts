@@ -49,6 +49,7 @@ describe("static web UI", () => {
           handoff: () => ({ ok: false, reason: "n/a" }),
           askOwner: () => ({ ok: false, reason: "n/a" }),
           requestAccess: () => ({ ok: false, reason: "n/a" }),
+          requestCommand: () => ({ ok: false, reason: "n/a" }),
           requestPublish: () => ({ ok: false, reason: "n/a" }),
           logPublish: () => ({ ok: false, reason: "n/a" }),
           testIntegration: async () => ({ ok: false, text: "n/a" }),

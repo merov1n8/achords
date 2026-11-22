@@ -155,6 +155,10 @@ describe("HTTP API", () => {
             questions.push({ from, question: `access: ${reason}` });
             return { ok: true };
           },
+          requestCommand: (from, request) => {
+            questions.push({ from, question: `command: ${request.command} (${request.reason})` });
+            return { ok: true };
+          },
           requestPublish: (from, request) => {
             questions.push({ from, question: `publish: ${JSON.stringify(request)}` });
             return { ok: true, text: "sent" };
@@ -936,6 +940,22 @@ describe("HTTP API", () => {
       question: "access: Blender effect from a video",
     });
     expect((await post(tokens.issue("task-4", "artist", ["ask_owner"]).token)).status).toBe(403);
+  });
+
+  it("agent endpoint: request_command reaches the orchestrator only when granted", async () => {
+    const post = (token: string) =>
+      fetch(`${base}/api/agent/request_command`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ command: "git push origin audit", reason: "merge the audit" }),
+      });
+    const granted = tokens.issue("task-4", "dev", ["request_command"]).token;
+    expect(await (await post(granted)).json()).toEqual({ ok: true });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-4" },
+      question: "command: git push origin audit (merge the audit)",
+    });
+    expect((await post(tokens.issue("task-4", "dev", ["ask_owner"]).token)).status).toBe(403);
   });
 
   it("publish endpoints need a token granting that integration (ADR-0037)", async () => {

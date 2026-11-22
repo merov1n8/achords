@@ -97,6 +97,17 @@ const TOOLS = [
     done: "Request sent to the owner. End your turn now; you will be resumed with the decision.",
   },
   {
+    name: "request_command",
+    description:
+      "Ask the owner to allow one shell command that was refused as not allowed (e.g. `git push origin fix-audit`). One plain command, exactly as you will run it: no ; & | $ > < or line breaks. The owner allows it for this task, permanently, or refuses; your task resumes with the decision. Use this instead of asking in chat: a yes in chat does not unlock commands.",
+    input: z.object({
+      command: text.describe("The exact command"),
+      reason: text.describe("What you need it for, in one sentence"),
+    }),
+    endpoint: "/api/agent/request_command",
+    done: "Request sent to the owner. End your turn now; you will be resumed with the decision.",
+  },
+  {
     name: "move_task",
     description:
       "Move a kanban card to another column (e.g. your finished work to review, or reviewed work to done). Only moves the workspace workflow allows for your role are accepted; some need the owner's approval.",

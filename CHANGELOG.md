@@ -97,6 +97,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Agents can ask for a shell command they are not allowed to run, and the owner decides with
+  buttons in the chat (web and Telegram): this task only, always (added to the agent's
+  settings) or reject. Pushing and the GitHub CLI can only be allowed for one task, one exact
+  command at a time. Until now a yes in the chat did not unlock anything.
 - The container image for agent runs has ffmpeg and jq, and the libraries a headless Chromium
   needs (video rendered from code, e.g. Remotion), so a video agent can work in a container.
 - An agent with a shell can now also use integrations that hold keys (WordPress, fal.ai,

@@ -359,6 +359,119 @@ describe("integrations in runs (ADR-0034)", () => {
     expect(seen[0]?.req.allowedTools).toContain("mcp__blender__get_scene_info");
   });
 
+  describe("one shell command allowed by the owner (ADR-0056)", () => {
+    const start = (agentId: string) => {
+      const thread = createThread(db, { project: "acme" });
+      const r = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: agentId, title: "Merge the audit", instructions: "merge and push" },
+      );
+      if (!r.ok) throw new Error(r.reason);
+      return { thread, taskId: r.taskId };
+    };
+    const drain = async () => {
+      for (let i = 0; i < 10 && (await orch.workOnce()); i++);
+    };
+    const ask = (command: string) => {
+      onRun = (task) => {
+        if (seen.length === 1) {
+          const out = orch.requestCommand(
+            { from: "task", taskId: task.id },
+            { command, reason: "audit" },
+          );
+          if (!out.ok) throw new Error(out.reason);
+        }
+      };
+    };
+    const lastActions = (threadId: string) =>
+      listMessages(db, threadId)
+        .at(-1)
+        ?.actions?.map((a) => a.data.split(":").slice(0, 2).join(":"));
+    const idOf = (threadId: string) =>
+      listMessages(db, threadId).at(-1)?.actions?.[0]?.data.split(":")[2] as string;
+
+    it("asks with three buttons; this task allows exactly that command for the chain", async () => {
+      agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
+      ask("git fetch origin audit");
+      const { thread, taskId } = start("dev");
+      await drain();
+      expect(seen[0]?.req.allowedTools).toContain("mcp__achords__request_command");
+      expect(listMessages(db, thread.id).at(-1)?.content).toMatch(
+        /dev asks to run a command \(Merge the audit\):\ngit fetch origin audit\nWhy: audit/,
+      );
+      expect(lastActions(thread.id)).toEqual(["cmd:task", "cmd:always", "cmd:reject"]);
+      expect(await orch.workOnce()).toBe(false); // waits for the owner
+      const id = idOf(thread.id);
+      expect(orch.runAction(`cmd:task:${id}`).message).toMatch(/until \d\d:\d\d: git fetch/);
+      expect(orch.runAction(`cmd:task:${id}`).ok).toBe(false); // once only
+      expect(listMessages(db, thread.id).some((m) => m.actions?.length)).toBe(false);
+      await drain();
+      const second = seen.at(-1)?.req;
+      expect(second?.allowedTools).toContain("Bash(git fetch origin audit)");
+      expect(second?.allowedTools).not.toContain("Bash(git fetch origin audit:*)");
+      expect(second?.prompt).toMatch(/allowed exactly `git fetch origin audit` for this task/);
+      expect(getTask(db, taskId)?.status).toBe("done");
+      // The agent's settings are unchanged.
+      expect(readFileSync(join(home, "agents", "dev", "agent.yaml"), "utf8")).not.toMatch(/fetch/);
+    });
+
+    it("always adds the command to agent.yaml; reject resumes without it", async () => {
+      agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
+      ask("git merge origin/audit");
+      const a = start("dev");
+      await drain();
+      expect(orch.runAction(`cmd:always:${idOf(a.thread.id)}`).ok).toBe(true);
+      expect(readFileSync(join(home, "agents", "dev", "agent.yaml"), "utf8")).toMatch(
+        /git merge origin\/audit/,
+      );
+      await drain();
+      expect(seen.at(-1)?.req.allowedTools).toContain("Bash(git merge origin/audit:*)");
+
+      seen.length = 0;
+      ask("git rebase main");
+      const b = start("dev");
+      await drain();
+      expect(orch.runAction(`cmd:reject:${idOf(b.thread.id)}`).message).toMatch(/Refused/);
+      await drain();
+      expect(seen.at(-1)?.req.prompt).toMatch(/refused the command `git rebase main`/);
+      expect(seen.at(-1)?.req.allowedTools).not.toContain("Bash(git rebase main)");
+    });
+
+    it("push and gh get no Always button and cannot be made permanent", async () => {
+      agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
+      ask("git push origin audit");
+      const { thread } = start("dev");
+      await drain();
+      expect(lastActions(thread.id)).toEqual(["cmd:task", "cmd:reject"]);
+      expect(orch.runAction(`cmd:always:${idOf(thread.id)}`).ok).toBe(false);
+      expect(readFileSync(join(home, "agents", "dev", "agent.yaml"), "utf8")).not.toMatch(/push/);
+    });
+
+    it("refuses chained commands, allowed ones and agents without a shell", async () => {
+      agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
+      const { taskId } = start("dev");
+      const from = { from: "task" as const, taskId };
+      expect(
+        orch.requestCommand(from, { command: "git push; rm -rf /", reason: "x" }),
+      ).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/one plain command/),
+      });
+      expect(orch.requestCommand(from, { command: "git status -s", reason: "x" })).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/already allowed/),
+      });
+      const other = start("maker");
+      expect(
+        orch.requestCommand({ from: "task", taskId: other.taskId }, { command: "ls", reason: "x" }),
+      ).toMatchObject({ ok: false, reason: expect.stringMatching(/no shell/) });
+      // Agents without a shell never get the tool.
+      await drain();
+      const makerRun = seen.find((r) => r.task.id === other.taskId)?.req;
+      expect(makerRun?.allowedTools).not.toContain("mcp__achords__request_command");
+    });
+  });
+
   describe("owner-granted full access (ADR-0035)", () => {
     const start = (agentId: string) => {
       const thread = createThread(db, { project: "acme" });
