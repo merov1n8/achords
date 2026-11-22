@@ -93,6 +93,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- The container image for agent runs has ffmpeg and jq, and the libraries a headless Chromium
+  needs (video rendered from code, e.g. Remotion), so a video agent can work in a container.
 - An agent with a shell can now also use integrations that hold keys (WordPress, fal.ai,
   ElevenLabs, Meshy, Google), if it runs in an Apple container (new checkbox next to the shell in
   the agent form). The integration's server runs on Achords' side; the agent's run only gets a
