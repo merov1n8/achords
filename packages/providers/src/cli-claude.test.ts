@@ -81,6 +81,12 @@ describe("cli-claude adapter", () => {
     expect(seen.argv.join(" ")).toContain("--effort xhigh");
   });
 
+  it("passes extra settings (the WebFetch path hook) when given", async () => {
+    await provider().run(req({ settings: '{"hooks":{}}' }));
+    const seen = JSON.parse(readFileSync(record, "utf8"));
+    expect(seen.argv).toEqual(expect.arrayContaining(["--settings", '{"hooks":{}}']));
+  });
+
   it("adds extra directories and a JSON schema, and returns the structured output", async () => {
     const schema = { type: "object", properties: { action: { type: "string" } } };
     const res = await provider("structured").run(

@@ -394,7 +394,7 @@
   "integrations.noProjectSecrets": "No client project has its credentials yet",
   "integrations.noAccounts": "No project lists its accounts (Projects → Edit → Accounts)",
   "projects.accounts": "Accounts",
-  "projects.accountsHelp": "The client's accounts, one per row; add several rows for the same channel. Agents of this project see them. Google Analytics, Search Console, Facebook and Instagram entries also limit agents to exactly these properties, sites, pages and accounts (use the IDs). Git repositories: agents of this project work only in these.",
+  "projects.accountsHelp": "The client's accounts: one row per channel, one entry per line. Agents of this project see them. Google Analytics, Search Console, Facebook and Instagram entries also limit agents to exactly these properties, sites, pages and accounts (use the IDs). Git repositories: agents of this project work only in these. Websites: any agent on this project may read them; with a path (https://example.com/api/) only under that path.",
   "projects.addAccount": "Add account",
   "projects.channel": "Channel",
   "projects.accountValue": "Account, page, handle or ID",

@@ -552,7 +552,7 @@ describe("integrations in runs (ADR-0034)", () => {
   it("the project's websites open to whichever agent works on it, and only to that run", async () => {
     appendFileSync(
       join(home, "projects", "acme", "project.yaml"),
-      'integrations:\n  website: ["https://acme.example", "https://shop.acme.example/x", "not a url"]\n',
+      'integrations:\n  website: ["https://acme.example", "https://shop.acme.example/api/", "not a url"]\n',
     );
     await give("analyst", "acme");
     await give("analyst");
@@ -563,6 +563,9 @@ describe("integrations in runs (ADR-0034)", () => {
         "WebFetch(domain:shop.acme.example)",
       ]),
     );
+    // The path is enforced by a hook: only /api/ on shop.acme.example.
+    expect(seen[0]?.req.settings).toContain("https://shop.acme.example/api/*");
+    expect(seen[1]?.req.settings).toBeUndefined();
     expect(seen[1]?.req.allowedTools?.some((r) => r.startsWith("WebFetch"))).toBe(false);
   });
 

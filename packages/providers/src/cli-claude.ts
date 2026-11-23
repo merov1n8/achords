@@ -56,6 +56,7 @@ export function buildArgs(req: RunRequest): string[] {
     "--setting-sources",
     "",
   );
+  if (req.settings) args.push("--settings", req.settings);
   if (req.addDirs?.length) args.push("--add-dir", ...req.addDirs);
   if (req.jsonSchema) args.push("--json-schema", JSON.stringify(req.jsonSchema));
   if (req.appendSystemPrompt) args.push("--append-system-prompt", req.appendSystemPrompt);

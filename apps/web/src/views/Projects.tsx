@@ -184,11 +184,12 @@ export const CHANNELS = [
 // and carried over unchanged when the rows are saved.
 export const SITE_CHANNELS = ["wordpress"];
 
+/** One row per channel; its value holds that channel's entries, one per line. */
 export type Row = { channel: string; value: string };
 export const toRows = (lists: Record<string, string[]>): Row[] =>
   Object.entries(lists)
     .filter(([channel]) => !SITE_CHANNELS.includes(channel))
-    .flatMap(([channel, values]) => values.map((value) => ({ channel, value })));
+    .map(([channel, values]) => ({ channel, value: values.join("\n") }));
 /** The site lists of `lists`, to send back with edited account rows. */
 export const siteLists = (lists: Record<string, string[]>): Record<string, string[]> =>
   Object.fromEntries(Object.entries(lists).filter(([c]) => SITE_CHANNELS.includes(c)));
@@ -196,7 +197,11 @@ export const toLists = (rows: Row[]): Record<string, string[]> => {
   const out: Record<string, string[]> = {};
   for (const r of rows) {
     const channel = r.channel.trim().toLowerCase();
-    if (channel && r.value.trim()) out[channel] = [...(out[channel] ?? []), r.value.trim()];
+    const values = r.value
+      .split("\n")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (channel && values.length) out[channel] = [...new Set([...(out[channel] ?? []), ...values])];
   }
   return out;
 };
@@ -235,8 +240,9 @@ export function Accounts(props: {
               <option value={r.channel}>{r.channel}</option>
             )}
           </select>
-          <input
+          <textarea
             class="input"
+            rows={Math.max(1, r.value.split("\n").length)}
             placeholder={
               r.channel === "repository"
                 ? "https://github.com/owner/repo"

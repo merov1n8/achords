@@ -54,6 +54,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Project accounts: one row per channel with one entry per line, instead of a row per entry.
+- A project website with a path (`https://www.beds24.com/api/`) is readable only under that path.
 - Web addresses have no `#` any more (`/chat/…` instead of `#/chat/…`).
 - Chat run details count the chat's tasks (done of all) and say when work waits for your answer;
   input tokens include the part read from cache; the message box grows as you type and can be

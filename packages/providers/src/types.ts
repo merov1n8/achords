@@ -21,6 +21,8 @@ export interface RunRequest {
   /** JSON Schema the final answer must match; the parsed value is returned as `structured`. */
   jsonSchema?: object;
   appendSystemPrompt?: string;
+  /** Extra CLI settings as JSON (claude --settings), e.g. the WebFetch path hook (ADR-0057). */
+  settings?: string;
   maxTurns?: number;
   maxBudgetUsd?: number;
   /** How hard the model thinks (claude --effort; codex reasoning effort, capped at high). */

@@ -32,10 +32,53 @@ export function allowRules(input: {
       rules.push(
         ...(input.network.includes("*")
           ? ["WebFetch"]
-          : input.network.map((h) => `WebFetch(domain:${h})`)),
+          : [...new Set(input.network.map((h) => `WebFetch(domain:${h.split("/")[0]})`))]),
       );
     } else if (tool === "Bash") rules.push(...input.shell.map((c) => `Bash(${c}:*)`));
     else rules.push(tool);
   }
   return rules;
+}
+
+// Sites in `network.allow` are a host ("example.com") or a host with a path prefix
+// ("www.beds24.com/api/", ADR-0057). Only plain URL characters: the entries end up in a shell
+// pattern.
+const SITE = /^[a-z0-9.-]+(\/[A-Za-z0-9._~/-]*)?$/;
+
+/** A site entry from a URL ("https://host/path/"), or undefined when it is not a plain URL. */
+export function siteOf(url: string): string | undefined {
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return undefined;
+  }
+  if (!/^https?:$/.test(u.protocol) || u.search || u.hash) return undefined;
+  const site = u.pathname === "/" ? u.hostname : `${u.hostname}${u.pathname}`;
+  return SITE.test(site) ? site : undefined;
+}
+
+/**
+ * The CLI's WebFetch rules know hosts only, so a site with a path gets a PreToolUse hook (passed
+ * with --settings) that refuses any URL outside the allowed sites. Undefined when no entry has
+ * a path or the web is open. `..` and encoded dots are refused, so a path cannot climb out.
+ */
+export function webFetchSettings(network: string[]): string | undefined {
+  if (network.includes("*")) return undefined;
+  const sites = network.filter((s) => SITE.test(s));
+  if (!sites.some((s) => s.includes("/"))) return undefined;
+  const patterns = sites.flatMap((s) =>
+    s.includes("/")
+      ? [`https://${s}*`, `http://${s}*`]
+      : [`https://${s}`, `https://${s}/*`, `http://${s}`, `http://${s}/*`],
+  );
+  const command = [
+    `u=$(sed -n 's/.*"url" *: *"\\([^"]*\\)".*/\\1/p' | head -n 1)`,
+    `case "$u" in *..*|*%2[eE]*) ;; ${patterns.join("|")}) exit 0;; esac`,
+    `echo "Not allowed: $u. Allowed: ${sites.join(", ")}" >&2`,
+    "exit 2",
+  ].join("; ");
+  return JSON.stringify({
+    hooks: { PreToolUse: [{ matcher: "WebFetch", hooks: [{ type: "command", command }] }] },
+  });
 }
