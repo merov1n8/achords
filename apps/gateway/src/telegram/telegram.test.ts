@@ -103,6 +103,21 @@ function fakeTelegram() {
       },
     });
   };
+  const photo = (from: number, caption?: string, size = 9) => {
+    queue.push({
+      update_id: nextId++,
+      message: {
+        message_id: nextId,
+        from: { id: from },
+        chat: { id: from, type: "private" },
+        ...(caption ? { caption } : {}),
+        photo: [
+          { file_id: "small", file_size: 1 },
+          { file_id: "f1", file_size: size },
+        ],
+      },
+    });
+  };
   const press = (from: number, data: string, chatType = "private") => {
     queue.push({
       update_id: nextId++,
@@ -114,7 +129,7 @@ function fakeTelegram() {
       },
     });
   };
-  return { server, sent, msg, press, voice, queue, calls };
+  return { server, sent, msg, press, voice, photo, queue, calls };
 }
 
 describe("telegram channel", () => {
@@ -426,6 +441,22 @@ describe("telegram channel", () => {
     });
     await channel.deliver();
     expect(tg.sent[0]?.reply_markup).toBeUndefined();
+  });
+
+  it("photos: stored for the chat, the caption and an image line go to the orchestrator", async () => {
+    await pairOwner();
+    tg.photo(2002, "not the owner"); // nothing is downloaded for strangers
+    tg.photo(OWNER, "Ez a hiba a pénztárban");
+    await channel.pollOnce();
+    expect(tg.calls.filter((c) => c.method === "getFile").map((c) => c.body.file_id)).toEqual([
+      "f1",
+    ]);
+    const last = handled.at(-1)?.text ?? "";
+    const path = /\[image: (\S+)\]$/.exec(last)?.[1] as string;
+    expect(last.startsWith("Ez a hiba a pénztárban\n\n[image: ")).toBe(true);
+    expect(path.startsWith(join(home, "attachments"))).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe("OGG-BYTES");
+    expect(path.endsWith(".jpg")).toBe(true);
   });
 
   describe("voice notes", () => {

@@ -9,10 +9,11 @@ import {
   Send,
   Square,
   Volume2,
+  X,
 } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { api } from "../api.ts";
-import { formatUsd, mention, type ThreadSummary } from "../chat.ts";
+import { api, uploadImage } from "../api.ts";
+import { formatUsd, imageParts, mention, type ThreadSummary, withImages } from "../chat.ts";
 import { Confirm } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
@@ -23,6 +24,32 @@ import { loadDetailsOpen, saveDetailsOpen } from "../theme.ts";
 import type { Message, Project, Thread } from "../types.ts";
 import { ChatList } from "./ChatList.tsx";
 import { RunDetails, RunSheet } from "./RunDetails.tsx";
+
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const MAX_IMAGE = 5 * 1024 * 1024;
+const MAX_IMAGES = 6;
+
+/** A message's text, and the images of this chat it carries shown as pictures. */
+function MessageBody(props: { threadId: string; content: string }) {
+  const { text, images } = imageParts(props.content, props.threadId);
+  return (
+    <>
+      {text && <div class="content">{text}</div>}
+      {images.length > 0 && (
+        <div class="msg-images">
+          {images.map((name) => {
+            const src = `/api/threads/${props.threadId}/images/${name}`;
+            return (
+              <a key={name} href={src} target="_blank" rel="noreferrer">
+                <img src={src} alt="" loading="lazy" />
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
 
 const phone = () => matchMedia("(max-width: 767.98px)").matches;
 
@@ -151,6 +178,25 @@ function Conversation(props: {
   // Leaving the chat stops reading.
   useEffect(() => stopSpeaking, []);
   const [waitingAfter, setWaitingAfter] = useState<number>();
+  // Images dropped or pasted, shown as thumbnails until the message is sent.
+  const [pending, setPending] = useState<{ file: File; preview: string }[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const addImages = (files: Iterable<File>) => {
+    for (const file of files) {
+      if (!IMAGE_TYPES.includes(file.type)) continue;
+      if (file.size > MAX_IMAGE) {
+        setError(t("chat.imageTooLarge"));
+        continue;
+      }
+      // A data: URL, because the page's CSP allows no blob: images.
+      const reader = new FileReader();
+      reader.onload = () =>
+        setPending((cur) =>
+          [...cur, { file, preview: String(reader.result) }].slice(0, MAX_IMAGES),
+        );
+      reader.readAsDataURL(file);
+    }
+  };
   const mic = useRecorder(
     (spoken) => setText((cur) => (cur ? `${cur} ${spoken}` : spoken)),
     (msg) => setError(msg),
@@ -178,12 +224,15 @@ function Conversation(props: {
 
   const send = async (e: Event) => {
     e.preventDefault();
-    const body = text.trim();
-    if (!body) return;
+    if (!text.trim() && !pending.length) return;
     setError(undefined);
     try {
+      const paths: string[] = [];
+      for (const p of pending) paths.push(await uploadImage(threadId, p.file));
+      const body = withImages(text, paths);
       await api(`/api/threads/${threadId}/messages`, { method: "POST", body: { text: body } });
       setText("");
+      setPending([]);
       setWaitingAfter(lastSeq);
       messages.refresh();
     } catch (err) {
@@ -192,7 +241,26 @@ function Conversation(props: {
   };
 
   return (
-    <section class="conversation">
+    // The whole conversation is a drop target for images; keyboard users paste them instead.
+    <section
+      aria-label={t("nav.chat")}
+      class={`conversation ${dragging ? "dropping" : ""}`}
+      onDragOver={(e) => {
+        if (!e.dataTransfer?.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer?.files.length) return;
+        e.preventDefault();
+        setDragging(false);
+        addImages(e.dataTransfer.files);
+        input.current?.focus();
+      }}
+    >
       <header class="thread-head">
         <a class="iconbtn touch back" href="/chat" aria-label={t("chat.back")}>
           <ChevronLeft class="icon" />
@@ -279,7 +347,7 @@ function Conversation(props: {
                 )}
               </div>
             )}
-            <div class="content">{m.content}</div>
+            <MessageBody threadId={threadId} content={m.content} />
             {m.actions && (
               <div class="actions">
                 {m.actions.map((a, i) => (
@@ -318,6 +386,24 @@ function Conversation(props: {
           ))}
         </div>
       )}
+      {pending.length > 0 && (
+        <div class="pending-images">
+          {pending.map((p, i) => (
+            <div key={p.preview} class="thumb">
+              <img src={p.preview} alt={p.file.name} />
+              <button
+                type="button"
+                class="iconbtn"
+                aria-label={t("chat.removeImage")}
+                title={t("chat.removeImage")}
+                onClick={() => setPending((cur) => cur.filter((_, j) => j !== i))}
+              >
+                <X class="icon" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <form class="composer" onSubmit={send}>
         <textarea
           ref={input}
@@ -329,6 +415,14 @@ function Conversation(props: {
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) send(e);
+          }}
+          onPaste={(e) => {
+            const files = [...(e.clipboardData?.files ?? [])].filter((f) =>
+              f.type.startsWith("image/"),
+            );
+            if (!files.length) return;
+            e.preventDefault();
+            addImages(files);
           }}
           placeholder={t("chat.placeholder")}
           rows={2}

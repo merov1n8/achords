@@ -167,6 +167,7 @@ Default layout, configurable:
 
 - Telegram voice notes and web mic recordings are transcribed by a local Whisper (`whisper.cpp` / `mlx-whisper`). Browser Web Speech API is not used (it may send audio to third parties).
 - Read aloud: the web uses the browser's speech synthesis with on-device voices only (Chrome's network voices would send the text out); Telegram's "🔊 Read aloud" button makes an OGG/Opus voice note on the host (macOS `say`, Hungarian text with Tünde, then ffmpeg) and sends it with `sendVoice`.
+- Chat images: web drop/paste (`POST /api/threads/:id/images`, raw body, PNG/JPEG/WebP/GIF up to 5 MB) and Telegram photos or image files are stored in `~/.achords/attachments/<thread>/<uuid>.<ext>` (0600). The message text carries a `[image: <path>]` line per image, so the boss, a direct @agent and delegated work see it without a schema change; runs of that chat get the folder as a read root (also mounted in container runs) and a prompt line to open images with Read.
 
 ### 4.14 MCP layer
 

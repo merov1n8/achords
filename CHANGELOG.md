@@ -101,6 +101,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Images in the chat: drag screenshots onto a web chat or paste them into the message box (up
+  to 6, 5 MB each, PNG/JPEG/WebP/GIF), or send a photo or image file on Telegram (the caption
+  is the message). They are stored for that chat and shown in the conversation; agents working
+  on the chat open them with their Read tool. Larger files still go in the project folder.
 - Read aloud: agent messages on the web get a speaker icon (the browser's own voice; on a Mac,
   Hungarian text with Tünde), and on Telegram a "🔊 Read aloud" button that answers with a voice
   note made on this Mac (`say` and ffmpeg). Nothing is sent to a speech service.

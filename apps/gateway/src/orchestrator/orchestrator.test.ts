@@ -9,12 +9,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  attachmentsDir,
   createThread,
   enqueue,
   getTask,
   listActiveRuns,
   listMessages,
   openCoreDatabase,
+  saveImage,
   setPaused,
 } from "@achords/core";
 import { openMemory } from "@achords/memory";
@@ -368,6 +370,26 @@ describe("orchestrator", () => {
       custom: false,
       text: expect.stringMatching(/^# Achords guide/),
     });
+  });
+
+  it("images in the chat: the run may read that chat's image folder and is told how", async () => {
+    const { orch, calls } = make(() => result({ text: "ok" }));
+    const t = createThread(db, {});
+    const other = createThread(db, {});
+    saveImage(home, t.id, "image/png", Buffer.from("PNG"));
+    saveImage(home, other.id, "image/png", Buffer.from("PNG"));
+    enqueue(db, {
+      title: "Look",
+      description: "See the shot",
+      threadId: t.id,
+      assigneeAgentId: "web-dev",
+    });
+    await orch.workOnce();
+    const req = calls[0] as RunRequest;
+    const dir = realpathSync(attachmentsDir(home, t.id));
+    expect(req.allowedTools).toContain(`Read(/${dir}/**)`);
+    expect(req.allowedTools?.some((r) => r.includes(other.id))).toBe(false);
+    expect(req.prompt).toMatch(/open them with the Read tool/);
   });
 
   it("reports a failed boss run briefly instead of going silent", async () => {

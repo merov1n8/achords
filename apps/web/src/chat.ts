@@ -32,3 +32,30 @@ export function mention(text: string, agent: string): string {
 
 export const hasOpenWork = (s: Pick<ThreadSummary, "participants">) =>
   s.participants.some((p) => p.status !== "idle");
+
+const IMAGE_LINE = /^\[image: (\/\S+)\]$/;
+
+/**
+ * A message's text and the images of this chat it carries ("[image: <path>]" lines, see
+ * packages/core attachments.ts), as file names the chat's image route serves.
+ */
+export function imageParts(content: string, threadId: string): { text: string; images: string[] } {
+  const images: string[] = [];
+  const text = content
+    .split("\n")
+    .filter((line) => {
+      const m = IMAGE_LINE.exec(line.trim());
+      const dir = `/attachments/${threadId}/`;
+      const path = m?.[1];
+      if (!path?.includes(dir)) return true;
+      images.push(path.slice(path.lastIndexOf("/") + 1));
+      return false;
+    })
+    .join("\n")
+    .trim();
+  return { text, images };
+}
+
+/** The owner's text with image lines after it (same form as the gateway's withImages). */
+export const withImages = (text: string, paths: string[]) =>
+  [text.trim(), paths.map((p) => `[image: ${p}]`).join("\n")].filter(Boolean).join("\n\n");

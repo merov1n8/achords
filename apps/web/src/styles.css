@@ -1831,3 +1831,38 @@ td.actions > * {
   width: 100%;
   min-height: 320px;
 }
+.pending-images,
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+.pending-images .thumb {
+  position: relative;
+}
+.pending-images img {
+  height: 72px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.pending-images .iconbtn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border);
+}
+.msg-images img {
+  max-width: min(320px, 100%);
+  max-height: 240px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.conversation.dropping {
+  outline: 2px dashed var(--accent, #7c3aed);
+  outline-offset: -6px;
+}

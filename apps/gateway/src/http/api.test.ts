@@ -1183,6 +1183,35 @@ describe("HTTP API", () => {
     expect(refused.status).toBe(403);
   });
 
+  it("chat images: stored for the chat, shown back, wrong type or size refused", async () => {
+    const { call } = await pair();
+    const thread = createThread(db, { title: "Shots" });
+    const up = await call(`/api/threads/${thread.id}/images`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: "PNG-BYTES",
+    });
+    const { path, name } = (await up.json()) as { path: string; name: string };
+    expect(path).toMatch(new RegExp(`/attachments/${thread.id}/[0-9a-f-]{36}\\.png$`));
+    const back = await call(`/api/threads/${thread.id}/images/${name}`);
+    expect(back.headers.get("content-type")).toBe("image/png");
+    expect(await back.text()).toBe("PNG-BYTES");
+    const svg = await call(`/api/threads/${thread.id}/images`, {
+      method: "POST",
+      headers: { "content-type": "image/svg+xml" },
+      body: "<svg/>",
+    });
+    expect(svg.status).toBe(415);
+    const big = await call(`/api/threads/${thread.id}/images`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: Buffer.alloc(5 * 1024 * 1024 + 1),
+    });
+    expect(big.status).toBe(413);
+    expect((await call(`/api/threads/${thread.id}/images/..%2Fcore.db`)).status).toBe(404);
+    expect((await fetch(`${base}/api/threads/${thread.id}/images/${name}`)).status).toBe(401);
+  });
+
   it("message actions can be run from the web (owner session + CSRF)", async () => {
     const { call } = await pair();
     const ok = await call("/api/actions", {

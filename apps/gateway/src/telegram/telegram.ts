@@ -10,12 +10,16 @@ import {
   getSetting,
   getThread,
   type HomePaths,
+  IMAGE_TYPES,
   killActiveRuns,
   listMessagesAfter,
+  MAX_IMAGE_BYTES,
   makeThreadLocalOnly,
   redeemPairingCode,
+  saveImage,
   setSetting,
   setThreadProject,
+  withImages,
   writeStopMarker,
 } from "@achords/core";
 import { t } from "@achords/i18n";
@@ -95,6 +99,9 @@ interface Update {
     chat: { id: number; type: string };
     text?: string;
     voice?: { file_id: string; duration: number; file_size?: number };
+    caption?: string;
+    photo?: { file_id: string; file_size?: number }[];
+    document?: { file_id: string; mime_type?: string; file_size?: number };
   };
 }
 
@@ -248,6 +255,44 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     return thread.id;
   };
 
+  async function download(fileId: string, what: string): Promise<Buffer> {
+    const file = await call<{ file_path: string }>("getFile", { file_id: fileId });
+    try {
+      const res = await fetch(`${base}/file/bot${deps.token}/${file.file_path}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    } catch (err) {
+      // Never log the URL: it contains the bot token.
+      throw new Error(`telegram ${what} download failed (${(err as Error).name})`);
+    }
+  }
+
+  /** A photo or image file from the owner: stored for the chat, the caption is the message. */
+  async function imageMessage(m: NonNullable<Update["message"]>) {
+    // Photos come in several sizes, largest last; take the largest a model can still look at.
+    const photo = m.photo?.filter((p) => (p.file_size ?? 0) <= MAX_IMAGE_BYTES).at(-1);
+    const doc = m.document;
+    const type = photo ? "image/jpeg" : (doc?.mime_type ?? "");
+    const fileId = photo?.file_id ?? doc?.file_id;
+    if (!fileId || (doc && !photo && (doc.file_size ?? 0) > MAX_IMAGE_BYTES)) {
+      await send(m.chat.id, t("telegram.imageTooLarge"));
+      return;
+    }
+    const threadId = currentThread();
+    let path: string;
+    try {
+      path = saveImage(deps.paths.home, threadId, type, await download(fileId, "image"));
+    } catch (err) {
+      await send(m.chat.id, t("telegram.imageFailed", { reason: (err as Error).message }));
+      return;
+    }
+    await deps.orchestrator.handleMessage(
+      threadId,
+      withImages(m.caption ?? "", [path]),
+      "telegram",
+    );
+  }
+
   /** Downloads the owner's voice note and transcribes it locally; undefined if it failed. */
   async function voiceToText(
     chatId: number,
@@ -262,16 +307,7 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       await send(chatId, t("telegram.voiceTooLong", { minutes: MAX_VOICE_S / 60 }));
       return undefined;
     }
-    const file = await call<{ file_path: string }>("getFile", { file_id: voice.file_id });
-    let bytes: Buffer;
-    try {
-      const res = await fetch(`${base}/file/bot${deps.token}/${file.file_path}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      bytes = Buffer.from(await res.arrayBuffer());
-    } catch (err) {
-      // Never log the URL: it contains the bot token.
-      throw new Error(`telegram voice download failed (${(err as Error).name})`);
-    }
+    const bytes = await download(voice.file_id, "voice");
     mkdirSync(deps.paths.runDir, { recursive: true, mode: 0o700 });
     const path = join(deps.paths.runDir, `voice-${randomUUID()}.oga`);
     writeFileSync(path, bytes, { mode: 0o600 });
@@ -289,7 +325,8 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
 
   async function handle(update: Update) {
     const m = update.message;
-    if (!m?.from || (!m.text && !m.voice)) return;
+    const image = !!m?.photo?.length || !!IMAGE_TYPES[m?.document?.mime_type ?? ""];
+    if (!m?.from || (!m.text && !m.voice && !image)) return;
     if (m.chat.type !== "private") {
       deps.log(`telegram: ignored message from a ${m.chat.type} chat`);
       return;
@@ -320,6 +357,12 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       return;
     }
     setSetting(db, OWNER_CHAT, String(m.chat.id));
+
+    if (image) {
+      // Only after the owner check: nobody else can make the host download anything.
+      await imageMessage(m);
+      return;
+    }
 
     if (m.voice) {
       // Only now, after the owner check: nobody else can make the host download anything.

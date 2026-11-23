@@ -2,6 +2,7 @@
 export const PACKAGE_NAME = "@achords/core";
 
 export * from "./agents.ts";
+export * from "./attachments.ts";
 export * from "./auth.ts";
 export * from "./board.ts";
 export * from "./cards.ts";

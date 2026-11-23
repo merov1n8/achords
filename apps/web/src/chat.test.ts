@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTokens, formatUsd, hasOpenWork, mention } from "./chat.ts";
+import { formatTokens, formatUsd, hasOpenWork, imageParts, mention, withImages } from "./chat.ts";
 
 describe("chat page helpers", () => {
   it("shortens token counts and formats dollars", () => {
@@ -25,5 +25,22 @@ describe("chat page helpers", () => {
     expect(hasOpenWork(p("queued"))).toBe(true);
     expect(hasOpenWork(p("waiting"))).toBe(true);
     expect(hasOpenWork(p("running"))).toBe(true);
+  });
+});
+
+describe("images in chat messages", () => {
+  it("shows this chat's images as pictures and keeps the rest as text", () => {
+    const content =
+      "Nézd meg\n\n[image: /Users/x/.achords/attachments/t1/a.png]\n[image: /Users/x/.achords/attachments/t2/b.png]";
+    expect(imageParts(content, "t1")).toEqual({
+      text: "Nézd meg\n\n[image: /Users/x/.achords/attachments/t2/b.png]",
+      images: ["a.png"],
+    });
+    expect(imageParts("plain", "t1")).toEqual({ text: "plain", images: [] });
+  });
+
+  it("writes image lines after the text", () => {
+    expect(withImages(" hi ", ["/a/1.png"])).toBe("hi\n\n[image: /a/1.png]");
+    expect(withImages("", ["/a/1.png", "/a/2.gif"])).toBe("[image: /a/1.png]\n[image: /a/2.gif]");
   });
 });

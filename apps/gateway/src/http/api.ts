@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   AuthError,
   addChecklistItem,
   addComment,
+  attachmentsDir,
   createMonitor,
   createPairingCode,
   createSchedule,
@@ -23,6 +24,8 @@ import {
   getSetting,
   getTask,
   getThread,
+  IMAGE_NAME,
+  IMAGE_TYPES,
   listAgents,
   listChecklist,
   listComments,
@@ -35,12 +38,14 @@ import {
   listThreads,
   listUsageWindows,
   liveProgress,
+  MAX_IMAGE_BYTES,
   type MonitorInput,
   occurrences,
   redeemPairingCode,
   removeChecklistItem,
   revokeSession,
   type ScheduleInput,
+  saveImage,
   setSetting,
   setThreadProject,
   spendBy,
@@ -939,6 +944,39 @@ export function createApiHandler(deps: ApiDeps) {
       "GET",
       /^\/api\/workflow\/([\w-]{1,64})$/,
       ({ params }) => deps.orchestrator.workflow(params[0] as string),
+    ],
+    // Images dropped or pasted into a chat: stored for that chat, referenced in the message.
+    [
+      "POST",
+      /^\/api\/threads\/([\w-]{1,64})\/images$/,
+      async ({ req, params }) => {
+        const id = params[0] as string;
+        if (!getThread(db, id)) throw new HttpError(404, "no such chat");
+        const type = req.headers["content-type"] ?? "";
+        if (!IMAGE_TYPES[type.split(";")[0]?.trim().toLowerCase() ?? ""]) {
+          throw new HttpError(415, "only PNG, JPEG, WebP or GIF images");
+        }
+        const bytes = await readBody(req, MAX_IMAGE_BYTES);
+        const path = attempt(() => saveImage(homeOrThrow(), id, type, bytes));
+        return { path, name: basename(path) };
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/threads\/([\w-]{1,64})\/images\/([\w.-]{1,64})$/,
+      ({ res, params }) => {
+        const name = params[1] as string;
+        const path = join(attachmentsDir(homeOrThrow(), params[0] as string), name);
+        if (!IMAGE_NAME.test(name) || !existsSync(path)) throw new HttpError(404, "no such image");
+        const ext = name.split(".").pop() as string;
+        const type = Object.entries(IMAGE_TYPES).find(([, e]) => e === ext)?.[0] as string;
+        res.writeHead(200, {
+          ...securityHeaders,
+          "content-type": type,
+          "cache-control": "private, max-age=86400",
+        });
+        res.end(readFileSync(path));
+      },
     ],
     // Web voice note → text on this machine; the browser puts it in the composer to review.
     [

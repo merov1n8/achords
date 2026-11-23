@@ -74,3 +74,16 @@ export async function transcribe(audio: Blob): Promise<string> {
   if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText);
   return data.text ?? "";
 }
+
+/** Uploads one image for a chat; returns its path on the host (for the message's image line). */
+export async function uploadImage(threadId: string, file: Blob): Promise<string> {
+  const res = await fetch(`/api/threads/${threadId}/images`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": file.type, ...(csrf ? { "x-achords-csrf": csrf } : {}) },
+    body: file,
+  });
+  const data = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
+  if (!res.ok || !data.path) throw new ApiError(res.status, data.error ?? res.statusText);
+  return data.path;
+}

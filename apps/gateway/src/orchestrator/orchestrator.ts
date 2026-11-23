@@ -16,6 +16,7 @@ import {
   answerOwnerQuestion,
   appendMessage,
   askOwner as askOwnerQuestion,
+  attachmentsDir,
   type Channel,
   childFinished,
   claim,
@@ -2183,6 +2184,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const until = task.roomId || task.workerSpec ? undefined : elevatedUntil(rootId);
     // Commands the owner allowed one at a time (ADR-0056); never for discussion turns or workers.
     let allowedCommands: string[] = [];
+    let imagesNote = "";
     let shellAsks = false;
     let dropped: string[] = [];
     const unscoped: string[] = [];
@@ -2200,6 +2202,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       project = task.project ? projects().get(task.project) : undefined;
       if (task.project && !project) throw new Error(`unknown project ${task.project}`);
       manifest = withProject(manifest, project);
+      // Images the owner put in this chat: readable by the runs working on it.
+      const images = task.threadId ? attachmentsDir(home, task.threadId) : undefined;
+      if (images && existsSync(images) && manifest.tools.includes("Read")) {
+        manifest = { ...manifest, fs: { ...manifest.fs, read: [...manifest.fs.read, images] } };
+        imagesNote =
+          "\n\nImages in this chat appear as [image: <path>] lines: open them with the Read tool to look at them.";
+      }
       if (task.roomId) {
         const { shell: _shell, ...rest } = manifest;
         manifest = {
@@ -2463,7 +2472,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${commandsNote}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${commandsNote}${imagesNote}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       if (allowedCommands.length && built.req.allowedTools) {
