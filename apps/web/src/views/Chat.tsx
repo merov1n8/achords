@@ -238,6 +238,8 @@ function Conversation(props: {
       const body = withImages(text, paths);
       await api(`/api/threads/${threadId}/messages`, { method: "POST", body: { text: body } });
       setText("");
+      // The box grew with a long message; sent, it goes back to its normal size.
+      if (input.current) input.current.style.height = "";
       setPending([]);
       setWaitingAfter(lastSeq);
       messages.refresh();

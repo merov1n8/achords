@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- The chat's message box stayed tall after sending a long message; it now returns to its normal
+  size.
 - An agent's final report appeared in the chat under the boss's name, so a long report looked
   like the boss's answer. It now shows under the agent that wrote it ("Done (web-dev): …").
 - An agent in an Apple container with an OpenAI or Gemini default model could be saved and then
