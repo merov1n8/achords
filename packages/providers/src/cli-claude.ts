@@ -262,11 +262,16 @@ function runOnce(
         costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : null,
       };
       const ok = result.is_error !== true && result.subtype === "success";
+      const text = typeof result.result === "string" ? result.result : "";
+      // Subscription usage limit: "unavailable", like codex (ADR-0058).
+      const limit = !ok && /usage limit|hit your limit|limit reached/i.test(text);
       finish({
         ok,
-        stopReason: ok ? "completed" : "error",
-        text: typeof result.result === "string" ? result.result : "",
-        ...(ok ? {} : { error: `claude reported ${String(result.subtype)}` }),
+        stopReason: ok ? "completed" : limit ? "unavailable" : "error",
+        text,
+        ...(ok
+          ? {}
+          : { error: limit ? text.slice(0, 300) : `claude reported ${String(result.subtype)}` }),
         usage,
         windows,
         ...(typeof result.session_id === "string" ? { sessionId: result.session_id } : {}),

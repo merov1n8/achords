@@ -155,6 +155,9 @@ const CHAT_TOTAL = 60_000;
 const MAX_POST = 100_000;
 const MEMORY_HITS = 5;
 const DEFER_MS = 60_000;
+// A model at its usage limit is skipped this long (ADR-0058); then the default is tried again.
+export const MODEL_OUT_MS = 60 * 60_000;
+const modelOutKey = (model: string) => `model_out:${model}`;
 const BUDGET_DEFER_MS = 30 * 60_000;
 const SUMMARY_CHARS = 1500;
 
@@ -549,8 +552,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * The model a run uses. Local-only work takes the default if it is local, otherwise the first
    * local model the manifest allows; with none, the run is refused (ADR-0007, no fallback).
    */
+  /** ADR-0058: the first allowed model not at its usage limit, if any. */
+  const usableModel = (m: Manifest): string | undefined => {
+    const now = Date.now();
+    return [m.models.default, ...m.models.allowed].find(
+      (model) =>
+        Number(getSetting(db, modelOutKey(model)) ?? 0) <= now &&
+        checkModel(m, model, { dataSensitivity: "normal" }).allowed,
+    );
+  };
   const pickModel = (m: Manifest, sensitivity: Sensitivity): string => {
-    if (sensitivity === "normal") return m.models.default;
+    // A model at its usage limit gives way to the next allowed one (ADR-0058).
+    if (sensitivity === "normal") return usableModel(m) ?? m.models.default;
     const local = [m.models.default, ...m.models.allowed].find(isLocalModel);
     if (!local) {
       throw new Error(
@@ -2060,7 +2073,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         });
         recordUsage(provider.id, res.windows);
         if (res.stopReason === "unavailable") {
-          throw new Error("the local model is not available right now (is Ollama running?)");
+          const used = `${provider.id}/${req.model}`;
+          if (isLocalModel(used)) {
+            throw new Error("the local model is not available right now (is Ollama running?)");
+          }
+          // The boss's next message starts on its next allowed model (ADR-0058).
+          setSetting(db, modelOutKey(used), String(Date.now() + MODEL_OUT_MS));
+          throw new Error(`${used} reached its usage limit; please send the message again`);
         }
         if (!res.ok) throw new Error(res.error ?? "boss run failed");
         const decision = decisionSchema.parse(res.structured);
@@ -2708,8 +2727,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         // Planned stop: not the task's fault. Back to the queue with where it was, no attempt lost.
         requeueInterrupted(db, task.id, WORKER_ID, resumeNote(runProgressItems(db, run.id)));
       } else if (res.stopReason === "unavailable") {
-        // Fail-closed: wait for the backend (e.g. local model server), never fall back.
-        defer(db, task.id, WORKER_ID, `waiting for the local model: ${res.error ?? ""}`, DEFER_MS);
+        const used = `${built.provider.id}/${built.req.model}`;
+        if (isLocalModel(used)) {
+          // Fail-closed: wait for the local model server, never fall back.
+          defer(
+            db,
+            task.id,
+            WORKER_ID,
+            `waiting for the local model: ${res.error ?? ""}`,
+            DEFER_MS,
+          );
+        } else {
+          // A subscription at its usage limit (ADR-0058): the next allowed model takes over.
+          setSetting(db, modelOutKey(used), String(Date.now() + MODEL_OUT_MS));
+          const next = task.sensitivity === "normal" ? usableModel(manifest) : undefined;
+          if (next) {
+            const note = `${used} reached its usage limit; continuing on ${next}.`;
+            if (task.threadId) post(task.threadId, `${manifest.id}: ${note}`, manifest.id);
+            defer(db, task.id, WORKER_ID, note, 0);
+          } else {
+            defer(db, task.id, WORKER_ID, `usage limit: ${res.error ?? ""}`, DEFER_MS);
+          }
+        }
       } else if (
         res.ok &&
         ((getTask(db, task.id)?.waitingChildren ?? 0) > 0 || getTask(db, task.id)?.waitingOwner)

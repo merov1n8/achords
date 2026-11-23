@@ -2,7 +2,7 @@
 // Stand-in for the `claude` CLI in tests. Emits stream-json in the shape of claude 2.1.x
 // (recorded from a real `claude -p --output-format stream-json --verbose` run, ids replaced).
 // FAKE_CLAUDE_RECORD: file to write {argv, stdin, cwd, env subset} into.
-// FAKE_CLAUDE_MODE: ok | structured | error | crash | hang | hang-child
+// FAKE_CLAUDE_MODE: ok | structured | error | limit | crash | hang | hang-child
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
@@ -87,8 +87,13 @@ process.stdin.on("end", () => {
   out({
     type: "result",
     subtype: mode === "error" ? "error_max_turns" : "success",
-    is_error: mode === "error",
-    result: mode === "error" ? "" : `echo:${stdin.trim()}`,
+    is_error: mode === "error" || mode === "limit",
+    result:
+      mode === "error"
+        ? ""
+        : mode === "limit"
+          ? "You've hit your limit · resets 5pm"
+          : `echo:${stdin.trim()}`,
     session_id,
     duration_ms: 2082,
     num_turns: 1,

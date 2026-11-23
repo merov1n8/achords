@@ -170,6 +170,10 @@ describe("cli-claude adapter", () => {
   });
 
   it("maps CLI-reported errors and crashes to failed results", async () => {
+    // A subscription at its usage limit: the gateway may continue on another model (ADR-0058).
+    const limit = await provider("limit").run(req());
+    expect(limit).toMatchObject({ ok: false, stopReason: "unavailable" });
+    expect(limit.error).toMatch(/hit your limit/);
     const err = await provider("error").run(req());
     expect(err).toMatchObject({ ok: false, stopReason: "error" });
     expect(err.error).toMatch(/error_max_turns/);

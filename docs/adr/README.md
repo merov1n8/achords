@@ -57,3 +57,4 @@
 - [ADR-0055: Keyed integrations hosted by the gateway, and handoff between agents](0055-keyed-integrations-on-the-gateway-and-handoff.md)
 - [ADR-0056: Shell commands approved in the chat](0056-shell-commands-approved-in-the-chat.md)
 - [ADR-0057: Project websites open to the agent working on the project](0057-project-websites-open-to-the-project-agent.md)
+- [ADR-0058: The next allowed model takes over at a usage limit](0058-next-model-at-a-usage-limit.md)
