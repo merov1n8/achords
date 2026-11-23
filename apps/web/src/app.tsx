@@ -18,7 +18,7 @@ import { ApiError, api, loadSession, logout } from "./api.ts";
 import { Mark } from "./components/Mark.tsx";
 import { MoreSheet, TabBar, TopBar } from "./components/MobileNav.tsx";
 import { t } from "./i18n.ts";
-import { inAppPath, legacyPath, navigate, routeOf } from "./route.ts";
+import { inAppPath, navigate, routeOf } from "./route.ts";
 import { loadCollapsed, saveCollapsed } from "./theme.ts";
 import type { Thread } from "./types.ts";
 import { Agents } from "./views/Agents.tsx";
@@ -41,9 +41,6 @@ import { Updates } from "./views/Updates.tsx";
 import { Usage } from "./views/Usage.tsx";
 import { Vault } from "./views/Vault.tsx";
 
-// Old #/ links (bookmarks, notifications) keep working: rewritten once to the plain path.
-const old = legacyPath(location.hash);
-if (old) history.replaceState(null, "", old);
 const parseRoute = () => routeOf(location.pathname);
 const go = (path: string) => navigate(`/${path}`);
 

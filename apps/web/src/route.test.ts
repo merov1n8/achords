@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inAppPath, legacyPath, routeOf } from "./route.ts";
+import { inAppPath, routeOf } from "./route.ts";
 
 const O = "https://mac.example";
 
@@ -8,12 +8,6 @@ describe("plain path routes", () => {
     expect(routeOf("/chat/abc")).toEqual(["chat", "abc"]);
     expect(routeOf("/")).toEqual([]);
     expect(routeOf("/chats/my%20project")).toEqual(["chats", "my project"]);
-  });
-
-  it("turns an old #/ link into its path", () => {
-    expect(legacyPath("#/settings/guide")).toBe("/settings/guide");
-    expect(legacyPath("#top")).toBeUndefined();
-    expect(legacyPath("")).toBeUndefined();
   });
 
   it("opens own links in the app; leaves the API, other sites and new tabs alone", () => {

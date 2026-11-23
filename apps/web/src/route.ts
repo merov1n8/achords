@@ -4,10 +4,6 @@
 export const routeOf = (pathname: string): string[] =>
   pathname.split("/").filter(Boolean).map(decodeURIComponent);
 
-/** An old "#/chat/x" link (before plain paths) as its path, or undefined. */
-export const legacyPath = (hash: string): string | undefined =>
-  hash.startsWith("#/") ? hash.slice(1) : undefined;
-
 /** The in-app path a click on this link should open without a reload, or undefined. */
 export function inAppPath(
   href: string | null,
