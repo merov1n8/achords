@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   appendMessage,
   createPairingCode,
+  createThread,
   type Db,
   getSetting,
   getThread,
@@ -25,6 +26,7 @@ const OWNER = 1001;
 interface Sent {
   chat_id: number;
   text: string;
+  message_thread_id?: number;
   reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] };
 }
 
@@ -34,6 +36,14 @@ function fakeTelegram() {
   const sent: Sent[] = [];
   const calls: { method: string; body: Record<string, unknown> }[] = [];
   let nextId = 1;
+  // Forum topic mode in the private chat (Bot API 9.3+): off unless a test turns it on.
+  const topics = {
+    on: false,
+    refuse: false,
+    next: 500,
+    created: [] as { id: number; name: string }[],
+  };
+  const gone = new Set<number>();
   const server: Server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
@@ -70,10 +80,37 @@ function fakeTelegram() {
       res.end(JSON.stringify({ ok: true, result: true }));
       return;
     }
+    if (method === "getMe") {
+      res.end(JSON.stringify({ ok: true, result: { id: 1, has_topics_enabled: topics.on } }));
+      return;
+    }
+    if (method === "createForumTopic" && topics.refuse) {
+      res.writeHead(403).end(JSON.stringify({ ok: false }));
+      return;
+    }
+    if (method === "createForumTopic") {
+      const id = topics.next++;
+      topics.created.push({ id, name: body.name });
+      res.end(JSON.stringify({ ok: true, result: { message_thread_id: id, name: body.name } }));
+      return;
+    }
+    if (method === "deleteForumTopic") {
+      calls.push({ method, body });
+      gone.add(body.message_thread_id);
+      res.end(JSON.stringify({ ok: true, result: true }));
+      return;
+    }
+    if (method === "sendMessage" && gone.has(body.message_thread_id)) {
+      res
+        .writeHead(400)
+        .end(JSON.stringify({ ok: false, description: "message thread not found" }));
+      return;
+    }
     if (method === "sendMessage") {
       sent.push({
         chat_id: body.chat_id,
         text: body.text,
+        ...(body.message_thread_id ? { message_thread_id: body.message_thread_id } : {}),
         ...(body.reply_markup ? { reply_markup: body.reply_markup } : {}),
       });
       res.end(JSON.stringify({ ok: true, result: {} }));
@@ -89,6 +126,20 @@ function fakeTelegram() {
         from: { id: from },
         chat: { id: chatId, type: chatType },
         text,
+      },
+    });
+  };
+  /** A message inside a topic of the private chat, or the service message of its creation. */
+  const inTopic = (from: number, topic: number, extra: Record<string, unknown>) => {
+    queue.push({
+      update_id: nextId++,
+      message: {
+        message_id: nextId,
+        from: { id: from },
+        chat: { id: from, type: "private" },
+        message_thread_id: topic,
+        is_topic_message: true,
+        ...extra,
       },
     });
   };
@@ -129,7 +180,7 @@ function fakeTelegram() {
       },
     });
   };
-  return { server, sent, msg, press, voice, photo, queue, calls };
+  return { server, sent, msg, inTopic, press, voice, photo, queue, calls, topics, gone };
 }
 
 describe("telegram channel", () => {
@@ -141,8 +192,10 @@ describe("telegram channel", () => {
   let handled: { threadId: string; text: string }[];
   let stopped: string[];
   let decided: string[];
+  let clock: number;
 
   beforeEach(async () => {
+    clock = Date.now();
     home = mkdtempSync(join(tmpdir(), "achords-tg-"));
     db = openCoreDatabase(join(home, "core.db"));
     tg = fakeTelegram();
@@ -184,6 +237,7 @@ describe("telegram channel", () => {
       },
       onEmergencyStop: (lines) => stopped.push(...lines),
       log: (m) => logs.push(m),
+      now: () => clock,
     });
   });
   afterEach(async () => {
@@ -576,6 +630,138 @@ describe("telegram channel", () => {
     await broken.pollOnce().catch((err: Error) => logs.push(err.message));
     expect(logs.join("\n")).not.toContain(TOKEN);
     expect(logs.join("\n")).not.toContain(TOKEN.split(":")[1]);
+  });
+
+  describe("topics: one chat, one topic (ADR-0063)", () => {
+    const DAY = 24 * 60 * 60_000;
+    const reply = (threadId: string, content: string) =>
+      appendMessage(db, { threadId, role: "agent", author: "boss", channel: "system", content });
+    const topicsOn = async () => {
+      await pairOwner();
+      tg.topics.on = true;
+      await channel.deliver(); // notices the mode; nothing to send yet
+      tg.sent.length = 0;
+    };
+
+    it("a chat started on the web gets a topic of its own and continues there", async () => {
+      await topicsOn();
+      const web = createThread(db, { title: "Shop redesign" });
+      appendMessage(db, { threadId: web.id, role: "user", channel: "web", content: "kezdjük" });
+      reply(web.id, "Rendben, kezdem.");
+      await channel.deliver();
+      expect(tg.topics.created).toEqual([{ id: 500, name: "Shop redesign" }]);
+      expect(tg.sent).toEqual([
+        { chat_id: OWNER, text: "This chat continues from the web.", message_thread_id: 500 },
+        { chat_id: OWNER, text: "Rendben, kezdem.", message_thread_id: 500 },
+      ]);
+      // What the owner writes in that topic goes to the same chat, and the answer comes back there.
+      tg.sent.length = 0;
+      tg.inTopic(OWNER, 500, { text: "és a kosár?" });
+      await channel.pollOnce();
+      expect(handled).toEqual([{ threadId: web.id, text: "és a kosár?" }]);
+      await channel.deliver();
+      expect(tg.sent).toEqual([
+        { chat_id: OWNER, text: "re: és a kosár?", message_thread_id: 500 },
+      ]);
+      expect(tg.topics.created).toHaveLength(1);
+    });
+
+    it("a topic the owner opens in Telegram starts a new chat with the topic's name", async () => {
+      await topicsOn();
+      tg.inTopic(OWNER, 42, { forum_topic_created: { name: "Nyaralás" } });
+      tg.inTopic(OWNER, 42, { text: "keress szállást" });
+      await channel.pollOnce();
+      expect(handled).toHaveLength(1);
+      const chat = getThread(db, handled[0]?.threadId ?? "");
+      expect(chat?.title).toBe("Nyaralás");
+      expect(chat?.id).not.toBe(getSetting(db, "telegram.thread_id"));
+      await channel.deliver();
+      expect(tg.sent).toEqual([
+        { chat_id: OWNER, text: "re: keress szállást", message_thread_id: 42 },
+      ]);
+      expect(tg.topics.created).toHaveLength(0); // the owner's topic is used, none is made
+
+      // Renamed in Telegram: the chat follows. Messages outside any topic stay one chat.
+      tg.inTopic(OWNER, 42, { forum_topic_edited: { name: "Nyaralás 2027" } });
+      tg.msg(OWNER, "általános kérdés");
+      await channel.pollOnce();
+      expect(getThread(db, chat?.id ?? "")?.title).toBe("Nyaralás 2027");
+      expect(handled[1]?.threadId).toBe(getSetting(db, "telegram.thread_id"));
+    });
+
+    it("chats active lately get their topic at once; local-only chats never reach Telegram", async () => {
+      await pairOwner();
+      const recent = createThread(db, { title: "Recent" });
+      appendMessage(db, { threadId: recent.id, role: "user", channel: "web", content: "x" });
+      const secret = createThread(db, { title: "Secret", sensitivity: "local-only" });
+      tg.topics.on = true;
+      await channel.deliver();
+      expect(tg.topics.created.map((c) => c.name)).toEqual(["Recent"]);
+      tg.sent.length = 0;
+      reply(secret.id, "titok");
+      await channel.deliver();
+      expect(tg.sent).toEqual([]);
+      expect(tg.topics.created).toHaveLength(1);
+    });
+
+    it("an idle topic is deleted after 7 days and made again when its chat moves", async () => {
+      await topicsOn();
+      const web = createThread(db, { title: "Idle" });
+      reply(web.id, "első");
+      const waiting = createThread(db, { title: "Waiting" });
+      appendMessage(db, {
+        threadId: waiting.id,
+        role: "agent",
+        author: "boss",
+        channel: "system",
+        content: "Approve?",
+        actions: [{ label: "Approve", data: "proposal:approve:abc123" }],
+      });
+      await channel.deliver();
+      expect(tg.topics.created.map((c) => c.name)).toEqual(["Idle", "Waiting"]);
+
+      clock += 8 * DAY;
+      await channel.deliver();
+      // Only the idle one goes: a topic that still asks the owner something stays.
+      expect(tg.calls.filter((c) => c.method === "deleteForumTopic").map((c) => c.body)).toEqual([
+        { chat_id: OWNER, message_thread_id: 500 },
+      ]);
+      tg.sent.length = 0;
+      reply(web.id, "második");
+      await channel.deliver();
+      expect(tg.topics.created.at(-1)).toEqual({ id: 502, name: "Idle" });
+      expect(tg.sent.at(-1)).toEqual({ chat_id: OWNER, text: "második", message_thread_id: 502 });
+    });
+
+    it("a topic deleted by hand in Telegram is made again instead of losing the message", async () => {
+      await topicsOn();
+      const web = createThread(db, { title: "Gone" });
+      reply(web.id, "első");
+      await channel.deliver();
+      tg.gone.add(500);
+      tg.sent.length = 0;
+      reply(web.id, "második");
+      await channel.deliver();
+      expect(tg.sent.at(-1)).toEqual({ chat_id: OWNER, text: "második", message_thread_id: 501 });
+    });
+
+    it("when Telegram refuses a topic the message still arrives, under the chat's name", async () => {
+      await topicsOn();
+      tg.topics.refuse = true;
+      reply(createThread(db, { title: "Refused" }).id, "mégis megjön");
+      await channel.deliver();
+      expect(tg.sent).toEqual([{ chat_id: OWNER, text: "Refused:\nmégis megjön" }]);
+      expect(logs.join("\n")).toMatch(/no topic for a chat/);
+    });
+
+    it("without topic mode nothing changes: other chats stay on the web", async () => {
+      await pairOwner();
+      tg.sent.length = 0;
+      reply(createThread(db, { title: "Web only" }).id, "csak weben");
+      await channel.deliver();
+      expect(tg.sent).toEqual([]);
+      expect(tg.topics.created).toHaveLength(0);
+    });
   });
 
   it("keeps a single thread mapping in the core thread model", async () => {

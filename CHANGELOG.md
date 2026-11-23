@@ -118,6 +118,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Telegram topics: turn on Threaded mode for the bot in @BotFather and every chat gets its own
+  topic in Telegram, so a chat started on the web can be continued from the phone. A topic you
+  open in Telegram starts a new chat. Topics idle for 7 days are removed from Telegram (the chat
+  stays, and gets a topic again when it moves); local-only chats are never sent there.
 - Web: the number of chats with unread replies also shows beside Chat in the menu ("Chat (2)"),
   the same number as in the tab title.
 - Tell the boss a lasting fact about a project ("this is a Unity mobile game") or ask it to note

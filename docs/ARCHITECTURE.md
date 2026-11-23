@@ -51,7 +51,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 
 ### 4.2 Threads and channels
 
-- A **thread** is the unit of conversation; channels (web, Telegram) are views onto it. Start on Telegram, continue on the web.
+- A **thread** is the unit of conversation; channels (web, Telegram) are views onto it. Start on Telegram, continue on the web. With the bot's forum topic mode on, each thread has its own Telegram topic, a topic opened in Telegram starts a thread, and idle topics are removed after 7 days (ADR-0063); otherwise Telegram shows one thread at a time.
 - Default output policy: agent asks clarifying questions if needed, then reports "done" with a result summary. Traces are stored but hidden; viewable on demand in the web UI.
 - Each agent may have its own Telegram bot; the boss bot can route to sub-agents.
 - Telegram is bound to one owner user id via a pairing code; private chats only; unknown users are ignored silently; `/stop` = emergency stop, `/new` = new thread (ADR-0027).

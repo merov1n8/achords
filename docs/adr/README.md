@@ -62,3 +62,4 @@
 - [ADR-0060: Owner-approved additions to a project description](0060-owner-approved-project-description-additions.md)
 - [ADR-0061: Shell commands in any of an agent's work folders](0061-shell-commands-in-any-work-folder.md)
 - [ADR-0062: A review's verdict reaches the owner, and a card sent back restarts its work](0062-review-verdicts-reach-the-owner-and-restart-the-work.md)
+- [ADR-0063: Telegram topics: one chat, one topic](0063-telegram-topics-one-chat-one-topic.md)

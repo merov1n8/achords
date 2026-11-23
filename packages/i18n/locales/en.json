@@ -112,6 +112,8 @@
   "telegram.stopped": "Emergency stop: {runs} run(s) killed, queue paused. The gateway is shutting down; run `achords resume` and `achords start` on the host to continue.",
   "telegram.localOnly": "This thread is now local-only: it runs on local models only and never reaches a cloud model. This cannot be undone; use /new for normal work.",
   "telegram.newThread": "New thread started.",
+  "telegram.topicUntitled": "Chat",
+  "telegram.topicContinues": "This chat continues from the web.",
   "telegram.voiceNoWhisper": "Voice notes need local Whisper on the host (run `achords doctor`).",
   "telegram.voiceTooLong": "That voice note is too long (max {minutes} min).",
   "telegram.voiceFailed": "Could not transcribe the voice note: {reason}",
