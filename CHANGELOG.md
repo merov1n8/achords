@@ -118,6 +118,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Web: the number of chats with unread replies also shows beside Chat in the menu ("Chat (2)"),
+  the same number as in the tab title.
 - Tell the boss a lasting fact about a project ("this is a Unity mobile game") or ask it to note
   something in the project description: it shows the exact text to add, and adds it to the
   project's description when you approve. It works together with handing over work in the same

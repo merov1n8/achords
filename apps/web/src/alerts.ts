@@ -32,6 +32,10 @@ export function replyState(
   return { seen, max, unread, chime: prev?.max !== undefined && max > prev.max };
 }
 
+/** A name with its unread count, the same wherever the count shows: "Chat (2)", or just "Chat". */
+export const withCount = (label: string, unread: number) =>
+  unread > 0 ? `${label} (${unread})` : label;
+
 let ctx: AudioContext | undefined;
 
 /** Browsers start audio only after a click or key press; call this from one. */
@@ -82,11 +86,12 @@ const saveSeen = (seen: Seen) => {
 
 /**
  * Watches the chats while the app is open: chimes on a new agent reply and shows the number of
- * chats with unread replies in the tab title.
+ * chats with unread replies in the tab title; `onUnread` gets the same number for the menu.
  */
 export function watchReplies(
   list: () => Promise<{ id: string; lastAgentSeq: number | null }[]>,
   openThread: () => string | undefined,
+  onUnread: (unread: number) => void = () => {},
   everyMs = 5000,
 ): () => void {
   const saved = loadSeen();
@@ -97,7 +102,8 @@ export function watchReplies(
     const r = replyState(threads, state, openThread(), document.visibilityState === "visible");
     state = { seen: r.seen, max: r.max };
     saveSeen(r.seen);
-    document.title = r.unread ? `Achords (${r.unread})` : "Achords";
+    document.title = withCount("Achords", r.unread);
+    onUnread(r.unread);
     if (r.chime) chime();
   };
   const look = () =>
@@ -120,5 +126,6 @@ export function watchReplies(
     removeEventListener("pointerdown", unlockAudio);
     removeEventListener("keydown", unlockAudio);
     document.title = "Achords";
+    onUnread(0);
   };
 }

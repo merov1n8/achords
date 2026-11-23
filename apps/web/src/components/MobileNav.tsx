@@ -14,6 +14,7 @@ import {
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef } from "preact/hooks";
+import { withCount } from "../alerts.ts";
 import { t } from "../i18n.ts";
 import { useBackdropClose } from "./backdrop.ts";
 import { Mark } from "./Mark.tsx";
@@ -116,13 +117,14 @@ export function TabBar(props: {
   chatHref: string;
   moreOpen: boolean;
   onMore: () => void;
+  unread: number;
 }) {
   const s = props.section;
   return (
     <nav class="tabbar" aria-label={t("nav.main")}>
       <Tab
         href={props.chatHref}
-        label={t("nav.chat")}
+        label={withCount(t("nav.chat"), props.unread)}
         active={s === "chat" || s === "chats"}
         icon={<MessageSquare class="icon" />}
       />

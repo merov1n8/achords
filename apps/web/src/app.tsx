@@ -14,7 +14,7 @@ import {
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { watchReplies } from "./alerts.ts";
+import { watchReplies, withCount } from "./alerts.ts";
 import { ApiError, api, loadSession, logout } from "./api.ts";
 import { Mark } from "./components/Mark.tsx";
 import { MoreSheet, TabBar, TopBar } from "./components/MobileNav.tsx";
@@ -51,6 +51,7 @@ export function App() {
   const [device, setDevice] = useState<string>();
   const [route, setRoute] = useState(parseRoute());
   const [more, setMore] = useState(false);
+  const [unread, setUnread] = useState(0);
   const [collapsed, setCollapsed] = useState(loadCollapsed());
   const toggleCollapsed = () => {
     saveCollapsed(!collapsed);
@@ -100,7 +101,7 @@ export function App() {
     };
   }, []);
 
-  // Chime and unread count in the title while the app is open (paired only).
+  // Chime and unread count, in the title and beside Chat, while the app is open (paired only).
   useEffect(() => {
     if (state !== "ready") return;
     return watchReplies(
@@ -109,6 +110,7 @@ export function App() {
         const [section, sub] = parseRoute();
         return section === "chat" || section === undefined ? sub : undefined;
       },
+      setUnread,
     );
   }, [state]);
 
@@ -137,6 +139,7 @@ export function App() {
         device={device}
         collapsed={collapsed}
         onCollapse={toggleCollapsed}
+        unread={unread}
       />
       {/* The chat page brings its own columns, edge to edge. */}
       <main class={section === "chat" ? "flush" : undefined}>
@@ -165,7 +168,13 @@ export function App() {
         </div>
         <LiveBar />
       </main>
-      <TabBar section={section} chatHref="/chat" moreOpen={more} onMore={() => setMore(true)} />
+      <TabBar
+        section={section}
+        chatHref="/chat"
+        moreOpen={more}
+        onMore={() => setMore(true)}
+        unread={unread}
+      />
       <MoreSheet
         open={more}
         onClose={() => setMore(false)}
@@ -201,6 +210,7 @@ function Sidebar(props: {
   device?: string | undefined;
   collapsed: boolean;
   onCollapse: () => void;
+  unread: number;
 }) {
   const subLink = (href: string, label: string, active: boolean) => (
     <a class={`sub ${active ? "active" : ""}`} href={href}>
@@ -227,10 +237,10 @@ function Sidebar(props: {
       <a
         class={`nav ${section === "chat" || section === "chats" ? "active" : ""}`}
         href="/chat"
-        title={t("nav.chat")}
+        title={withCount(t("nav.chat"), props.unread)}
       >
         <MessageSquare class="icon" />
-        <span class="lbl">{t("nav.chat")}</span>
+        <span class="lbl">{withCount(t("nav.chat"), props.unread)}</span>
       </a>
       <a
         class={`nav ${section === "kanban" ? "active" : ""}`}

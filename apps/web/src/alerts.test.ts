@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { replyState } from "./alerts.ts";
+import { replyState, withCount } from "./alerts.ts";
 
 const th = (id: string, lastAgentSeq: number | null) => ({ id, lastAgentSeq });
 
@@ -19,6 +19,12 @@ describe("reply alerts", () => {
     expect(replyState(now, hidden, "b", false).unread).toBe(2);
     const open = replyState(now, hidden, "a", true);
     expect(open).toMatchObject({ seen: { a: 9, b: 0 }, unread: 1, chime: false });
+  });
+
+  it("the count reads the same in the tab title and in the menu, and is left out at zero", () => {
+    expect(withCount("Achords", 2)).toBe("Achords (2)");
+    expect(withCount("Chat", 2)).toBe("Chat (2)");
+    expect(withCount("Chat", 0)).toBe("Chat");
   });
 
   it("a chat made after the first look counts from its first reply", () => {
