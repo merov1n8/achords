@@ -23,6 +23,7 @@ import { Mark } from "./Mark.tsx";
 
 export const SETTINGS_PAGES: [string, string][] = [
   ["appearance", "nav.appearance"],
+  ["guide", "nav.guide"],
   ["integrations", "nav.integrations"],
   ["access", "nav.modelAccess"],
   ["vault", "nav.vault"],

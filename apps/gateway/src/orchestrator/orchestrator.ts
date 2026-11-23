@@ -114,6 +114,7 @@ import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/provi
 import { z } from "zod";
 import type { Apps } from "../apps.ts";
 import type { Prepared } from "../container.ts";
+import { readGuide } from "../guide.ts";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
 import { describeCall, describeResult } from "./publish-text.ts";
 import { createSkillFlow, type SkillRequest } from "./skills.ts";
@@ -502,11 +503,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return all;
   };
 
-  const post = (threadId: string, content: string) =>
+  const post = (threadId: string, content: string, author = BOSS_ID) =>
     appendMessage(db, {
       threadId,
       role: "agent",
-      author: BOSS_ID,
+      author,
       channel: "system",
       content: redact(content).slice(0, MAX_POST),
     });
@@ -583,7 +584,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       network: m.network.allow,
       shell: m.tools.includes("Bash") ? (m.shell?.allow ?? []) : [],
     });
-    const system = agentPrompt(m);
+    // The owner's guide (Settings → Guide) applies to every agent and the boss.
+    const system = [readGuide(home).text.trim(), agentPrompt(m)?.trim()]
+      .filter(Boolean)
+      .join("\n\n");
     const req: RunRequest = {
       prompt,
       model: model.slice(slash + 1),
@@ -2756,7 +2760,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               task.threadId,
               awaiting
                 ? t("thread.doneAwaitingApproval", { title: task.title })
-                : t("thread.done", { title: task.title, result: res.text }),
+                : t("thread.done", { title: task.title, result: res.text, agent: manifest.id }),
+              // The report is the agent's own words: shown under its name, not the boss's.
+              awaiting ? BOSS_ID : manifest.id,
             );
           }
         }

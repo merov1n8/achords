@@ -393,7 +393,7 @@ describe("inter-agent delegation (ADR-0029)", () => {
     const bLast = calls.filter((c) => c.agent === "b").at(-1)?.req.prompt ?? "";
     expect(bLast).toMatch(/You asked the owner: Kék vagy zöld legyen\?\nOwner's answer: zöld/);
     expect(getTask(db, task.id)).toMatchObject({ status: "done", result: "logo delivered" });
-    expect(listMessages(db, thread.id).at(-1)?.content).toMatch(/^Done: root for a/);
+    expect(listMessages(db, thread.id).at(-1)?.content).toMatch(/^Done \(a\): root for a/);
   });
 
   it("returns results to the delegating agent; the owner only gets the final result", async () => {
@@ -419,7 +419,9 @@ describe("inter-agent delegation (ADR-0029)", () => {
     );
     expect(getTask(db, task.id)).toMatchObject({ status: "done", result: "final answer using X" });
     const posted = listMessages(db, thread.id).map((m) => m.content);
-    expect(posted).toEqual([expect.stringMatching(/^Done: root for a\n\nfinal answer using X/)]);
+    expect(posted).toEqual([
+      expect.stringMatching(/^Done \(a\): root for a\n\nfinal answer using X/),
+    ]);
   });
 
   describe("handoff (ADR-0055)", () => {
@@ -499,7 +501,7 @@ describe("inter-agent delegation (ADR-0029)", () => {
       await drain();
       const posted = listMessages(db, thread.id).map((m) => m.content);
       expect(posted[0]).toMatch(/a handed over to b[\s\S]*script written/);
-      expect(posted[1]).toMatch(/^Done: Edit\n\nvideo edited/);
+      expect(posted[1]).toMatch(/^Done \(b\): Edit\n\nvideo edited/);
       expect(getTask(db, task.id)?.status).toBe("done");
     });
 

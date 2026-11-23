@@ -91,6 +91,7 @@ import {
   writeSkill,
 } from "@achords/policy";
 import { createGoogleSignins, parseClientJson, type Vault } from "@achords/secrets";
+import { GUIDE_LIMIT, readGuide, writeGuide } from "../guide.ts";
 import type { McpHost } from "../mcp/host.ts";
 import type { McpTickets, RunTokens } from "../mcp/tokens.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
@@ -1296,6 +1297,18 @@ export function createApiHandler(deps: ApiDeps) {
       async () => {
         if (!deps.update) throw new HttpError(404, "updates are not available");
         return { result: await deps.update.checkNow() };
+      },
+    ],
+    // The Achords guide: rules for every agent and the boss (Settings → Guide).
+    ["GET", /^\/api\/guide$/, () => readGuide(homeOrThrow())],
+    [
+      "PUT",
+      /^\/api\/guide$/,
+      async ({ body }) => {
+        const b = await body();
+        const text = b.text === "" ? "" : str(b.text, "text", GUIDE_LIMIT);
+        writeGuide(homeOrThrow(), text);
+        return readGuide(homeOrThrow());
       },
     ],
     // The owner's own accounts (ADR-0042): for work without a client project.

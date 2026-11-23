@@ -25,6 +25,7 @@ import { AllChats } from "./views/AllChats.tsx";
 import { Appearance } from "./views/Appearance.tsx";
 import { Chat } from "./views/Chat.tsx";
 import { Devices } from "./views/Devices.tsx";
+import { Guide } from "./views/Guide.tsx";
 import { Integrations } from "./views/Integrations.tsx";
 import { Kanban } from "./views/Kanban.tsx";
 import { LiveBar } from "./views/LiveBar.tsx";
@@ -130,6 +131,7 @@ export function App() {
           {section === "settings" && sub === "updates" && <Updates />}
           {section === "settings" && sub === "access" && <ModelAccess />}
           {section === "settings" && sub === "rooms" && <Rooms />}
+          {section === "settings" && sub === "guide" && <Guide />}
           {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
           {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
         </div>
@@ -264,6 +266,7 @@ function Sidebar(props: {
           t("nav.appearance"),
           section === "settings" && (sub === "appearance" || !sub),
         )}
+        {subLink("#/settings/guide", t("nav.guide"), sub === "guide")}
         {subLink("#/settings/integrations", t("nav.integrations"), sub === "integrations")}
         {subLink("#/settings/access", t("nav.modelAccess"), sub === "access")}
         {subLink("#/settings/vault", t("nav.vault"), sub === "vault")}

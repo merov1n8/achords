@@ -1817,3 +1817,7 @@ td.actions > * {
   color: var(--warn);
   font-weight: 600;
 }
+.guide-text {
+  width: 100%;
+  min-height: 320px;
+}

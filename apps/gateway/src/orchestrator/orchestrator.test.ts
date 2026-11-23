@@ -20,6 +20,7 @@ import {
 import { openMemory } from "@achords/memory";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readGuide, writeGuide } from "../guide.ts";
 import { createOrchestrator, type Orchestrator } from "./orchestrator.ts";
 import { seedAgents } from "./seed.ts";
 
@@ -274,7 +275,7 @@ describe("orchestrator", () => {
     writeFileSync(join(home, "agents", "boss", "prompt.md"), "legacy boss prompt");
     const { orch, calls } = make(boss({ action: "answer", message: "ok" }));
     await orch.handleMessage(createThread(db, {}).id, "hello", "web");
-    expect(calls[0]?.appendSystemPrompt).toBe("legacy boss prompt");
+    expect(calls[0]?.appendSystemPrompt).toMatch(/\n\nlegacy boss prompt$/);
   });
 
   it("boss asks a clarifying question: no task yet", async () => {
@@ -351,6 +352,24 @@ describe("orchestrator", () => {
     expect(listMessages(db, t.id).at(-1)?.content).toMatch(/could not/i);
   });
 
+  it("the owner's guide reaches the boss and every agent; empty goes back to the default", async () => {
+    writeGuide(home, "# House rules\n\nKeep reports to five lines.");
+    const { orch, calls } = make(() => result({ text: "ok" }));
+    const t = createThread(db, {});
+    await orch.handleMessage(t.id, "hi", "web");
+    enqueue(db, { title: "X", description: "Y", threadId: t.id, assigneeAgentId: "web-dev" });
+    await orch.workOnce();
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    for (const c of calls) {
+      expect((c as RunRequest).appendSystemPrompt).toContain("Keep reports to five lines.");
+    }
+    writeGuide(home, "  ");
+    expect(readGuide(home)).toMatchObject({
+      custom: false,
+      text: expect.stringMatching(/^# Achords guide/),
+    });
+  });
+
   it("reports a failed boss run briefly instead of going silent", async () => {
     const { orch } = make(() => result({ ok: false, stopReason: "error", error: "boom" }));
     const t = createThread(db, {});
@@ -391,9 +410,13 @@ describe("orchestrator", () => {
     expect(req.appendSystemPrompt).toContain("# Web developer");
 
     expect(getTask(db, task.id)).toMatchObject({ status: "done" });
-    expect(listMessages(db, t.id).at(-1)?.content).toBe(
-      "Done: TODO app\n\nKész: index.html a workspace-ben.",
-    );
+    // The report is the agent's own: posted under its name.
+    expect(listMessages(db, t.id).at(-1)).toMatchObject({
+      author: "web-dev",
+      content: "Done (web-dev): TODO app\n\nKész: index.html a workspace-ben.",
+    });
+    // The shipped guide applies to every run, before the agent's own instructions.
+    expect(req.appendSystemPrompt).toMatch(/^# Achords guide[\s\S]*# Web developer/);
     expect(listActiveRuns(db)).toEqual([]);
     const run = db.prepare("SELECT * FROM runs").get();
     expect(run).toMatchObject({
@@ -501,6 +524,6 @@ describe("orchestrator", () => {
     const t = createThread(db, {});
     enqueue(db, { title: "X", threadId: t.id, assigneeAgentId: "web-dev" });
     await orch.workOnce();
-    expect(listMessages(db, t.id).at(-1)?.content).toBe("Done: X\n\ntoken=[REDACTED]");
+    expect(listMessages(db, t.id).at(-1)?.content).toBe("Done (web-dev): X\n\ntoken=[REDACTED]");
   });
 });

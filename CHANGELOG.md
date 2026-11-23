@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- An agent's final report appeared in the chat under the boss's name, so a long report looked
+  like the boss's answer. It now shows under the agent that wrote it ("Done (web-dev): …").
 - An agent in an Apple container with an OpenAI or Gemini default model could be saved and then
   failed at run time, and when it was delegated work only its caller heard why. The agent form
   now warns at once and refuses to save that combination, and work that cannot run for a setup
@@ -97,6 +99,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Settings → Guide: rules for every agent and the boss (how to answer, what holds for all
+  work), added to each run's instructions. Achords ships a short default; saving makes it the
+  owner's own `GUIDE.md`.
 - The run details column on the right of the chat can be closed with a button at its top on
   wide screens; a button in the chat header opens it again. The choice is remembered.
 - Agents can ask for a shell command they are not allowed to run, and the owner decides with

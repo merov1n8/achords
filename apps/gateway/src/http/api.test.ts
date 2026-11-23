@@ -422,6 +422,19 @@ describe("HTTP API", () => {
     expect(await hostStatus("mac.tail1.ts.net")).toBe(421);
   });
 
+  it("the guide: shipped default, the owner's own text, empty goes back to the default", async () => {
+    const { call } = await pair();
+    const first = (await (await call("/api/guide")).json()) as { text: string; custom: boolean };
+    expect(first).toMatchObject({ custom: false, text: expect.stringMatching(/^# Achords guide/) });
+    const saved = await call("/api/guide", {
+      method: "PUT",
+      body: JSON.stringify({ text: "Short reports." }),
+    });
+    expect(await saved.json()).toEqual({ custom: true, text: "Short reports.\n" });
+    const reset = await call("/api/guide", { method: "PUT", body: JSON.stringify({ text: "" }) });
+    expect(await reset.json()).toMatchObject({ custom: false });
+  });
+
   it("requires the CSRF header and a same-origin Origin on state-changing requests", async () => {
     const { call, cookie } = await pair();
     const noCsrf = await fetch(`${base}/api/threads`, {
