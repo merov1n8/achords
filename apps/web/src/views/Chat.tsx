@@ -14,6 +14,7 @@ import {
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, uploadImage } from "../api.ts";
 import { formatUsd, imageParts, mention, type ThreadSummary, withImages } from "../chat.ts";
+import { Markdown } from "../components/Markdown.tsx";
 import { Confirm } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
@@ -41,11 +42,11 @@ function ChatImage({ src }: { src: string }) {
 }
 
 /** A message's text, and the images of this chat it carries shown as pictures. */
-function MessageBody(props: { threadId: string; content: string }) {
+function MessageBody(props: { threadId: string; content: string; markdown: boolean }) {
   const { text, images } = imageParts(props.content, props.threadId);
   return (
     <>
-      {text && <div class="content">{text}</div>}
+      {text && (props.markdown ? <Markdown text={text} /> : <div class="content">{text}</div>)}
       {images.length > 0 && (
         <div class="msg-images">
           {images.map((name) => (
@@ -355,7 +356,8 @@ function Conversation(props: {
                 )}
               </div>
             )}
-            <MessageBody threadId={threadId} content={m.content} />
+            {/* Agents answer in Markdown; the owner's own words stay as typed. */}
+            <MessageBody threadId={threadId} content={m.content} markdown={m.role === "agent"} />
             {m.actions && (
               <div class="actions">
                 {m.actions.map((a, i) => (

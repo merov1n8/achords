@@ -102,6 +102,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Agent replies in the web chat are formatted: headings, bold and italic, lists, tables, code
+  and links (from their Markdown). Rendered as page elements, never as HTML, so a reply cannot
+  inject markup. The owner's own messages stay as typed.
 - Images in the chat: drag screenshots onto a web chat or paste them into the message box (up
   to 6, 5 MB each, PNG/JPEG/WebP/GIF), or send a photo or image file on Telegram (the caption
   is the message). They are stored for that chat and shown in the conversation; agents working
