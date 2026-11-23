@@ -1,4 +1,14 @@
-import { ChevronLeft, Info, LoaderCircle, Mic, Pencil, Send, Square } from "lucide-preact";
+import {
+  ChevronLeft,
+  Info,
+  LoaderCircle,
+  Mic,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  Send,
+  Square,
+} from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { formatUsd, mention, type ThreadSummary } from "../chat.ts";
@@ -7,6 +17,7 @@ import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
 import { useRecorder } from "../recorder.ts";
+import { loadDetailsOpen, saveDetailsOpen } from "../theme.ts";
 import type { Message, Project, Thread } from "../types.ts";
 import { ChatList } from "./ChatList.tsx";
 import { RunDetails, RunSheet } from "./RunDetails.tsx";
@@ -27,13 +38,25 @@ export function Chat(props: {
   }, [props.threadId, first]);
 
   const thread = threads.data?.find((x) => x.id === props.threadId);
+  const [details, setDetails] = useState(loadDetailsOpen());
+  const toggleDetails = () => {
+    saveDetailsOpen(!details);
+    setDetails(!details);
+  };
   return (
-    <div class={`chatpage ${props.threadId ? "has-thread" : ""}`}>
+    <div
+      class={`chatpage ${props.threadId ? "has-thread" : ""} ${details ? "" : "details-closed"}`}
+    >
       <aside class="chatcol" aria-label={t("nav.chat")}>
         <ChatList activeId={props.threadId} onNew={props.onNew} />
       </aside>
       {props.threadId ? (
-        <ThreadView key={props.threadId} threadId={props.threadId} thread={thread} />
+        <ThreadView
+          key={props.threadId}
+          threadId={props.threadId}
+          thread={thread}
+          onToggleDetails={toggleDetails}
+        />
       ) : (
         <p class="muted chat-empty">
           {threads.data?.length === 0 ? t("chat.empty") : t("app.loading")}
@@ -43,7 +66,15 @@ export function Chat(props: {
   );
 }
 
-function ThreadView({ threadId, thread }: { threadId: string; thread?: Thread | undefined }) {
+function ThreadView({
+  threadId,
+  thread,
+  onToggleDetails,
+}: {
+  threadId: string;
+  thread?: Thread | undefined;
+  onToggleDetails: () => void;
+}) {
   const summary = usePoll(() => api<ThreadSummary>(`/api/threads/${threadId}/summary`), 3000, [
     threadId,
   ]);
@@ -58,10 +89,22 @@ function ThreadView({ threadId, thread }: { threadId: string; thread?: Thread | 
         thread={thread}
         summary={s}
         onInfo={() => setInfo(true)}
+        onOpenDetails={onToggleDetails}
         error={error}
         onError={setError}
       />
       <aside class="runcol" aria-label={t("chat.details")}>
+        <div class="runcol-head">
+          <button
+            type="button"
+            class="iconbtn"
+            onClick={onToggleDetails}
+            aria-label={t("chat.hideDetails")}
+            title={t("chat.hideDetails")}
+          >
+            <PanelRightClose class="icon" />
+          </button>
+        </div>
         {s && <RunDetails summary={s} onStop={() => setStop(true)} />}
       </aside>
       <RunSheet open={info} onClose={() => setInfo(false)}>
@@ -92,6 +135,7 @@ function Conversation(props: {
   thread?: Thread | undefined;
   summary?: ThreadSummary | undefined;
   onInfo: () => void;
+  onOpenDetails: () => void;
   error?: string | undefined;
   onError: (m: string | undefined) => void;
 }) {
@@ -184,6 +228,15 @@ function Conversation(props: {
           title={t("chat.details")}
         >
           <Info class="icon" />
+        </button>
+        <button
+          type="button"
+          class="iconbtn open-details"
+          onClick={props.onOpenDetails}
+          aria-label={t("chat.showDetails")}
+          title={t("chat.showDetails")}
+        >
+          <PanelRightOpen class="icon" />
         </button>
       </header>
       {s && (

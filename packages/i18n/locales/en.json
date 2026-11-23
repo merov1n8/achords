@@ -199,6 +199,8 @@
   "chat.projectHelp": "New work in this thread follows the project's PROJECT.md.",
   "chat.back": "Back to chats",
   "chat.details": "Run details",
+  "chat.hideDetails": "Hide run details",
+  "chat.showDetails": "Show run details",
   "chat.activeRun": "Active run",
   "chat.statusLine": "{done} of {total} tasks done · {usd}",
   "chat.tokens": "Tokens this chat",

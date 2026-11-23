@@ -97,6 +97,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- The run details column on the right of the chat can be closed with a button at its top on
+  wide screens; a button in the chat header opens it again. The choice is remembered.
 - Agents can ask for a shell command they are not allowed to run, and the owner decides with
   buttons in the chat (web and Telegram): this task only, always (added to the agent's
   settings) or reject. Pushing and the GitHub CLI can only be allowed for one task, one exact

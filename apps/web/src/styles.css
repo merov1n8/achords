@@ -1213,6 +1213,26 @@ main.flush > .livebar {
 .phone-only {
   display: none;
 }
+.runcol-head {
+  display: flex;
+  justify-content: flex-end;
+  margin: -12px -8px 4px 0;
+}
+.thread-head .open-details {
+  display: none;
+}
+/* Wide screens: the owner can close the run details column; the open button stays in the head. */
+@media (min-width: 1200px) {
+  .chatpage.details-closed {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+  .chatpage.details-closed .runcol {
+    display: none;
+  }
+  .chatpage.details-closed .thread-head .open-details {
+    display: inline-grid;
+  }
+}
 /* Narrower desktops: the run details move behind the info button (a side sheet). */
 @media (min-width: 768px) and (max-width: 1199.98px) {
   .chatpage {

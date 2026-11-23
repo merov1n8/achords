@@ -68,6 +68,23 @@ export function applyAppearance(a: Appearance): void {
   Object.assign(document.documentElement.dataset, attrs);
 }
 
+const DETAILS_KEY = "achords.chat-details";
+/** The chat page's run details column on wide screens: shown unless the owner closed it. */
+export function loadDetailsOpen(): boolean {
+  try {
+    return localStorage.getItem(DETAILS_KEY) !== "closed";
+  } catch {
+    return true;
+  }
+}
+export function saveDetailsOpen(open: boolean): void {
+  try {
+    localStorage.setItem(DETAILS_KEY, open ? "open" : "closed");
+  } catch {
+    // not remembered
+  }
+}
+
 const SIDEBAR_KEY = "achords.sidebar";
 export function loadCollapsed(): boolean {
   try {
