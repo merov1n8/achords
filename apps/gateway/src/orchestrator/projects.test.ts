@@ -118,6 +118,31 @@ describe("projects in runs (ADR-0031)", () => {
     expect(task?.project).toBe("acme");
   });
 
+  it("a shell run with more than one folder is told where it starts and how to change folder (ADR-0061)", async () => {
+    const repo = join(home, "Game Repo");
+    writeFileSync(
+      join(home, "agents", "web-dev", "agent.yaml"),
+      `id: web-dev\nname: web-dev\nrole: web-dev\nworkspace: web-clients\ntools: [Read, Edit, Bash]\nfs:\n  write: ["${repo}"]\nshell:\n  allow: ["git status"]\nmodels:\n  default: cli-claude/sonnet\n`,
+    );
+    orch.syncAgents();
+    give("web-dev", "acme");
+    await drain();
+    const files = join(home, "projects", "acme", "files");
+    expect(calls[0]?.req.cwd).toBe(files);
+    expect(calls[0]?.req.addDirs).toContain(repo);
+    expect(calls[0]?.req.prompt).toContain(
+      `Your shell starts in ${files}. Your other work folders: ${repo}.`,
+    );
+    expect(calls[0]?.req.prompt).toMatch(/first run `cd "<folder>"` as a command of its own/);
+
+    // One folder, or no shell: nothing to explain.
+    give("web-dev");
+    give("writer", "acme");
+    await drain();
+    expect(calls[1]?.req.prompt).not.toContain("Your shell starts in");
+    expect(calls[2]?.req.prompt).not.toContain("Your shell starts in");
+  });
+
   it("an agent of the project's workspace works in files/ and gets PROJECT.md", async () => {
     updateProject(join(home, "projects"), "acme", {
       integrations: { instagram: ["@acme", "@acme.shop"] },

@@ -123,7 +123,7 @@ Default layout, configurable:
 - `studio` (game dev, Unity), `web-clients` (client web work), `shared/marketing`.
   Each workspace has its own memory namespace, MD vault folder, MCP set and secrets scope. Marketing gets read-only access to the others' public material.
 
-- Projects (ADR-0031): a project level under a workspace for client work: `$ACHORDS_HOME/projects/<slug>/` with `project.yaml` (name, workspace), `PROJECT.md` (client preferences, stack, conventions, deploy rules), `files/` (working folder, managed in Finder by the owner) and an optional `workflow.yaml` replacing the workspace's. Threads carry a project (web chat header, Telegram `/project`), delegated tasks and children inherit it. Project runs get `PROJECT.md`; agents of the project's workspace work in `files/` (cwd and write root), others get the text only. Project memory lives in `<workspace>/<slug>`.
+- Projects (ADR-0031): a project level under a workspace for client work: `$ACHORDS_HOME/projects/<slug>/` with `project.yaml` (name, workspace), `PROJECT.md` (client preferences, stack, conventions, deploy rules), `files/` (working folder, managed in Finder by the owner) and an optional `workflow.yaml` replacing the workspace's. Threads carry a project (web chat header, Telegram `/project`), delegated tasks and children inherit it. Project runs get `PROJECT.md`; agents of the project's workspace work in `files/` (cwd and write root), others get the text only. Every folder in an agent's `fs.write` is a work folder for its allowed shell commands too; a run with more than one is told where its shell starts and to change folder with a `cd` of its own (ADR-0061). Project memory lives in `<workspace>/<slug>`.
 
 ### 4.8 Memory
 

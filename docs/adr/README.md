@@ -59,3 +59,5 @@
 - [ADR-0057: Project websites open to the agent working on the project](0057-project-websites-open-to-the-project-agent.md)
 - [ADR-0058: The next allowed model takes over at a usage limit](0058-next-model-at-a-usage-limit.md)
 - [ADR-0059: One card per chat](0059-one-card-per-chat.md)
+- [ADR-0060: Owner-approved additions to a project description](0060-owner-approved-project-description-additions.md)
+- [ADR-0061: Shell commands in any of an agent's work folders](0061-shell-commands-in-any-work-folder.md)

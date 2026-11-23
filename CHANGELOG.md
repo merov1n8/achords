@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- An agent with more than one folder (for example a project's files and a game's repository
+  elsewhere on the Mac) could not run its allowed shell commands in the other folder: `git add`
+  and `git commit` "required approval" however often they were approved. It is now told where
+  its shell starts and how to change folder, and its allowed commands run in any of its folders.
 - After an update the chat showed "internal error" for a minute or two: the old gateway kept
   answering open connections without its database. It now closes them and exits at once.
 - An agent could read a client's website only if the site was also added to that agent; now
@@ -110,6 +114,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Tell the boss a lasting fact about a project ("this is a Unity mobile game") or ask it to note
+  something in the project description: it shows the exact text to add, and adds it to the
+  project's description when you approve. It works together with handing over work in the same
+  message.
 - When a model hits its subscription usage limit, the agent continues on its next allowed model
   (for example Astra, then Sol) and the chat says so; the limited model is tried again after an hour.
 - Web: a soft chime when an agent replies in any chat, and the number of chats with unread

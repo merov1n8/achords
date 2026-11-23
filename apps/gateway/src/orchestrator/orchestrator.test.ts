@@ -20,6 +20,7 @@ import {
   setPaused,
 } from "@achords/core";
 import { openMemory } from "@achords/memory";
+import { createProject } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readGuide, writeGuide } from "../guide.ts";
@@ -260,6 +261,93 @@ describe("orchestrator", () => {
     const approve = listMessages(db, t.id).find((m) => m.actions?.length)?.actions?.[0]?.data ?? "";
     expect(orch.runAction(approve)).toMatchObject({ ok: false, message: /edited since/ });
     expect(readFileSync(path, "utf8")).not.toContain("WebFetch");
+  });
+
+  it("boss proposes an addition to the project description; written once, on approval (ADR-0060)", async () => {
+    createProject(join(home, "projects"), { slug: "acme", name: "Acme", workspace: "web-clients" });
+    const path = join(home, "projects", "acme", "PROJECT.md");
+    writeFileSync(path, "# Acme\n\nA shop.\n");
+    const project_update = { add: "Acme is a Unity mobile game.\n" };
+    const { orch } = make(
+      boss({ action: "update_project", message: "Javasoltam.", project_update }),
+    );
+    const t = createThread(db, { project: "acme" });
+    expect(await orch.handleMessage(t.id, "írd be a leírásba", "web")).toBe("update_project");
+    const msg = listMessages(db, t.id).find((m) => m.actions?.length);
+    expect(msg?.content).toMatch(
+      /description of Acme:\n\nAcme is a Unity mobile game\.\n\nNothing changes/,
+    );
+    expect(readFileSync(path, "utf8")).toBe("# Acme\n\nA shop.\n"); // nothing yet
+    const approve = msg?.actions?.[0]?.data ?? "";
+    expect(orch.runAction(approve)).toMatchObject({
+      ok: true,
+      message: /Added to the description/,
+    });
+    expect(readFileSync(path, "utf8")).toBe("# Acme\n\nA shop.\n\nAcme is a Unity mobile game.\n");
+    expect(orch.runAction(approve).ok).toBe(false); // once
+    expect(readFileSync(path, "utf8")).toBe("# Acme\n\nA shop.\n\nAcme is a Unity mobile game.\n");
+  });
+
+  it("a project description change: rejected, stale, or in a chat without a project, writes nothing", async () => {
+    createProject(join(home, "projects"), { slug: "acme", name: "Acme", workspace: "web-clients" });
+    const path = join(home, "projects", "acme", "PROJECT.md");
+    writeFileSync(path, "# Acme\n");
+    const decision = {
+      action: "update_project",
+      message: "ok",
+      project_update: { add: "New fact." },
+    };
+    const { orch } = make(boss(decision));
+    const pending = async () => {
+      const t = createThread(db, { project: "acme" });
+      await orch.handleMessage(t.id, "x", "web");
+      return listMessages(db, t.id).find((m) => m.actions?.length)?.actions ?? [];
+    };
+
+    const rejected = await pending();
+    expect(orch.runAction(rejected[1]?.data ?? "")).toMatchObject({
+      ok: true,
+      message: /Not added/,
+    });
+    expect(orch.runAction(rejected[0]?.data ?? "").ok).toBe(false);
+
+    // Edited by the owner in the meantime: the proposal no longer applies.
+    const stale = await pending();
+    writeFileSync(path, "# Acme\n\nEdited by hand.\n");
+    expect(orch.runAction(stale[0]?.data ?? "")).toMatchObject({
+      ok: false,
+      message: /edited since/,
+    });
+    expect(readFileSync(path, "utf8")).toBe("# Acme\n\nEdited by hand.\n");
+
+    const t = createThread(db, {});
+    expect(await orch.handleMessage(t.id, "x", "web")).toBe("error");
+    expect(listMessages(db, t.id).at(-1)?.content).toMatch(/no project/);
+  });
+
+  it("a delegation can carry a project description addition: the work starts, the text waits", async () => {
+    createProject(join(home, "projects"), { slug: "acme", name: "Acme", workspace: "web-clients" });
+    const { orch } = make(
+      boss({
+        action: "delegate",
+        message: "web-dev megcsinálja.",
+        task: {
+          title: "Fix cart",
+          description: "Fix it.",
+          assignee: "web-dev",
+          language: "Hungarian",
+        },
+        project_update: { add: "Acme sells shoes." },
+      }),
+    );
+    const t = createThread(db, { project: "acme" });
+    expect(await orch.handleMessage(t.id, "javítsd; amúgy cipőbolt", "web")).toBe("delegate");
+    expect(db.prepare("SELECT title FROM tasks").get()).toMatchObject({ title: "Fix cart" });
+    const msg = listMessages(db, t.id).find((m) => m.actions?.length);
+    expect(msg?.content).toContain("Acme sells shoes.");
+    expect(readFileSync(join(home, "projects", "acme", "PROJECT.md"), "utf8")).not.toContain(
+      "shoes",
+    );
   });
 
   it("AGENT.md: the agent's own runs get it, the boss sees each agent's summary", async () => {
