@@ -28,6 +28,7 @@ export const SETTINGS_PAGES: [string, string][] = [
   ["access", "nav.modelAccess"],
   ["vault", "nav.vault"],
   ["updates", "nav.updates"],
+  ["storage", "nav.storage"],
   ["devices", "nav.devices"],
   ["rooms", "nav.rooms"],
 ];

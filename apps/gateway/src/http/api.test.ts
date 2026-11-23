@@ -1183,6 +1183,21 @@ describe("HTTP API", () => {
     expect(refused.status).toBe(403);
   });
 
+  it("chat image retention: 30 days by default, the owner's number, empty keeps them", async () => {
+    const { call } = await pair();
+    const get = async () =>
+      ((await (await call("/api/settings/images")).json()) as { keepDays: number | null }).keepDays;
+    expect(await get()).toBe(30);
+    const put = (keepDays: unknown) =>
+      call("/api/settings/images", { method: "PUT", body: JSON.stringify({ keepDays }) });
+    expect((await put(7)).status).toBe(200);
+    expect(await get()).toBe(7);
+    expect((await put(0)).status).toBe(400);
+    expect((await put("5")).status).toBe(400);
+    expect(await (await put(null)).json()).toEqual({ keepDays: null });
+    expect(await get()).toBeNull();
+  });
+
   it("chat images: stored for the chat, shown back, wrong type or size refused", async () => {
     const { call } = await pair();
     const thread = createThread(db, { title: "Shots" });

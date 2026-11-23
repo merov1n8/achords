@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import {
   apiSpendSince,
   appendMessage,
+  dailyImagePrune,
   getSetting,
   homePaths,
   isPaused,
@@ -428,6 +429,15 @@ export function runGateway(home: string): Promise<number> {
           .finally(() => {
             delivering = false;
           });
+      }
+      // Chat images past the owner's retention go once a day, from midnight (local time).
+      if (ticks % 60 === 0) {
+        try {
+          const removed = dailyImagePrune(db, paths.home);
+          if (removed) log(`chat images: ${removed} older than the retention removed`);
+        } catch (err) {
+          log(`chat images cleanup failed: ${(err as Error).message}`);
+        }
       }
       // Scheduler (ADR-0033): due schedules become queued tasks; the worker below runs them.
       if (!isPaused(db)) {

@@ -29,6 +29,17 @@ const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_IMAGES = 6;
 
+/** One chat image; once deleted by the retention it says so instead of a broken picture. */
+function ChatImage({ src }: { src: string }) {
+  const [gone, setGone] = useState(false);
+  if (gone) return <span class="muted small">{t("chat.imageGone")}</span>;
+  return (
+    <a href={src} target="_blank" rel="noreferrer">
+      <img src={src} alt="" loading="lazy" onError={() => setGone(true)} />
+    </a>
+  );
+}
+
 /** A message's text, and the images of this chat it carries shown as pictures. */
 function MessageBody(props: { threadId: string; content: string }) {
   const { text, images } = imageParts(props.content, props.threadId);
@@ -37,14 +48,9 @@ function MessageBody(props: { threadId: string; content: string }) {
       {text && <div class="content">{text}</div>}
       {images.length > 0 && (
         <div class="msg-images">
-          {images.map((name) => {
-            const src = `/api/threads/${props.threadId}/images/${name}`;
-            return (
-              <a key={name} href={src} target="_blank" rel="noreferrer">
-                <img src={src} alt="" loading="lazy" />
-              </a>
-            );
-          })}
+          {images.map((name) => (
+            <ChatImage key={name} src={`/api/threads/${props.threadId}/images/${name}`} />
+          ))}
         </div>
       )}
     </>

@@ -37,6 +37,7 @@ import { Projects } from "./views/Projects.tsx";
 import { Rooms } from "./views/Rooms.tsx";
 import { Schedules } from "./views/Schedules.tsx";
 import { Skills } from "./views/Skills.tsx";
+import { Storage } from "./views/Storage.tsx";
 import { Updates } from "./views/Updates.tsx";
 import { Usage } from "./views/Usage.tsx";
 import { Vault } from "./views/Vault.tsx";
@@ -145,6 +146,7 @@ export function App() {
           {section === "settings" && sub === "access" && <ModelAccess />}
           {section === "settings" && sub === "rooms" && <Rooms />}
           {section === "settings" && sub === "guide" && <Guide />}
+          {section === "settings" && sub === "storage" && <Storage />}
           {section === "settings" && sub === "devices" && <Devices onLogout={doLogout} />}
           {section === "settings" && (sub === "appearance" || !sub) && <Appearance />}
         </div>
@@ -284,6 +286,7 @@ function Sidebar(props: {
         {subLink("/settings/access", t("nav.modelAccess"), sub === "access")}
         {subLink("/settings/vault", t("nav.vault"), sub === "vault")}
         {subLink("/settings/updates", t("nav.updates"), sub === "updates")}
+        {subLink("/settings/storage", t("nav.storage"), sub === "storage")}
         {subLink("/settings/devices", t("nav.devices"), sub === "devices")}
         {subLink("/settings/rooms", t("nav.rooms"), sub === "rooms")}
       </Group>

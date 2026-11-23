@@ -104,6 +104,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   to 6, 5 MB each, PNG/JPEG/WebP/GIF), or send a photo or image file on Telegram (the caption
   is the message). They are stored for that chat and shown in the conversation; agents working
   on the chat open them with their Read tool. Larger files still go in the project folder.
+- Settings → Storage: chat images are deleted after 30 days (the owner's number; empty keeps
+  them), once a day from midnight by the gateway. A deleted image shows a short note in the chat.
 - Read aloud: agent messages on the web get a speaker icon (the browser's own voice; on a Mac,
   Hungarian text with Tünde), and on Telegram a "🔊 Read aloud" button that answers with a voice
   note made on this Mac (`say` and ffmpeg). Nothing is sent to a speech service.

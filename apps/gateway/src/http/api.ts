@@ -24,8 +24,10 @@ import {
   getSetting,
   getTask,
   getThread,
+  IMAGE_KEEP_KEY,
   IMAGE_NAME,
   IMAGE_TYPES,
+  imageKeepDays,
   listAgents,
   listChecklist,
   listComments,
@@ -1335,6 +1337,20 @@ export function createApiHandler(deps: ApiDeps) {
       async () => {
         if (!deps.update) throw new HttpError(404, "updates are not available");
         return { result: await deps.update.checkNow() };
+      },
+    ],
+    // How long chat images are kept (Settings → Storage); null keeps them forever.
+    ["GET", /^\/api\/settings\/images$/, () => ({ keepDays: imageKeepDays(db) ?? null })],
+    [
+      "PUT",
+      /^\/api\/settings\/images$/,
+      async ({ body }) => {
+        const v = (await body()).keepDays;
+        if (v !== null && !(Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650)) {
+          throw new HttpError(400, "keepDays: whole days from 1 to 3650, or empty to keep forever");
+        }
+        setSetting(db, IMAGE_KEEP_KEY, v === null ? "" : String(v));
+        return { keepDays: imageKeepDays(db) ?? null };
       },
     ],
     // The Achords guide: rules for every agent and the boss (Settings → Guide).
