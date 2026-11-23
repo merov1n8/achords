@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -37,7 +37,9 @@ function fakeTelegram() {
   const server: Server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
+    const raw = Buffer.concat(chunks).toString();
+    const multipart = (req.headers["content-type"] ?? "").startsWith("multipart/form-data");
+    const body = multipart ? { multipart: raw } : chunks.length ? JSON.parse(raw) : {};
     const method = req.url?.split("/").pop();
     if (req.url === `/file/bot${TOKEN}/voice/file_1.oga`) {
       calls.push({ method: "download", body: {} });
@@ -59,7 +61,11 @@ function fakeTelegram() {
       res.end(JSON.stringify({ ok: true, result: ready }));
       return;
     }
-    if (method === "answerCallbackQuery" || method === "editMessageReplyMarkup") {
+    if (
+      method === "answerCallbackQuery" ||
+      method === "editMessageReplyMarkup" ||
+      method === "sendVoice"
+    ) {
       calls.push({ method, body });
       res.end(JSON.stringify({ ok: true, result: true }));
       return;
@@ -355,6 +361,71 @@ describe("telegram channel", () => {
       reply_markup: { inline_keyboard: [] },
     });
     expect(tg.sent.at(-1)?.text).toMatch(/Approved: agent tester/);
+  });
+
+  it("read aloud: a button under agent messages answers with a voice note made locally", async () => {
+    const spoken: string[] = [];
+    const ch = createTelegramChannel({
+      db,
+      paths: homePaths(home),
+      token: TOKEN,
+      apiBase: `http://127.0.0.1:${(tg.server.address() as AddressInfo).port}`,
+      pollTimeoutS: 0,
+      orchestrator: {
+        runAction: () => ({ ok: false, message: "-" }),
+        handleMessage: async () => "answer" as const,
+      },
+      onEmergencyStop: () => {},
+      log: () => {},
+      speaker: {
+        speak: async (text) => {
+          spoken.push(text);
+          const path = join(home, "reply.ogg");
+          writeFileSync(path, "OPUS-BYTES");
+          return { ok: true, path };
+        },
+      },
+    });
+    tg.msg(OWNER, `/pair ${createPairingCode(db, "telegram")}`);
+    await ch.pollOnce();
+    tg.sent.length = 0;
+    const threadId = getSetting(db, "telegram.thread_id") as string;
+    const msg = appendMessage(db, {
+      threadId,
+      role: "agent",
+      author: "web-dev",
+      channel: "system",
+      content: "A commit elkészült.",
+      actions: [{ label: "✅ This task", data: "cmd:task:ab12" }],
+    });
+    await ch.deliver();
+    expect(tg.sent[0]?.reply_markup?.inline_keyboard).toEqual([
+      [{ text: "✅ This task", callback_data: "cmd:task:ab12" }],
+      [{ text: "🔊 Read aloud", callback_data: `tts:${msg.seq}` }],
+    ]);
+    tg.press(2002, `tts:${msg.seq}`); // someone else: nothing is made
+    tg.press(OWNER, `tts:${msg.seq}`);
+    await ch.pollOnce();
+    expect(spoken).toEqual(["A commit elkészült."]);
+    // Acknowledged, the voice note sent, the buttons kept (it is not a decision).
+    expect(tg.calls.map((c) => c.method)).toEqual(["answerCallbackQuery", "sendVoice"]);
+    expect(String(tg.calls[1]?.body.multipart)).toContain("OPUS-BYTES");
+    expect(existsSync(join(home, "reply.ogg"))).toBe(false);
+  });
+
+  it("without a speaker there is no read-aloud button", async () => {
+    await pairOwner();
+    tg.sent.length = 0;
+    const threadId = getSetting(db, "telegram.thread_id") as string;
+    appendMessage(db, {
+      threadId,
+      role: "agent",
+      author: "boss",
+      channel: "system",
+      content: "hi",
+    });
+    await channel.deliver();
+    expect(tg.sent[0]?.reply_markup).toBeUndefined();
   });
 
   describe("voice notes", () => {

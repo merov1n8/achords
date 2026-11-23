@@ -253,6 +253,11 @@ export function listMessages(
     .map(toMessage);
 }
 
+export function getMessage(db: Db, seq: number): Message | undefined {
+  const r = db.prepare("SELECT rowid AS seq, * FROM messages WHERE rowid = ?").get(seq);
+  return r ? toMessage(r) : undefined;
+}
+
 export function listMessagesAfter(db: Db, threadId: string, seq: number): Message[] {
   return db
     .prepare(

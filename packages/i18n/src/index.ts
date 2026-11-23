@@ -17,3 +17,4 @@ export function t(key: string, vars: Record<string, string | number> = {}): stri
 }
 
 export const catalog = en;
+export { isHungarian, speakable } from "./speech.ts";

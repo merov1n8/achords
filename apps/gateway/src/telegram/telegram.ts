@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   AuthError,
   appendMessage,
   createThread,
   type Db,
+  getMessage,
   getSetting,
   getThread,
   type HomePaths,
@@ -20,6 +21,7 @@ import {
 import { t } from "@achords/i18n";
 import { loadProjects } from "@achords/policy";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
+import type { Speaker } from "../voice/speak.ts";
 import type { Transcriber } from "../voice/transcribe.ts";
 
 const OWNER_USER = "telegram.owner_user_id";
@@ -64,6 +66,8 @@ export interface TelegramDeps {
   orchestrator: Pick<Orchestrator, "handleMessage" | "runAction">;
   /** Local speech-to-text for voice notes (ADR-0014); without it voice notes get a hint. */
   transcriber?: Transcriber;
+  /** Local text-to-speech: agent messages get a read-aloud button that answers with a voice note. */
+  speaker?: Speaker;
   /** Called after an owner-issued /stop has paused the queue and killed runs. */
   onEmergencyStop: (lines: string[]) => void;
   log: (msg: string) => void;
@@ -116,27 +120,69 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     return json.result as T;
   }
 
-  // Long messages go out in parts; buttons belong to the last part.
+  // Files (voice notes) go up as multipart; same token rule as call().
+  async function upload(
+    method: string,
+    fields: Record<string, string | number>,
+    file: { field: string; path: string; name: string; type: string },
+  ): Promise<void> {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) form.append(k, String(v));
+    form.append(file.field, new Blob([readFileSync(file.path)], { type: file.type }), file.name);
+    let res: Response;
+    try {
+      res = await fetch(`${base}/bot${deps.token}/${method}`, { method: "POST", body: form });
+    } catch (err) {
+      throw new Error(`telegram ${method}: network error (${(err as Error).name})`);
+    }
+    if (!res.ok) throw new Error(`telegram ${method}: HTTP ${res.status}`);
+  }
+
+  // Long messages go out in parts; buttons belong to the last part. `speak`: the message's seq,
+  // for a read-aloud button under it.
   const send = async (
     chatId: number,
     text: string,
     actions?: { label: string; data: string }[] | null,
+    speak?: number,
   ) => {
+    const rows = [
+      ...(actions?.length ? [actions.map((a) => ({ text: a.label, callback_data: a.data }))] : []),
+      ...(speak && deps.speaker
+        ? [[{ text: t("telegram.readAloud"), callback_data: `tts:${speak}` }]]
+        : []),
+    ];
     const parts = splitText(text, MAX_TEXT);
     for (const [i, part] of parts.entries()) {
       await call("sendMessage", {
         chat_id: chatId,
         text: part,
-        ...(actions?.length && i === parts.length - 1
-          ? {
-              reply_markup: {
-                inline_keyboard: [actions.map((a) => ({ text: a.label, callback_data: a.data }))],
-              },
-            }
+        ...(rows.length && i === parts.length - 1
+          ? { reply_markup: { inline_keyboard: rows } }
           : {}),
       });
     }
   };
+
+  /** The read-aloud button: the message as a voice note, made on this Mac. */
+  async function readAloud(chatId: number, seq: number) {
+    const msg = getMessage(db, seq);
+    if (!msg || !deps.speaker) return;
+    const out = await deps.speaker.speak(msg.content);
+    if (!out.ok) {
+      await send(chatId, t("telegram.readAloudFailed", { reason: out.reason }));
+      return;
+    }
+    try {
+      await upload(
+        "sendVoice",
+        { chat_id: chatId },
+        { field: "voice", path: out.path, name: "reply.ogg", type: "audio/ogg" },
+      );
+    } finally {
+      rmSync(out.path, { force: true });
+    }
+  }
 
   /** Runs a button action; same effect as the matching text command. */
   const runAction = (data: string): string => deps.orchestrator.runAction(data).message;
@@ -146,6 +192,16 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     // Same rule as messages: the paired owner, in a private chat; anyone else is ignored silently.
     if (chat?.type !== "private" || q.from.id !== ownerUser()) {
       deps.log(`telegram: ignored button press from user ${q.from.id}`);
+      return;
+    }
+    const tts = /^tts:(\d{1,12})$/.exec(q.data ?? "");
+    if (tts) {
+      // Not a decision: the buttons stay, the voice note follows.
+      await call("answerCallbackQuery", {
+        callback_query_id: q.id,
+        text: t("telegram.readAloudWorking"),
+      });
+      await readAloud(chat.id, Number(tts[1]));
       return;
     }
     const reply = runAction(q.data ?? "");
@@ -339,7 +395,7 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
       const cursor = Number(getSetting(db, CURSOR) ?? 0);
       for (const msg of listMessagesAfter(db, threadId, cursor)) {
         // Quiet output: only agent messages go out; the owner's own words are not echoed.
-        if (msg.role === "agent") await send(chatId, msg.content, msg.actions);
+        if (msg.role === "agent") await send(chatId, msg.content, msg.actions, msg.seq);
         setSetting(db, CURSOR, String(msg.seq));
       }
     },

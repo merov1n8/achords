@@ -101,6 +101,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Read aloud: agent messages on the web get a speaker icon (the browser's own voice; on a Mac,
+  Hungarian text with Tünde), and on Telegram a "🔊 Read aloud" button that answers with a voice
+  note made on this Mac (`say` and ffmpeg). Nothing is sent to a speech service.
 - Settings → Guide: rules for every agent and the boss (how to answer, what holds for all
   work), added to each run's instructions. Achords ships a short default; saving makes it the
   owner's own `GUIDE.md`.

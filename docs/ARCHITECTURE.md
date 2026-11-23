@@ -166,6 +166,7 @@ Default layout, configurable:
 ### 4.13 Voice
 
 - Telegram voice notes and web mic recordings are transcribed by a local Whisper (`whisper.cpp` / `mlx-whisper`). Browser Web Speech API is not used (it may send audio to third parties).
+- Read aloud: the web uses the browser's speech synthesis with on-device voices only (Chrome's network voices would send the text out); Telegram's "🔊 Read aloud" button makes an OGG/Opus voice note on the host (macOS `say`, Hungarian text with Tünde, then ffmpeg) and sends it with `sendVoice`.
 
 ### 4.14 MCP layer
 

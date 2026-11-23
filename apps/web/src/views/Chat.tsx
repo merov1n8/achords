@@ -8,6 +8,7 @@ import {
   Pencil,
   Send,
   Square,
+  Volume2,
 } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
@@ -17,6 +18,7 @@ import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
 import { useRecorder } from "../recorder.ts";
+import { canSpeak, speak, stopSpeaking } from "../speech.ts";
 import { loadDetailsOpen, saveDetailsOpen } from "../theme.ts";
 import type { Message, Project, Thread } from "../types.ts";
 import { ChatList } from "./ChatList.tsx";
@@ -145,6 +147,9 @@ function Conversation(props: {
     threadId,
   ]);
   const [text, setText] = useState("");
+  const [speaking, setSpeaking] = useState<string>();
+  // Leaving the chat stops reading.
+  useEffect(() => stopSpeaking, []);
   const [waitingAfter, setWaitingAfter] = useState<number>();
   const mic = useRecorder(
     (spoken) => setText((cur) => (cur ? `${cur} ${spoken}` : spoken)),
@@ -253,6 +258,25 @@ function Conversation(props: {
             {m.role !== "user" && (
               <div class="meta">
                 {m.author ?? m.role} · {m.channel} · {ago(m.createdAt)}
+                {canSpeak() && (
+                  <button
+                    type="button"
+                    class="iconbtn speak"
+                    onClick={() => {
+                      if (speaking === m.id) {
+                        stopSpeaking();
+                        setSpeaking(undefined);
+                      } else {
+                        setSpeaking(m.id);
+                        speak(m.content, () => setSpeaking((s) => (s === m.id ? undefined : s)));
+                      }
+                    }}
+                    aria-label={t(speaking === m.id ? "chat.stopReading" : "chat.readAloud")}
+                    title={t(speaking === m.id ? "chat.stopReading" : "chat.readAloud")}
+                  >
+                    {speaking === m.id ? <Square class="icon" /> : <Volume2 class="icon" />}
+                  </button>
+                )}
               </div>
             )}
             <div class="content">{m.content}</div>

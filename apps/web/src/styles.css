@@ -600,6 +600,16 @@ main > .page {
 .msg.agent {
   border-bottom-left-radius: 4px;
 }
+.msg .meta .speak {
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.msg .meta .speak .icon {
+  width: 14px;
+  height: 14px;
+}
 .msg .meta {
   font-size: 12px;
   font-weight: 600;

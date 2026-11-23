@@ -49,6 +49,7 @@ import {
   type UpdaterDeps,
   updateTick,
 } from "./updater.ts";
+import { macSpeaker } from "./voice/speak.ts";
 import { whisperTranscriber } from "./voice/transcribe.ts";
 
 export const HEARTBEAT_KEY = "gateway.heartbeat";
@@ -371,6 +372,8 @@ export function runGateway(home: string): Promise<number> {
       orchestrator,
       onEmergencyStop: (lines) => log(`emergency stop via Telegram: ${lines.join("; ")}`),
       transcriber,
+      // Read-aloud with the Mac's own voices (say); other systems have no button.
+      ...(process.platform === "darwin" ? { speaker: macSpeaker({ workDir: paths.runDir }) } : {}),
       log,
     });
   }
