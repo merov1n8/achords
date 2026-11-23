@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { listMoves, moveCard, placeCard } from "./board.ts";
+import { listMoves, moveCard, placeCard, takeOverCard } from "./board.ts";
+import { addChecklistItem, addComment, listChecklist, listComments } from "./cards.ts";
 import { openCoreDatabase, openDatabase } from "./db/database.ts";
 import { migrate, migrationsFromDir } from "./db/migrate.ts";
 import { enqueue, getTask } from "./queue.ts";
@@ -11,6 +12,25 @@ const setup = () => {
 };
 
 describe("kanban board", () => {
+  it("a chat's next task takes over its card: column, checklist, comments and moves", () => {
+    const { db, t } = setup();
+    placeCard(db, t.id, "in_progress", "system");
+    moveCard(db, { taskId: t.id, from: "in_progress", to: "done", actor: "owner" });
+    addChecklistItem(db, t.id, "check mobile");
+    addComment(db, t.id, "looks good");
+    const next = enqueue(db, { title: "fix footer" });
+    takeOverCard(db, t.id, next.id, "in_progress", "system");
+    expect(getTask(db, t.id)?.column).toBeNull();
+    expect(getTask(db, next.id)?.column).toBe("in_progress");
+    expect(listChecklist(db, next.id).map((i) => i.text)).toEqual(["check mobile"]);
+    expect(listComments(db, next.id).map((c) => c.text)).toEqual(["looks good"]);
+    expect(listMoves(db, next.id).map((m) => [m.from, m.to])).toEqual([
+      [null, "in_progress"],
+      ["in_progress", "done"],
+      ["done", "in_progress"],
+    ]);
+  });
+
   it("a task has no card until it is placed; placing logs a move", () => {
     const { db, t } = setup();
     expect(getTask(db, t.id)?.column).toBeNull();

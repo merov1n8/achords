@@ -58,3 +58,4 @@
 - [ADR-0056: Shell commands approved in the chat](0056-shell-commands-approved-in-the-chat.md)
 - [ADR-0057: Project websites open to the agent working on the project](0057-project-websites-open-to-the-project-agent.md)
 - [ADR-0058: The next allowed model takes over at a usage limit](0058-next-model-at-a-usage-limit.md)
+- [ADR-0059: One card per chat](0059-one-card-per-chat.md)

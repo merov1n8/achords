@@ -288,6 +288,42 @@ describe("orchestrator", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM tasks").get()?.n).toBe(0);
   });
 
+  it("one chat, one card: follow-up work continues the chat's card unless a new one is asked for", async () => {
+    let newCard = false;
+    let n = 0;
+    const { orch } = make((req) =>
+      req.jsonSchema
+        ? result({
+            structured: {
+              action: "delegate",
+              message: "ok",
+              task: {
+                title: `step ${++n}`,
+                description: "do it",
+                assignee: "web-dev",
+                language: "Hungarian",
+                ...(newCard ? { new_card: true } : {}),
+              },
+            },
+          })
+        : result({ text: "done" }),
+    );
+    const t = createThread(db, {});
+    const cards = () =>
+      db
+        .prepare("SELECT title, board_column AS col FROM tasks WHERE board_column IS NOT NULL")
+        .all();
+    await orch.handleMessage(t.id, "first", "web");
+    await orch.workOnce();
+    expect(cards()).toEqual([{ title: "step 1", col: "review" }]);
+    await orch.handleMessage(t.id, "fix it", "web");
+    // The card moves on to the new task, back in progress; still one card.
+    expect(cards()).toEqual([{ title: "step 2", col: "in_progress" }]);
+    newCard = true;
+    await orch.handleMessage(t.id, "and a separate ticket for the footer", "web");
+    expect(cards()).toHaveLength(2);
+  });
+
   it("boss delegates: a kanban task for the sub-agent, a one-line ack in the thread", async () => {
     const { orch } = make(
       boss({

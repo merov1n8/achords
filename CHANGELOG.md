@@ -56,6 +56,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Kanban: one card per chat. Follow-up work in a chat continues its card instead of adding a
+  new one; ask in the chat for a separate card when you want one.
 - Project accounts: one row per channel with one entry per line, instead of a row per entry.
 - A project website with a path (`https://www.beds24.com/api/`) is readable only under that path.
 - Web addresses have no `#` any more (`/chat/…` instead of `#/chat/…`).

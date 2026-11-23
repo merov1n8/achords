@@ -69,6 +69,8 @@ import {
   startParked,
   startRun,
   type Task,
+  takeOverCard,
+  threadCard,
   upsertAgent,
   waitForChildren,
 } from "@achords/core";
@@ -181,6 +183,12 @@ const decisionSchema = z.object({
         .string()
         .min(1)
         .describe("Language the owner writes in (e.g. Hungarian); the agent reports in it"),
+      new_card: z
+        .boolean()
+        .optional()
+        .describe(
+          "true only if the owner explicitly asks for a separate card/ticket; otherwise the chat's card continues",
+        ),
     })
     .optional(),
   // ADR-0041: a proposed change to an existing agent; the owner approves the exact diff.
@@ -396,7 +404,8 @@ export interface Orchestrator {
   delegate(
     from: { from: "boss"; threadId: string } | { from: "task"; taskId: string },
     request: { agent: string; title: string; instructions: string },
-    opts?: { budgetUsd?: number },
+    /** `newCard`: a card of its own even though the chat already has one. */
+    opts?: { budgetUsd?: number; newCard?: boolean },
   ): { ok: true; taskId: string } | { ok: false; reason: string };
   /**
    * Handoff (ADR-0055): the calling task's run ends and `agent` continues the work as its
@@ -1872,7 +1881,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             ? { project: getThread(db, from.threadId)?.project as string }
             : {}),
         });
-        placeCard(db, t.id, workflowForTask(t).start, "system");
+        // One chat, one card: further work in the chat continues its card (ADR-0059).
+        const card = opts.newCard ? undefined : threadCard(db, from.threadId);
+        if (card) takeOverCard(db, card, t.id, workflowForTask(t).start, "system");
+        else placeCard(db, t.id, workflowForTask(t).start, "system");
         return { ok: true, taskId: t.id };
       }
       const parent = getTask(db, from.taskId);
@@ -2112,6 +2124,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               // The sub-agent never sees the conversation, so the reply language travels with it.
               instructions: `${task.description}\n\nWrite your final report for the owner in ${task.language}.`,
             },
+            task.new_card ? { newCard: true } : {},
           );
           if (!r.ok) throw new Error(r.reason);
         }
@@ -2779,8 +2792,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         });
         if (task.parentId) childFinished(db, task.id);
         else {
-          finishCard(task);
-          placeCard(db, next.id, workflowForTask(next).start, "system");
+          // The successor carries the same card on (ADR-0059).
+          takeOverCard(db, task.id, next.id, workflowForTask(next).start, "system");
           if (task.threadId) {
             post(
               task.threadId,

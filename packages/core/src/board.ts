@@ -72,3 +72,39 @@ export function listMoves(db: Db, taskId: string): CardMove[] {
       createdAt: Number(r.created_at),
     }));
 }
+
+/**
+ * One chat, one card: the chat's next task takes over the card of the earlier one. The card moves
+ * to `column` on the new task, with its checklist, comments and move history; the earlier task
+ * leaves the board (it stays in the database and in the chat).
+ */
+export function takeOverCard(
+  db: Db,
+  fromId: string,
+  toId: string,
+  column: string,
+  actor: string,
+  now = Date.now(),
+): void {
+  transaction(db, () => {
+    const from = db.prepare("SELECT board_column FROM tasks WHERE id = ?").get(fromId)
+      ?.board_column as string | null | undefined;
+    for (const table of ["task_checklist", "task_comments", "task_moves"]) {
+      db.prepare(`UPDATE ${table} SET task_id = ? WHERE task_id = ?`).run(toId, fromId);
+    }
+    db.prepare("UPDATE tasks SET board_column = NULL WHERE id = ?").run(fromId);
+    db.prepare("UPDATE tasks SET board_column = ? WHERE id = ?").run(column, toId);
+    log(db, toId, from ?? null, column, actor, false, now);
+  });
+}
+
+/** The chat's card: its newest top-level task on the board, if any. */
+export function threadCard(db: Db, threadId: string): string | undefined {
+  const r = db
+    .prepare(
+      `SELECT id FROM tasks WHERE thread_id = ? AND parent_id IS NULL AND room_id IS NULL
+         AND board_column IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    )
+    .get(threadId);
+  return r ? (r.id as string) : undefined;
+}
