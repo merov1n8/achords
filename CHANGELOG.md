@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- After an update the chat showed "internal error" for a minute or two: the old gateway kept
+  answering open connections without its database. It now closes them and exits at once.
 - An agent could read a client's website only if the site was also added to that agent; now
   every agent working on a project's task can read the sites listed in the project.
 - The chat's message box stayed tall after sending a long message; it now returns to its normal

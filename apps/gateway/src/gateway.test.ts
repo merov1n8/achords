@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { Agent, get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getSetting, homePaths, listAgents, openCoreDatabase } from "@achords/core";
@@ -78,6 +79,51 @@ describe("gateway process", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("drops open keep-alive connections on shutdown instead of serving without a database", async () => {
+    // Regression: a browser polling over keep-alive kept the old gateway alive for minutes
+    // after an update, every request failing with "database is not open".
+    home = mkdtempSync(join(tmpdir(), "achords-gw-"));
+    child = startGateway(home);
+    let out = "";
+    child.stdout?.on("data", (d: Buffer) => {
+      out += d.toString();
+    });
+    let port = 0;
+    await waitFor(() => {
+      port = Number(/127\.0\.0\.1:(\d+)/.exec(out)?.[1] ?? 0);
+      return port > 0;
+    });
+    const agent = new Agent({ keepAlive: true });
+    const statuses: number[] = [];
+    let polling = true;
+    const poll = async () => {
+      while (polling) {
+        await new Promise<void>((resolve) => {
+          // A session cookie makes the request read the database (a dead session is a 401).
+          const headers = { cookie: `achords_session_${port}=dead` };
+          get({ port, path: "/api/threads", agent, headers }, (res) => {
+            statuses.push(res.statusCode ?? 0);
+            res.resume().on("end", resolve);
+          }).on("error", () => resolve());
+        });
+      }
+    };
+    // Like a browser's parallel polls: some request is always in flight when the server closes.
+    const polled = Promise.all([poll(), poll(), poll(), poll()]);
+    await waitFor(() => statuses.length > 0);
+    const exited = exitCode(child);
+    child.kill("SIGTERM");
+    const code = await Promise.race([
+      exited,
+      new Promise((r) => setTimeout(() => r("hung"), 3000)),
+    ]);
+    polling = false;
+    await polled;
+    agent.destroy();
+    expect(code).toBe(0);
+    expect(statuses).not.toContain(500);
+  }, 15_000);
 
   it("exits on its own when the STOP marker appears", async () => {
     home = mkdtempSync(join(tmpdir(), "achords-gw-"));

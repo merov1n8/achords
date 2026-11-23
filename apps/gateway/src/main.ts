@@ -15,7 +15,8 @@ if (process.argv.includes("--self-test")) {
 
 try {
   const { runGateway } = await import("./gateway.ts");
-  process.exitCode = await runGateway(resolveHome());
+  // Exit now: a leftover handle must not keep a stopped gateway alive next to its successor.
+  process.exit(await runGateway(resolveHome()));
 } catch (err) {
   // Crash right after an update: back to the previous commit, then let launchd restart us.
   const db = openCoreDatabase(homePaths(resolveHome()).db);

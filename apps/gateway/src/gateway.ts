@@ -404,7 +404,10 @@ export function runGateway(home: string): Promise<number> {
       if (working) {
         await Promise.race([working, new Promise((r) => setTimeout(r, SHUTDOWN_WAIT_MS))]);
       }
+      // Keep-alive connections would go on serving requests after the database closes
+      // ("database is not open" for minutes after an update), so they go too.
       server.close();
+      server.closeAllConnections();
       containers.close();
       vault?.close();
       memory.close();
