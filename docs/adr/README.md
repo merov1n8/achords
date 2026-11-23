@@ -56,3 +56,4 @@
 - [ADR-0054: Local apps opened and closed by achords](0054-local-apps-opened-by-achords.md)
 - [ADR-0055: Keyed integrations hosted by the gateway, and handoff between agents](0055-keyed-integrations-on-the-gateway-and-handoff.md)
 - [ADR-0056: Shell commands approved in the chat](0056-shell-commands-approved-in-the-chat.md)
+- [ADR-0057: Project websites open to the agent working on the project](0057-project-websites-open-to-the-project-agent.md)

@@ -549,6 +549,23 @@ describe("integrations in runs (ADR-0034)", () => {
     });
   });
 
+  it("the project's websites open to whichever agent works on it, and only to that run", async () => {
+    appendFileSync(
+      join(home, "projects", "acme", "project.yaml"),
+      'integrations:\n  website: ["https://acme.example", "https://shop.acme.example/x", "not a url"]\n',
+    );
+    await give("analyst", "acme");
+    await give("analyst");
+    expect(seen[0]?.req.tools).toContain("WebFetch");
+    expect(seen[0]?.req.allowedTools).toEqual(
+      expect.arrayContaining([
+        "WebFetch(domain:acme.example)",
+        "WebFetch(domain:shop.acme.example)",
+      ]),
+    );
+    expect(seen[1]?.req.allowedTools?.some((r) => r.startsWith("WebFetch"))).toBe(false);
+  });
+
   describe("project scope of shared accounts (ADR-0036)", () => {
     it("hands the project's targets to the launcher and names them in the prompt", async () => {
       appendFileSync(
