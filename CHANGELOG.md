@@ -118,6 +118,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- A project can work in a folder outside Achords: add `workdir: ~/path/to/repo` to its
+  `project.yaml` and its agents start there (and Unity is opened for that folder) instead of in
+  the project's `files/`.
+- Checks before review: with `needs_checks: true` on the review column of a workflow, an agent
+  must report a passing build and tests before its card goes to review; otherwise the card
+  stays and the chat says why.
 - Telegram topics: turn on Threaded mode for the bot in @BotFather and every chat gets its own
   topic in Telegram, so a chat started on the web can be continued from the phone. A topic you
   open in Telegram starts a new chat. Topics idle for 7 days are removed from Telegram (the chat

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -141,6 +141,23 @@ describe("projects in runs (ADR-0031)", () => {
     await drain();
     expect(calls[1]?.req.prompt).not.toContain("Your shell starts in");
     expect(calls[2]?.req.prompt).not.toContain("Your shell starts in");
+  });
+
+  it("a project with a work folder elsewhere starts its runs there; files/ stays a folder of the run (ADR-0064)", async () => {
+    const repo = join(home, "Game Repo");
+    mkdirSync(repo);
+    const yaml = join(home, "projects", "acme", "project.yaml");
+    writeFileSync(yaml, `${readFileSync(yaml, "utf8")}workdir: ${JSON.stringify(repo)}\n`);
+    give("web-dev", "acme");
+    give("writer", "acme"); // another workspace: the text only, as before
+    await drain();
+    expect(calls[0]?.req.cwd).toBe(repo);
+    expect(calls[0]?.req.addDirs).toContain(join(home, "projects", "acme", "files"));
+    expect(calls[1]?.req.cwd).not.toBe(repo);
+    expect(calls[1]?.req.addDirs ?? []).not.toContain(repo);
+    // Edited in the web form (name, accounts): the work folder is kept.
+    updateProject(join(home, "projects"), "acme", { name: "Acme 2" });
+    expect(readFileSync(yaml, "utf8")).toContain(`workdir: ${JSON.stringify(repo)}`);
   });
 
   it("an agent of the project's workspace works in files/ and gets PROJECT.md", async () => {

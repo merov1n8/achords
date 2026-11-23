@@ -63,3 +63,5 @@
 - [ADR-0061: Shell commands in any of an agent's work folders](0061-shell-commands-in-any-work-folder.md)
 - [ADR-0062: A review's verdict reaches the owner, and a card sent back restarts its work](0062-review-verdicts-reach-the-owner-and-restart-the-work.md)
 - [ADR-0063: Telegram topics: one chat, one topic](0063-telegram-topics-one-chat-one-topic.md)
+- [ADR-0064: A project's work folder may be outside Achords](0064-a-project-work-folder-outside-achords.md)
+- [ADR-0065: Checks before review](0065-checks-before-review.md)

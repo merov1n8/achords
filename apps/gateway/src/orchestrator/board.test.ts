@@ -183,6 +183,64 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
     expect(chat).toContainEqual(["qa", "Review (qa): Build page\n\nApproved."]);
   });
 
+  it("a workflow that needs checks holds unverified work back from review (ADR-0065)", async () => {
+    setup([
+      ["dev", "roles: [dev]"],
+      ["qa", "roles: [qa]"],
+    ]);
+    const wf = join(home, "workflows", "shared.yaml");
+    writeFileSync(
+      wf,
+      readFileSync(wf, "utf8").replace(
+        "review: { assign: role:qa }",
+        "review: { assign: role:qa, needs_checks: true }",
+      ),
+    );
+    // Not reported at all: no review run, the card stays, the chat says why.
+    const first = give();
+    await drain();
+    expect(calls.map((c) => c.task.assigneeAgentId)).toEqual(["dev"]);
+    expect(calls[0]?.req.allowedTools).toContain("mcp__achords__report_checks");
+    expect(calls[0]?.req.prompt).toMatch(/call report_checks/);
+    expect(column(first.id)).toBe("in_progress");
+    expect(listMessages(db, first.thread.id).at(-1)?.content).toMatch(
+      /not sent to review[\s\S]*no build or test result was reported/,
+    );
+
+    // Reported as failed: held back with the agent's own reason.
+    behave = (_req, task) => {
+      if (task.assigneeAgentId === "dev") {
+        orch.reportChecks(
+          { from: "task", taskId: task.id },
+          { passed: false, summary: "Unity was not running" },
+        );
+      }
+      return result();
+    };
+    const second = give();
+    await drain();
+    expect(column(second.id)).toBe("in_progress");
+    expect(listMessages(db, second.thread.id).at(-1)?.content).toMatch(/Unity was not running/);
+    expect(calls.filter((c) => c.task.assigneeAgentId === "qa")).toHaveLength(0);
+
+    // Reported as passed: review as usual.
+    behave = (_req, task) => {
+      if (task.assigneeAgentId === "dev") {
+        orch.reportChecks(
+          { from: "task", taskId: task.id },
+          { passed: true, summary: "42 tests green" },
+        );
+      }
+      return result();
+    };
+    const third = give();
+    await drain();
+    expect(column(third.id)).toBe("review");
+    expect(calls.at(-1)?.task.assigneeAgentId).toBe("qa");
+    expect(calls.at(-1)?.req.prompt).toContain("42 tests green");
+    expect(calls.at(-1)?.req.allowedTools).not.toContain("mcp__achords__report_checks");
+  });
+
   it("a card sent back again and again stops at the owner", async () => {
     setup([
       ["dev", "roles: [dev]"],

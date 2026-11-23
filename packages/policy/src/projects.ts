@@ -6,6 +6,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
@@ -28,6 +29,12 @@ const projectSchema = z
     integrations: accountLists,
     // ADR-0037: a client can forbid agents publishing (off) or force review; never loosen.
     publish: z.enum(["review", "off"]).optional(),
+    // ADR-0064: the project's code lives elsewhere on this Mac (a full path, or ~/…); its
+    // runs start there instead of in files/. Set by hand: it opens that folder to agents.
+    workdir: z
+      .string()
+      .regex(/^(~\/|\/).+/, "a full path, or one starting with ~/")
+      .optional(),
   })
   .strict();
 
@@ -38,8 +45,12 @@ export interface Project {
   /** Catalog id → this client's own properties/sites/pages (ADR-0036). */
   integrations: Record<string, string[]>;
   publish?: "review" | "off" | undefined;
+  /** As written in project.yaml; `workDir` is the path it stands for. */
+  workdir?: string | undefined;
   dir: string;
   filesDir: string;
+  /** Where the project's runs start: `workdir` when set (ADR-0064), else `filesDir`. */
+  workDir: string;
   /** PROJECT.md: client preferences, stack, conventions, deploy rules. */
   doc: string;
   /** Optional workflow replacing the workspace's for this project's cards. */
@@ -67,6 +78,9 @@ export function loadProjects(projectsDir: string): Map<string, Project> {
       ...parsed.data,
       dir,
       filesDir: join(dir, "files"),
+      workDir: parsed.data.workdir
+        ? parsed.data.workdir.replace(/^~\//, `${homedir()}/`)
+        : join(dir, "files"),
       doc: existsSync(docPath) ? readFileSync(docPath, "utf8") : "",
       workflowPath: join(dir, "workflow.yaml"),
     });
@@ -113,10 +127,12 @@ export function updateProject(
     workspace: (patch.workspace ?? cur.workspace).trim(),
     integrations: patch.integrations ? cleanLists(patch.integrations) : cur.integrations,
     ...(cur.publish ? { publish: cur.publish } : {}),
+    ...(cur.workdir ? { workdir: cur.workdir } : {}),
   });
   // Owner-edited fields the web form does not show (integration targets) are kept.
   const extra =
     (data.publish ? `publish: ${data.publish}\n` : "") +
+    (data.workdir ? `workdir: ${JSON.stringify(data.workdir)}\n` : "") +
     (Object.keys(data.integrations).length
       ? stringifyYaml({ integrations: data.integrations })
       : "");
@@ -198,6 +214,7 @@ export function ownProject(home: string, workspace = "shared"): Project {
     integrations: loadOwnAccounts(home),
     dir: home,
     filesDir: join(home, "work"),
+    workDir: join(home, "work"),
     doc: "",
     workflowPath: "",
   };

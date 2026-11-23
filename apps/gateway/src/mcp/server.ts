@@ -118,6 +118,17 @@ const TOOLS = [
     endpoint: "/api/agent/move_task",
     done: "Card moved.",
   },
+  {
+    name: "report_checks",
+    description:
+      "Report the result of building the project and running its tests, before you finish. passed is true only if both ran and succeeded. If you could not run them, report passed false and say why. Work without a passing report is not sent to review.",
+    input: z.object({
+      passed: z.boolean().describe("true only if the build and the tests ran and succeeded"),
+      summary: text.describe("What you ran and what came out, in one or two sentences"),
+    }),
+    endpoint: "/api/agent/report_checks",
+    done: "Recorded.",
+  },
   // Skills (ADR-0049): the system prompt lists them; these read, import and propose.
   {
     name: "skill_read",

@@ -148,6 +148,7 @@ export interface ApiDeps {
     | "openRoom"
     | "requestAccess"
     | "requestCommand"
+    | "reportChecks"
     | "requestPublish"
     | "testIntegration"
     | "logPublish"
@@ -1941,6 +1942,7 @@ export function createApiHandler(deps: ApiDeps) {
           "open_room",
           "request_access",
           "request_command",
+          "report_checks",
         ];
         if (method !== "POST" || !AGENT_TOOLS.includes(tool)) throw new HttpError(404, "not found");
         if (!caller.tools.includes(tool)) {
@@ -1980,14 +1982,19 @@ export function createApiHandler(deps: ApiDeps) {
                         yaml: str(b.manifest_yaml, "manifest_yaml", 20_000),
                         reason: str(b.reason, "reason", 2000),
                       })
-                    : tool === "request_access"
-                      ? o.requestAccess(from, str(b.reason, "reason", 2000))
-                      : tool === "request_command"
-                        ? o.requestCommand(from, {
-                            command: str(b.command, "command", 300),
-                            reason: str(b.reason, "reason", 2000),
-                          })
-                        : o.askOwner(from, str(b.question, "question", 2000));
+                    : tool === "report_checks"
+                      ? o.reportChecks(from, {
+                          passed: b.passed === true,
+                          summary: str(b.summary, "summary", 2000),
+                        })
+                      : tool === "request_access"
+                        ? o.requestAccess(from, str(b.reason, "reason", 2000))
+                        : tool === "request_command"
+                          ? o.requestCommand(from, {
+                              command: str(b.command, "command", 300),
+                              reason: str(b.reason, "reason", 2000),
+                            })
+                          : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

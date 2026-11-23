@@ -90,6 +90,8 @@
   "publish.openLink": "Open it (log in first if needed): {link}",
   "thread.changeProposal": "Proposed change to {agent}: {reason}\n\n{changes}\n\nNothing changes until you approve.",
   "thread.projectUpdateProposal": "Proposed addition to the description of {project}:\n\n{text}\n\nNothing changes until you approve.",
+  "thread.unchecked": "\"{title}\" is not sent to review: {agent} did not report a passing build and tests ({why}). Reply here to have it continue, or move the card yourself.",
+  "thread.uncheckedNone": "no build or test result was reported",
   "thread.reviewed": "Review ({agent}): {title}\n\n{result}",
   "thread.sentBack": "→ {agent} continues with what the review found.",
   "thread.reviewLimit": "\"{title}\" was sent back {n} times and now waits for you: read the last review and decide.",

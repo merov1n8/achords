@@ -385,6 +385,11 @@ export interface Orchestrator {
     from: string,
     to: string,
   ): { ok: true; override: boolean } | { ok: false; reason: string };
+  /** ADR-0065: the calling task's build and test result; a workflow may need it for review. */
+  reportChecks(
+    from: { from: "task"; taskId: string },
+    request: { passed: boolean; summary: string },
+  ): { ok: true } | { ok: false; reason: string };
   /** Skills (ADR-0049): the full text of a skill the calling agent sees. */
   skillRead(
     from: { from: "task"; taskId: string },
@@ -719,16 +724,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     };
   };
   /**
-   * The only way a project widens a run: an agent of the project's workspace works in its
-   * files/ folder (cwd and write root). Agents of other workspaces get the text, not the folder.
+   * The only way a project widens a run: an agent of the project's workspace works in the
+   * project's work folder (cwd and write root): files/, or the folder project.yaml names
+   * (ADR-0064), with files/ beside it. Agents of other workspaces get the text, not the folders.
    */
-  const withProject = (m: Manifest, p: Project | undefined): Manifest =>
-    p && m.workspace === p.workspace
-      ? {
-          ...m,
-          fs: { ...m.fs, write: [p.filesDir, ...m.fs.write.filter((w) => w !== p.filesDir)] },
-        }
-      : m;
+  const withProject = (m: Manifest, p: Project | undefined): Manifest => {
+    if (!p || m.workspace !== p.workspace) return m;
+    const own = [...new Set([p.workDir, p.filesDir])];
+    return {
+      ...m,
+      fs: { ...m.fs, write: [...own, ...m.fs.write.filter((w) => !own.includes(expandHome(w)))] },
+    };
+  };
   const projectBlock = (p: Project) => {
     const accounts = Object.entries(p.integrations)
       .filter(([channel]) => channel !== "repository")
@@ -751,6 +758,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const pendingKey = (taskId: string) => `pending_move:${taskId}`;
   const accessKey = (taskId: string) => `pending_access:${taskId}`;
   const commandKey = (id: string) => `pending_cmd:${id}`;
+  const checksKey = (taskId: string) => `checks:${taskId}`;
+  const checksOf = (taskId: string) => {
+    const raw = getSetting(db, checksKey(taskId));
+    return raw ? (JSON.parse(raw) as { passed: boolean; summary: string }) : undefined;
+  };
+  /** Whether finished work must carry a passing report_checks to enter review (ADR-0065). */
+  const needsChecks = (wf: Workflow) => wf.on_enter[wf.finish]?.needs_checks === true;
   const projectDocKey = (id: string) => `pending_project_doc:${id}`;
   const grantKey = (rootId: string) => `shell_grant:${rootId}`;
   /** Commands the owner allowed for this chain, exactly as written, while still valid. */
@@ -911,6 +925,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         `Card ${task.id} ("${task.title}", by ${task.assigneeAgentId ?? "?"}) is in "${column}" and assigned to you as ${role}.`,
         `Original instructions:\n${task.description ?? ""}`,
         `Result of the work:\n${root.result ?? "(none yet)"}`,
+        ...(checksOf(task.id)
+          ? [`Build and tests, as reported by the agent: ${checksOf(task.id)?.summary}`]
+          : []),
         `When you have decided, move the card with move_task (task_id "${task.id}") to one of: ${targets.join(", ") || "(no column allowed for your role)"}, and say why.`,
       ].join("\n\n"),
       assigneeAgentId: reviewer.id,
@@ -950,12 +967,26 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return { ok: true };
   };
 
-  /** A successful run lands in `finish` unless the agent already moved the card. */
-  const finishCard = (task: Task) => {
+  /**
+   * A successful run lands in `finish` unless the agent already moved the card. Returns a note
+   * for the chat when the card is held instead: unverified work is not worth a review
+   * (ADR-0065), and the owner decides what happens to it.
+   */
+  const finishCard = (task: Task): string | undefined => {
     const cur = getTask(db, task.id);
     if (!cur?.column || !cur.assigneeAgentId) return;
     const wf = workflowForTask(cur);
     if (cur.column !== wf.start) return;
+    if (needsChecks(wf)) {
+      const checks = checksOf(cur.id);
+      if (!checks?.passed) {
+        return t("thread.unchecked", {
+          agent: cur.assigneeAgentId,
+          title: cur.title,
+          why: checks?.summary ?? t("thread.uncheckedNone"),
+        });
+      }
+    }
     const roles = agents().get(cur.assigneeAgentId)?.roles ?? [];
     const check = checkMove(wf, { assignee: cur.assigneeAgentId, column: cur.column }, wf.finish, {
       kind: "agent",
@@ -1186,6 +1217,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       );
       if (!check.ok) return check;
       return requestMove(target, target.column, request.to, `agent:${manifest.id}`, wf);
+    },
+
+    reportChecks(from, request) {
+      if (!getTask(db, from.taskId)) return { ok: false, reason: "unknown calling task" };
+      setSetting(
+        db,
+        checksKey(from.taskId),
+        JSON.stringify({ passed: request.passed, summary: redact(request.summary) }),
+      );
+      return { ok: true };
     },
 
     ownerMove(taskId, from, to) {
@@ -2342,6 +2383,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let allowedCommands: string[] = [];
     let imagesNote = "";
     let shellAsks = false;
+    let reportsChecks = false;
     let dropped: string[] = [];
     const unscoped: string[] = [];
     const unavailable: string[] = [];
@@ -2411,6 +2453,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         !!manifest.shell &&
         manifest.tools.includes("Bash");
       if (shellAsks) allowedCommands = grantedCommands(rootId);
+      // The work on a card whose workflow needs checks reports them (ADR-0065); reviews do not.
+      reportsChecks =
+        !task.parentId && !task.roomId && !task.workerSpec && needsChecks(workflowForTask(task));
       if (geminiRun && manifest.mcp.length) {
         dropped = [...manifest.mcp];
         manifest = { ...manifest, mcp: [] };
@@ -2638,6 +2683,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const otherFolders = shellAsks
         ? [...new Set(manifest.fs.write.map(expandHome))].filter((p) => p !== startsIn)
         : [];
+      const checksNote = reportsChecks
+        ? "\n\nBefore you finish: build the project and run its tests, then call report_checks with what happened (passed only if both ran and succeeded). Work without a passing report is not sent to review; if you cannot run them, report that and say why."
+        : "";
       const foldersNote = otherFolders.length
         ? `\n\nYour shell starts in ${startsIn}. Your other work folders: ${otherFolders.join(", ")}. A command runs in the folder the shell is in, and a git repository's commands only work from inside it: to work in another folder, first run \`cd "<folder>"\` as a command of its own, then the command exactly as allowed. Never join the two (\`cd … && …\`) and do not use \`git -C\`: both are refused.`
         : "";
@@ -2649,7 +2697,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${commandsNote}${foldersNote}${imagesNote}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${commandsNote}${foldersNote}${checksNote}${imagesNote}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       if (allowedCommands.length && built.req.allowedTools) {
@@ -2711,6 +2759,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         "move_task",
         "request_access",
         ...(shellAsks ? ["request_command"] : []),
+        ...(reportsChecks ? ["report_checks"] : []),
         "skill_read",
         "skill_fetch",
         "skill_propose",
@@ -2960,7 +3009,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           childFinished(db, task.id);
           reviewFinished(task, manifest.id, res.text);
         } else {
-          finishCard(task);
+          const held = finishCard(task);
           if (task.threadId) {
             const awaiting = getSetting(db, awaitingKey(task.id));
             if (awaiting) setSetting(db, awaitingKey(task.id), "");
@@ -2972,6 +3021,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               // The report is the agent's own words: shown under its name, not the boss's.
               awaiting ? BOSS_ID : manifest.id,
             );
+            if (held) post(task.threadId, held);
           }
         }
       } else {

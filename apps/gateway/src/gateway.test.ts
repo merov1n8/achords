@@ -21,7 +21,7 @@ function exitCode(child: ChildProcess): Promise<number | null> {
   return new Promise((resolve) => child.once("exit", (code) => resolve(code)));
 }
 
-async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
+async function waitFor(check: () => boolean, ms = 20_000): Promise<void> {
   const until = Date.now() + ms;
   while (!check()) {
     if (Date.now() > until) throw new Error("timed out");
@@ -29,7 +29,9 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
   }
 }
 
-describe("gateway process", () => {
+// Each test starts a real gateway process. A loaded CI runner (macOS above all) can take longer
+// than the default 5 s to start one, which failed these tests at random.
+describe("gateway process", { timeout: 30_000 }, () => {
   let home: string;
   let child: ChildProcess | undefined;
   afterEach(() => {

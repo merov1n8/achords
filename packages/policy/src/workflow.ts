@@ -25,7 +25,14 @@ export const workflowSchema = z
     on_enter: z
       .record(
         COLUMN,
-        z.object({ assign: BY.optional(), approve: z.literal("owner").optional() }).strict(),
+        z
+          .object({
+            assign: BY.optional(),
+            approve: z.literal("owner").optional(),
+            // ADR-0065: a finished card enters this column only with a passing report_checks.
+            needs_checks: z.boolean().optional(),
+          })
+          .strict(),
       )
       .default({}),
   })

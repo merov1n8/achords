@@ -155,6 +155,7 @@ describe("HTTP API", () => {
             questions.push({ from, question: `access: ${reason}` });
             return { ok: true };
           },
+          reportChecks: () => ({ ok: true }),
           requestCommand: (from, request) => {
             questions.push({ from, question: `command: ${request.command} (${request.reason})` });
             return { ok: true };
