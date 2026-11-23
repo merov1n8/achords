@@ -1181,6 +1181,15 @@ describe("HTTP API", () => {
     expect(
       (await call("/api/actions", { method: "POST", body: '{"data":"rm:-rf:/"}' })).status,
     ).toBe(400);
+    // Command requests (ADR-0056): all three buttons reach the orchestrator.
+    for (const verb of ["task", "always", "reject"]) {
+      const res = await call("/api/actions", {
+        method: "POST",
+        body: JSON.stringify({ data: `cmd:${verb}:b8746623` }),
+      });
+      expect(res.status).toBe(200);
+      expect(decisions.at(-1)?.id).toBe("b8746623");
+    }
     const noCsrf = await fetch(`${base}/api/actions`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: base },

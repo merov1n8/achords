@@ -969,7 +969,11 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/actions$/,
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
-        if (!/^(proposal|move|access|publish|skill):(approve|reject):[\w-]{1,36}$/.test(data)) {
+        if (
+          !/^((proposal|move|access|publish|skill):(approve|reject)|cmd:(task|always|reject)):[\w-]{1,36}$/.test(
+            data,
+          )
+        ) {
           throw new HttpError(400, "unknown action");
         }
         const out = deps.orchestrator.runAction(data);
