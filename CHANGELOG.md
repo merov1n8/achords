@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- A review ended in silence: the reviewer's verdict was not shown anywhere, and a card it sent
+  back to "in progress" just sat there. The verdict now appears in the chat under the
+  reviewer's name, and the card's agent continues at once with what the review found (after
+  three reworks the card waits for you instead).
 - An agent with more than one folder (for example a project's files and a game's repository
   elsewhere on the Mac) could not run its allowed shell commands in the other folder: `git add`
   and `git commit` "required approval" however often they were approved. It is now told where

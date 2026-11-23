@@ -13,6 +13,7 @@ import {
   openCoreDatabase,
   setDraining,
   type Task,
+  threadCard,
 } from "@achords/core";
 import { createProject } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
@@ -140,6 +141,69 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
     // The review run is part of the card, not a card of its own.
     expect(calls[1]?.task.parentId).toBe(id);
     expect(getTask(db, calls[1]?.task.id ?? "")?.column).toBeNull();
+  });
+
+  it("a review's verdict is posted in the chat; a card sent back restarts its agent with the findings (ADR-0062)", async () => {
+    setup([
+      ["dev", "roles: [dev]"],
+      ["qa", "roles: [qa]"],
+    ]);
+    const { id, thread } = give();
+    let reviews = 0;
+    behave = (_req, task) => {
+      if (task.assigneeAgentId === "dev") return result({ text: `built v${reviews + 1}` });
+      // QA sends the first version back and approves the second.
+      const card = String(threadCard(db, thread.id));
+      reviews++;
+      orch.moveTask(
+        { from: "task", taskId: task.id },
+        { taskId: card, to: reviews === 1 ? "in_progress" : "done" },
+      );
+      return result({ text: reviews === 1 ? "Needs a fix: the button is dead." : "Approved." });
+    };
+    await drain();
+    expect(calls.map((c) => c.task.assigneeAgentId)).toEqual(["dev", "qa", "dev", "qa"]);
+    // The second dev run is told what the review found, and sees its own earlier report.
+    expect(calls[2]?.req.prompt).toMatch(
+      /qa reviewed this work and sent it back[\s\S]*the button is dead/,
+    );
+    expect(calls[2]?.req.prompt).toContain("built v1");
+    expect(calls[2]?.task.id).not.toBe(id);
+    // One card all along (ADR-0059): it ends in done, on the newest task.
+    const card = String(threadCard(db, thread.id));
+    expect(card).toBe(calls[2]?.task.id);
+    expect(column(card)).toBe("done");
+    expect(column(id)).toBeNull();
+    const chat = listMessages(db, thread.id).map((m) => [m.author, m.content]);
+    expect(chat).toContainEqual([
+      "qa",
+      "Review (qa): Build page\n\nNeeds a fix: the button is dead.",
+    ]);
+    expect(chat).toContainEqual(["boss", "→ dev continues with what the review found."]);
+    expect(chat).toContainEqual(["qa", "Review (qa): Build page\n\nApproved."]);
+  });
+
+  it("a card sent back again and again stops at the owner", async () => {
+    setup([
+      ["dev", "roles: [dev]"],
+      ["qa", "roles: [qa]"],
+    ]);
+    const { thread } = give();
+    behave = (_req, task) => {
+      if (task.assigneeAgentId === "qa") {
+        orch.moveTask(
+          { from: "task", taskId: task.id },
+          { taskId: String(threadCard(db, thread.id)), to: "in_progress" },
+        );
+      }
+      return result({ text: "x" });
+    };
+    for (let i = 0; i < 40 && (await orch.workOnce()); i++);
+    // The first version and three reworks, each reviewed; the fourth send-back is not acted on.
+    expect(calls.filter((c) => c.task.assigneeAgentId === "dev")).toHaveLength(4);
+    expect(listMessages(db, thread.id).at(-1)?.content).toMatch(
+      /sent back 4 times[\s\S]*waits for you/,
+    );
   });
 
   it("live progress: the run keeps its checklist (TodoWrite) state for the web", async () => {

@@ -61,3 +61,4 @@
 - [ADR-0059: One card per chat](0059-one-card-per-chat.md)
 - [ADR-0060: Owner-approved additions to a project description](0060-owner-approved-project-description-additions.md)
 - [ADR-0061: Shell commands in any of an agent's work folders](0061-shell-commands-in-any-work-folder.md)
+- [ADR-0062: A review's verdict reaches the owner, and a card sent back restarts its work](0062-review-verdicts-reach-the-owner-and-restart-the-work.md)

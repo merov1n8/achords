@@ -161,6 +161,8 @@ const DEFER_MS = 60_000;
 export const MODEL_OUT_MS = 60 * 60_000;
 const modelOutKey = (model: string) => `model_out:${model}`;
 const BUDGET_DEFER_MS = 30 * 60_000;
+// Reworks a reviewer may ask for before the card waits for the owner (ADR-0062).
+const MAX_SEND_BACKS = 3;
 const SUMMARY_CHARS = 1500;
 
 const listChange = z
@@ -961,6 +963,44 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       roles,
     });
     if (check.ok) requestMove(cur, cur.column, wf.finish, "system", wf);
+  };
+
+  /**
+   * ADR-0062: a workflow review ends. Its verdict is the owner's to read, so it goes to the
+   * chat; and a card the reviewer sent back to the start column is work again, so its agent
+   * continues with what the review found (the review itself only moved the card).
+   */
+  const reviewFinished = (review: Task, reviewer: string, verdict: string) => {
+    if (review.agentChain.at(-1) !== "workflow" || !review.parentId) return;
+    const card = getTask(db, review.parentId);
+    if (!card) return;
+    const say = (text: string, author = BOSS_ID) => {
+      if (card.threadId) post(card.threadId, text, author);
+    };
+    say(t("thread.reviewed", { agent: reviewer, title: card.title, result: verdict }), reviewer);
+    const wf = workflowForTask(card);
+    if (card.column !== wf.start || card.status !== "done" || !card.assigneeAgentId) return;
+    // Two agents that never agree would pass the card back and forth for ever.
+    const sentBack = Number(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM task_moves WHERE task_id = ? AND to_column = ? AND actor LIKE 'agent:%'",
+        )
+        .get(card.id, wf.start)?.n ?? 0,
+    );
+    if (sentBack > MAX_SEND_BACKS) {
+      say(t("thread.reviewLimit", { title: card.title, n: sentBack }));
+      return;
+    }
+    const next = enqueueSuccessor(db, card, {
+      title: card.title,
+      description: `${card.description ?? ""}\n\n${reviewer} reviewed this work and sent it back. Fix what the review found, then report what you changed.\n\nThe review:\n${verdict}`,
+      assigneeAgentId: card.assigneeAgentId,
+      caller: reviewer,
+    });
+    // The same card carries on (ADR-0059).
+    takeOverCard(db, card.id, next.id, wf.start, "system");
+    say(t("thread.sentBack", { agent: card.assigneeAgentId }));
   };
 
   /** The continuation note for a task interrupted by a planned stop. */
@@ -2508,9 +2548,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             .join("\n")}\nUse these results and finish the task.`
         : "";
       const previous = task.continuesFrom ? getTask(db, task.continuesFrom) : undefined;
-      const handedOver = previous
-        ? `\n\nThis continues the work of ${previous.assigneeAgentId} ("${previous.title}"), who handed it to you. Their report:\n${previous.result ?? ""}`
-        : "";
+      const handedOver = !previous
+        ? ""
+        : previous.assigneeAgentId === manifest.id
+          ? `\n\nThis continues your own earlier work on this card. Your report then:\n${previous.result ?? ""}`
+          : `\n\nThis continues the work of ${previous.assigneeAgentId} ("${previous.title}"), who handed it to you. Their report:\n${previous.result ?? ""}`;
       const answer =
         task.ownerQuestion && task.ownerAnswer
           ? `\n\nYou asked the owner: ${task.ownerQuestion}\nOwner's answer: ${task.ownerAnswer}\nContinue the task with this answer.`
@@ -2914,8 +2956,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             deps.embedder,
           )
           .catch(() => {}); // memory is best effort; the task result is already safe
-        if (task.parentId) childFinished(db, task.id);
-        else {
+        if (task.parentId) {
+          childFinished(db, task.id);
+          reviewFinished(task, manifest.id, res.text);
+        } else {
           finishCard(task);
           if (task.threadId) {
             const awaiting = getSetting(db, awaitingKey(task.id));
