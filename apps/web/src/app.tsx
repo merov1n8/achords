@@ -18,6 +18,7 @@ import { ApiError, api, loadSession, logout } from "./api.ts";
 import { Mark } from "./components/Mark.tsx";
 import { MoreSheet, TabBar, TopBar } from "./components/MobileNav.tsx";
 import { t } from "./i18n.ts";
+import { inAppPath, legacyPath, navigate, routeOf } from "./route.ts";
 import { loadCollapsed, saveCollapsed } from "./theme.ts";
 import type { Thread } from "./types.ts";
 import { Agents } from "./views/Agents.tsx";
@@ -40,13 +41,11 @@ import { Updates } from "./views/Updates.tsx";
 import { Usage } from "./views/Usage.tsx";
 import { Vault } from "./views/Vault.tsx";
 
-/** Hash routes: #/chat/<threadId>, #/kanban, #/projects, #/agents, #/settings/<section>. */
-function parseRoute(): string[] {
-  return location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-}
-const go = (path: string) => {
-  location.hash = `#/${path}`;
-};
+// Old #/ links (bookmarks, notifications) keep working: rewritten once to the plain path.
+const old = legacyPath(location.hash);
+if (old) history.replaceState(null, "", old);
+const parseRoute = () => routeOf(location.pathname);
+const go = (path: string) => navigate(`/${path}`);
 
 export function App() {
   const [state, setState] = useState<"loading" | "unpaired" | "ready" | "error">("loading");
@@ -73,14 +72,31 @@ export function App() {
       setRoute(parseRoute());
       setMore(false);
     };
-    addEventListener("hashchange", onHash);
+    addEventListener("popstate", onHash);
+    // Own links open in the app without a reload.
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0) return;
+      const a = (e.target as Element | null)?.closest?.("a");
+      if (!a) return;
+      const path = inAppPath(a.getAttribute("href"), location.origin, {
+        target: a.target,
+        download: a.hasAttribute("download"),
+        modified: e.metaKey || e.ctrlKey || e.shiftKey || e.altKey,
+      });
+      if (!path) return;
+      e.preventDefault();
+      if (path !== location.pathname + location.search) navigate(path);
+      else onHash();
+    };
+    document.addEventListener("click", onClick);
     // A revoked or expired session surfaces as a 401 from any view: back to pairing.
     const onReject = (e: PromiseRejectionEvent) => {
       if (e.reason instanceof ApiError && e.reason.status === 401) setState("unpaired");
     };
     addEventListener("unhandledrejection", onReject);
     return () => {
-      removeEventListener("hashchange", onHash);
+      removeEventListener("popstate", onHash);
+      document.removeEventListener("click", onClick);
       removeEventListener("unhandledrejection", onReject);
     };
   }, []);
@@ -137,7 +153,7 @@ export function App() {
         </div>
         <LiveBar />
       </main>
-      <TabBar section={section} chatHref="#/chat" moreOpen={more} onMore={() => setMore(true)} />
+      <TabBar section={section} chatHref="/chat" moreOpen={more} onMore={() => setMore(true)} />
       <MoreSheet
         open={more}
         onClose={() => setMore(false)}
@@ -198,7 +214,7 @@ function Sidebar(props: {
       </div>
       <a
         class={`nav ${section === "chat" || section === "chats" ? "active" : ""}`}
-        href="#/chat"
+        href="/chat"
         title={t("nav.chat")}
       >
         <MessageSquare class="icon" />
@@ -206,7 +222,7 @@ function Sidebar(props: {
       </a>
       <a
         class={`nav ${section === "kanban" ? "active" : ""}`}
-        href="#/kanban"
+        href="/kanban"
         title={t("nav.kanban")}
       >
         <Columns3 class="icon" />
@@ -214,7 +230,7 @@ function Sidebar(props: {
       </a>
       <a
         class={`nav ${section === "projects" ? "active" : ""}`}
-        href="#/projects"
+        href="/projects"
         title={t("nav.projects")}
       >
         <FolderKanban class="icon" />
@@ -222,7 +238,7 @@ function Sidebar(props: {
       </a>
       <a
         class={`nav ${section === "agents" ? "active" : ""}`}
-        href="#/agents"
+        href="/agents"
         title={t("nav.agents")}
       >
         <Bot class="icon" />
@@ -230,7 +246,7 @@ function Sidebar(props: {
       </a>
       <a
         class={`nav ${section === "skills" ? "active" : ""}`}
-        href="#/skills"
+        href="/skills"
         title={t("nav.skills")}
       >
         <BookOpen class="icon" />
@@ -238,7 +254,7 @@ function Sidebar(props: {
       </a>
       <a
         class={`nav ${section === "schedules" ? "active" : ""}`}
-        href="#/schedules"
+        href="/schedules"
         title={t("nav.schedules")}
       >
         <CalendarClock class="icon" />
@@ -246,13 +262,13 @@ function Sidebar(props: {
       </a>
       <a
         class={`nav ${section === "monitors" ? "active" : ""}`}
-        href="#/monitors"
+        href="/monitors"
         title={t("nav.monitors")}
       >
         <Activity class="icon" />
         <span class="lbl">{t("nav.monitors")}</span>
       </a>
-      <a class={`nav ${section === "usage" ? "active" : ""}`} href="#/usage" title={t("nav.usage")}>
+      <a class={`nav ${section === "usage" ? "active" : ""}`} href="/usage" title={t("nav.usage")}>
         <Gauge class="icon" />
         <span class="lbl">{t("nav.usage")}</span>
       </a>
@@ -262,17 +278,17 @@ function Sidebar(props: {
         active={section === "settings"}
       >
         {subLink(
-          "#/settings/appearance",
+          "/settings/appearance",
           t("nav.appearance"),
           section === "settings" && (sub === "appearance" || !sub),
         )}
-        {subLink("#/settings/guide", t("nav.guide"), sub === "guide")}
-        {subLink("#/settings/integrations", t("nav.integrations"), sub === "integrations")}
-        {subLink("#/settings/access", t("nav.modelAccess"), sub === "access")}
-        {subLink("#/settings/vault", t("nav.vault"), sub === "vault")}
-        {subLink("#/settings/updates", t("nav.updates"), sub === "updates")}
-        {subLink("#/settings/devices", t("nav.devices"), sub === "devices")}
-        {subLink("#/settings/rooms", t("nav.rooms"), sub === "rooms")}
+        {subLink("/settings/guide", t("nav.guide"), sub === "guide")}
+        {subLink("/settings/integrations", t("nav.integrations"), sub === "integrations")}
+        {subLink("/settings/access", t("nav.modelAccess"), sub === "access")}
+        {subLink("/settings/vault", t("nav.vault"), sub === "vault")}
+        {subLink("/settings/updates", t("nav.updates"), sub === "updates")}
+        {subLink("/settings/devices", t("nav.devices"), sub === "devices")}
+        {subLink("/settings/rooms", t("nav.rooms"), sub === "rooms")}
       </Group>
       <div class="foot muted" title={t("nav.connected", { device: props.device ?? "" })}>
         <span class="dot" />

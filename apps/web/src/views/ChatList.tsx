@@ -228,7 +228,7 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
     <div key={th.id} class={`threadrow ${th.id === props.activeId ? "active" : ""}`}>
       <a
         class="chatrow"
-        href={`#/chat/${th.id}`}
+        href={`/chat/${th.id}`}
         aria-current={th.id === props.activeId ? "page" : undefined}
       >
         <span class="t">
@@ -261,7 +261,7 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
           {heading(g.name)}
           {list.slice(0, PER_PROJECT).map(item)}
           {list.length > PER_PROJECT && (
-            <a class="sub muted" href={`#/chats/${g.key ? encodeURIComponent(g.key) : "-"}`}>
+            <a class="sub muted" href={`/chats/${g.key ? encodeURIComponent(g.key) : "-"}`}>
               {t("chats.more", { n: list.length - PER_PROJECT })}
             </a>
           )}
@@ -328,7 +328,7 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
         </div>
       </div>
       <div class="chatlist-items">{body}</div>
-      <a class="sub" href="#/chats">
+      <a class="sub" href="/chats">
         {t("chats.all")}
       </a>
     </div>

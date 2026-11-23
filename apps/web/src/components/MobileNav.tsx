@@ -62,12 +62,7 @@ export function TopBar(props: {
       <span class="grow" />
       {chat && (
         <>
-          <a
-            class="iconbtn touch"
-            href="#/chats"
-            aria-label={t("chats.all")}
-            title={t("chats.all")}
-          >
+          <a class="iconbtn touch" href="/chats" aria-label={t("chats.all")} title={t("chats.all")}>
             <List class="icon" />
           </a>
           <button
@@ -131,19 +126,19 @@ export function TabBar(props: {
         icon={<MessageSquare class="icon" />}
       />
       <Tab
-        href="#/kanban"
+        href="/kanban"
         label={t("nav.kanban")}
         active={s === "kanban"}
         icon={<Columns3 class="icon" />}
       />
       <Tab
-        href="#/agents"
+        href="/agents"
         label={t("nav.agents")}
         active={s === "agents"}
         icon={<Bot class="icon" />}
       />
       <Tab
-        href="#/monitors"
+        href="/monitors"
         label={t("nav.monitors")}
         active={s === "monitors"}
         icon={<Activity class="icon" />}
@@ -190,11 +185,11 @@ export function MoreSheet(props: {
     >
       <span class="grabber" />
       <div class="grid">
-        {tile("#/projects", t("nav.projects"), <FolderKanban class="icon" />)}
-        {tile("#/skills", t("nav.skills"), <BookOpen class="icon" />)}
-        {tile("#/schedules", t("nav.schedules"), <CalendarClock class="icon" />)}
-        {tile("#/usage", t("nav.usage"), <Gauge class="icon" />)}
-        {tile("#/settings/appearance", t("nav.settings"), <SettingsIcon class="icon" />)}
+        {tile("/projects", t("nav.projects"), <FolderKanban class="icon" />)}
+        {tile("/skills", t("nav.skills"), <BookOpen class="icon" />)}
+        {tile("/schedules", t("nav.schedules"), <CalendarClock class="icon" />)}
+        {tile("/usage", t("nav.usage"), <Gauge class="icon" />)}
+        {tile("/settings/appearance", t("nav.settings"), <SettingsIcon class="icon" />)}
       </div>
       <div>
         <div class="sheet-sec">{t("nav.settings")}</div>
@@ -202,7 +197,7 @@ export function MoreSheet(props: {
           <a
             key={id}
             class={`nav ${props.section === "settings" && (props.sub ?? "appearance") === id ? "active" : ""}`}
-            href={`#/settings/${id}`}
+            href={`/settings/${id}`}
             onClick={props.onClose}
           >
             {t(key)}

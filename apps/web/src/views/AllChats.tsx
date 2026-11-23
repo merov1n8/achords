@@ -134,7 +134,7 @@ export function AllChats(props: { project?: string | undefined }) {
                     />
                   </td>
                   <td>
-                    <a href={`#/chat/${th.id}`}>
+                    <a href={`/chat/${th.id}`}>
                       {th.pinned && <Pin class="icon pin" aria-label={t("chats.pinned")} />}
                       {th.title ?? t("chat.untitled")}
                     </a>

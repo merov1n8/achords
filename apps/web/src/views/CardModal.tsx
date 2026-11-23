@@ -110,7 +110,7 @@ export function CardModal(props: {
             )}
             <span>{ago(c.updatedAt)}</span>
             {c.threadId && (
-              <a href={`#/chat/${c.threadId}`} onClick={props.onClose}>
+              <a href={`/chat/${c.threadId}`} onClick={props.onClose}>
                 <MessageSquare class="icon" /> {t("card.openChat")}
               </a>
             )}

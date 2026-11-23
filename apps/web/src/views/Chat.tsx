@@ -189,7 +189,7 @@ function Conversation(props: {
   return (
     <section class="conversation">
       <header class="thread-head">
-        <a class="iconbtn touch back" href="#/chat" aria-label={t("chat.back")}>
+        <a class="iconbtn touch back" href="/chat" aria-label={t("chat.back")}>
           <ChevronLeft class="icon" />
         </a>
         <div class="grow">

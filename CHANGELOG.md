@@ -50,6 +50,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- Web addresses have no `#` any more (`/chat/…` instead of `#/chat/…`). Old `#/` links and
+  bookmarks still open the right page.
 - Chat run details count the chat's tasks (done of all) and say when work waits for your answer;
   input tokens include the part read from cache; the message box grows as you type and can be
   dragged taller.
