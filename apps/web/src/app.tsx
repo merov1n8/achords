@@ -14,6 +14,7 @@ import {
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { watchReplies } from "./alerts.ts";
 import { ApiError, api, loadSession, logout } from "./api.ts";
 import { Mark } from "./components/Mark.tsx";
 import { MoreSheet, TabBar, TopBar } from "./components/MobileNav.tsx";
@@ -98,6 +99,18 @@ export function App() {
       removeEventListener("unhandledrejection", onReject);
     };
   }, []);
+
+  // Chime and unread count in the title while the app is open (paired only).
+  useEffect(() => {
+    if (state !== "ready") return;
+    return watchReplies(
+      () => api<Thread[]>("/api/threads?limit=200"),
+      () => {
+        const [section, sub] = parseRoute();
+        return section === "chat" || section === undefined ? sub : undefined;
+      },
+    );
+  }, [state]);
 
   if (state === "loading") return <p class="muted pair">{t("app.loading")}</p>;
   if (state === "error") return <p class="error pair">{t("app.unreachable")}</p>;

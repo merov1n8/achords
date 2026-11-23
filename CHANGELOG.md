@@ -108,6 +108,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Web: a soft chime when an agent replies in any chat, and the number of chats with unread
+  replies in the tab title ("Achords (2)"); a chat counts as read once it is open in a visible tab.
 - Agent replies in the web chat are formatted: headings, bold and italic, lists, tables, code
   and links (from their Markdown). Rendered as page elements, never as HTML, so a reply cannot
   inject markup. The owner's own messages stay as typed.

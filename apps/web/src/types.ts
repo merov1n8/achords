@@ -11,6 +11,8 @@ export interface Thread {
   scheduled: boolean;
   /** Name of the agent that wrote last; null before any reply. */
   lastAgent: string | null;
+  /** Seq of the last agent reply; null before any (reply alerts). */
+  lastAgentSeq: number | null;
   updatedAt: number;
 }
 

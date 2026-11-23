@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+import { replyState } from "./alerts.ts";
+
+const th = (id: string, lastAgentSeq: number | null) => ({ id, lastAgentSeq });
+
+describe("reply alerts", () => {
+  it("first look: nothing is unread and nothing chimes", () => {
+    const r = replyState([th("a", 5), th("b", null)], undefined, undefined, false);
+    expect(r).toEqual({ seen: { a: 5, b: 0 }, max: 5, unread: 0, chime: false });
+  });
+
+  it("a new reply chimes once and counts until its chat is open in a visible tab", () => {
+    const first = replyState([th("a", 5), th("b", null)], undefined, undefined, false);
+    const now = [th("a", 9), th("b", 3)];
+    const hidden = replyState(now, first, undefined, false);
+    expect(hidden).toMatchObject({ unread: 2, chime: true, max: 9 });
+    expect(replyState(now, hidden, undefined, false)).toMatchObject({ unread: 2, chime: false });
+    // Open, but the tab is in the background: not read yet.
+    expect(replyState(now, hidden, "b", false).unread).toBe(2);
+    const open = replyState(now, hidden, "a", true);
+    expect(open).toMatchObject({ seen: { a: 9, b: 0 }, unread: 1, chime: false });
+  });
+
+  it("a chat made after the first look counts from its first reply", () => {
+    const first = replyState([th("a", 5)], undefined, undefined, false);
+    expect(replyState([th("a", 5), th("new", 7)], first, undefined, false)).toMatchObject({
+      unread: 1,
+      chime: true,
+    });
+  });
+
+  it("the open chat's own reply chimes too, but is not counted", () => {
+    const first = replyState([th("a", 5)], undefined, "a", true);
+    expect(replyState([th("a", 6)], first, "a", true)).toMatchObject({
+      seen: { a: 6 },
+      unread: 0,
+      chime: true,
+    });
+  });
+
+  it("after a reload the saved marks still count what came meanwhile", () => {
+    const r = replyState([th("a", 8)], { seen: { a: 5 } }, undefined, false);
+    expect(r).toMatchObject({ unread: 1, chime: false, max: 8 });
+  });
+});

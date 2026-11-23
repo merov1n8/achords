@@ -45,11 +45,14 @@ describe("threads", () => {
         ...(visibility ? { visibility } : {}),
       });
     expect(getThread(db, a.id)?.lastAgent).toBeNull();
+    expect(getThread(db, a.id)?.lastAgentSeq).toBeNull();
     agent("ghost");
     expect(listThreads(db)[0]?.lastAgent).toBe("ghost");
-    agent("coder");
+    const coder = agent("coder");
     agent("boss", "trace");
     expect(listThreads(db)[0]?.lastAgent).toBe("Coder");
+    // The web's reply alert watches this: the last visible agent message, traces left out.
+    expect(listThreads(db)[0]?.lastAgentSeq).toBe(coder.seq);
   });
 
   it("hides trace messages unless asked", () => {

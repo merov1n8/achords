@@ -18,6 +18,8 @@ export interface Thread {
   scheduled: boolean;
   /** Name of the agent that wrote last (its id when it has no record); null before any reply. */
   lastAgent: string | null;
+  /** Seq of the last visible agent message; null before any reply (the web's reply alert). */
+  lastAgentSeq: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -58,6 +60,7 @@ const toThread = (r: Row): Thread => ({
   archived: Number(r.archived ?? 0) === 1,
   scheduled: Number(r.scheduled ?? 0) === 1,
   lastAgent: (r.last_agent as string | null) ?? null,
+  lastAgentSeq: r.last_agent_seq == null ? null : Number(r.last_agent_seq),
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at),
 });
@@ -124,7 +127,9 @@ export function makeThreadLocalOnly(db: Db, id: string): boolean {
 const SCHEDULED = `EXISTS (SELECT 1 FROM schedules s WHERE s.thread_id = threads.id) AS scheduled,
   (SELECT COALESCE(a.name, m.author) FROM messages m LEFT JOIN agents a ON a.id = m.author
    WHERE m.thread_id = threads.id AND m.role = 'agent' AND m.visibility = 'normal'
-   ORDER BY m.rowid DESC LIMIT 1) AS last_agent`;
+   ORDER BY m.rowid DESC LIMIT 1) AS last_agent,
+  (SELECT MAX(m.rowid) FROM messages m
+   WHERE m.thread_id = threads.id AND m.role = 'agent' AND m.visibility = 'normal') AS last_agent_seq`;
 
 export function getThread(db: Db, id: string): Thread | undefined {
   const row = db.prepare(`SELECT *, ${SCHEDULED} FROM threads WHERE id = ?`).get(id);
