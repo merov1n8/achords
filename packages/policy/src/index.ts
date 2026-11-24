@@ -74,7 +74,14 @@ export {
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";
-export { GIT_REPO, GIT_SHELL_ENV, gitTokenId, pushTarget, validBranch } from "./git.ts";
+export {
+  GIT_REPO,
+  GIT_SHELL_ENV,
+  gitTokenId,
+  hookedGitEnv,
+  pushTarget,
+  validBranch,
+} from "./git.ts";
 export {
   ceilingOf,
   type EffectiveLevel,
@@ -108,7 +115,13 @@ export {
   WITHOUT_LEVEL,
   withinRights,
 } from "./migrate.ts";
-export { allowRules, openWeb, siteOf, webFetchSettings } from "./permissions.ts";
+export {
+  allowRules,
+  claudeRunSettings,
+  openWeb,
+  siteOf,
+  webFetchSettings,
+} from "./permissions.ts";
 export { costOf, loadPricing, type Pricing } from "./pricing.ts";
 export {
   type AccountEntry,

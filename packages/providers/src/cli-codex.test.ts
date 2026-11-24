@@ -69,6 +69,25 @@ describe("cli-codex (ADR-0040)", () => {
     expect(rw.at(-1)).toBe("-");
   });
 
+  it("lets git read achords' hooks folder (core.hooksPath) inside the denied home", () => {
+    const args = codexArgs(
+      req({
+        cwd: "/Users/o/ws",
+        env: {
+          GIT_CONFIG_COUNT: "2",
+          GIT_CONFIG_KEY_0: "credential.helper",
+          GIT_CONFIG_VALUE_0: "",
+          GIT_CONFIG_KEY_1: "core.hooksPath",
+          GIT_CONFIG_VALUE_1: "/Users/o/achords/apps/gateway/git-hooks",
+        },
+      }),
+      { last: "/t/last.txt" },
+      host,
+    );
+    expect(fsOf(args)).toContain('"/Users/o/achords/apps/gateway/git-hooks" = "read"');
+    expect(fsOf(args)).not.toContain('"" = "read"');
+  });
+
   it("maps the agent's effort to codex reasoning effort (max and xhigh become high)", () => {
     const files = { last: "/t/last.txt" };
     expect(codexArgs(req({ effort: "low" }), files, host)).toContain(
