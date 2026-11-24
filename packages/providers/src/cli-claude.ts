@@ -40,7 +40,8 @@ export function buildArgs(req: RunRequest): string[] {
     "--output-format",
     "stream-json",
     "--verbose",
-    "--no-session-persistence",
+    ...(req.session ? [] : ["--no-session-persistence"]),
+    ...(req.session?.resume ? ["--resume", req.session.resume] : []),
     "--model",
     req.model,
     "--tools",
@@ -250,6 +251,9 @@ function runOnce(
           error: `claude exited with exit code ${code} and no result${detail}`,
           usage: emptyUsage(),
           windows,
+          ...(req.session?.resume && /no conversation found/i.test(stderr)
+            ? { resumeRejected: true }
+            : {}),
         });
         return;
       }

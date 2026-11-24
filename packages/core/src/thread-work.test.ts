@@ -27,18 +27,28 @@ describe("thread work", () => {
     const root = enqueueRoot(db, { title: "Refactor", threadId: thread.id, caller: "boss" });
     const child = enqueueChild(db, root, { title: "Review", caller: "coder" });
     const other = enqueue(db, { title: "Elsewhere" });
-    const done = (taskId: string, agentId: string, input: number, output: number, usd: number) => {
-      const run = startRun(db, { provider: "cli-claude", taskId, agentId });
+    const done = (
+      taskId: string,
+      agentId: string,
+      input: number,
+      output: number,
+      usd: number,
+      resumed = false,
+    ) => {
+      const run = startRun(db, { provider: "cli-claude", taskId, agentId, resumed });
       finishRun(db, run.id, "succeeded", {
         costUsd: usd,
         tokens: { input, output, cached: 5000 },
       });
     };
     done(root.id, "coder", 1000, 200, 0.25);
-    done(child.id, "reviewer", 500, 100, 0.1);
-    done(other.id, "writer", 9999, 9999, 9);
+    done(child.id, "reviewer", 500, 100, 0.1, true);
+    done(other.id, "writer", 9999, 9999, 9, true);
     expect(threadSummary(db, thread.id)).toMatchObject({
       tokensIn: 1500,
+      // ADR-0066: what resumed sessions read, this chat's only.
+      resumedIn: 500,
+      resumedCached: 5000,
       // Most input of a CLI run is read from the prompt cache; shown apart so "in" is not tiny.
       tokensCached: 10000,
       tokensOut: 300,
@@ -82,6 +92,8 @@ describe("thread work", () => {
       tokensCached: 0,
       tokensIn: 0,
       tokensOut: 0,
+      resumedIn: 0,
+      resumedCached: 0,
       costUsd: 0,
       participants: [],
     });

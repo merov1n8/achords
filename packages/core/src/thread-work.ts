@@ -17,6 +17,9 @@ export interface ThreadSummary {
   /** Input read from the prompt cache (not in tokensIn). */
   tokensCached: number;
   tokensOut: number;
+  /** ADR-0066: what runs that resumed a card's session read as input, and how much from cache. */
+  resumedIn: number;
+  resumedCached: number;
   costUsd: number;
   participants: { agent: string; name: string; status: ParticipantStatus }[];
 }
@@ -33,7 +36,9 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
   const totals = db
     .prepare(
       `SELECT COALESCE(SUM(input_tokens), 0) AS i, COALESCE(SUM(output_tokens), 0) AS o,
-         COALESCE(SUM(cached_tokens), 0) AS c, COALESCE(SUM(cost_usd), 0) AS usd
+         COALESCE(SUM(cached_tokens), 0) AS c, COALESCE(SUM(cost_usd), 0) AS usd,
+         COALESCE(SUM(CASE WHEN resumed = 1 THEN input_tokens END), 0) AS ri,
+         COALESCE(SUM(CASE WHEN resumed = 1 THEN cached_tokens END), 0) AS rc
        FROM runs WHERE task_id IN (${THREAD_TASKS})`,
     )
     .get(threadId, threadId);
@@ -80,6 +85,8 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
     tokensIn: Number(totals?.i ?? 0),
     tokensCached: Number(totals?.c ?? 0),
     tokensOut: Number(totals?.o ?? 0),
+    resumedIn: Number(totals?.ri ?? 0),
+    resumedCached: Number(totals?.rc ?? 0),
     costUsd: Number(totals?.usd ?? 0),
     participants,
   };

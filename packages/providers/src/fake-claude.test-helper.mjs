@@ -3,6 +3,8 @@
 // (recorded from a real `claude -p --output-format stream-json --verbose` run, ids replaced).
 // FAKE_CLAUDE_RECORD: file to write {argv, stdin, cwd, env subset} into.
 // FAKE_CLAUDE_MODE: ok | structured | error | limit | crash | hang | hang-child
+// FAKE_CLAUDE_KNOWN: session ids `--resume` accepts (comma-separated); others are rejected the
+// way the real CLI does it.
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
@@ -22,12 +24,19 @@ process.stdin.on("end", () => {
         cwd: process.cwd(),
         injected: process.env.ACHORDS_TEST_SECRET ?? null,
         anthropicKey: process.env.ANTHROPIC_API_KEY ?? null,
+        configDir: process.env.CLAUDE_CONFIG_DIR ?? null,
       }),
     );
   }
   const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
   const session_id = "00000000-0000-0000-0000-000000000001";
 
+  const resume = process.argv.indexOf("--resume");
+  const resumed = resume >= 0 ? process.argv[resume + 1] : undefined;
+  if (resumed && !(process.env.FAKE_CLAUDE_KNOWN ?? "").split(",").includes(resumed)) {
+    process.stderr.write(`No conversation found with session ID: ${resumed}\n`);
+    process.exit(1);
+  }
   if (mode === "crash") {
     process.stderr.write("fatal: something broke\n");
     process.exit(3);

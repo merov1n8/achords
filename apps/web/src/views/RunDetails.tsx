@@ -45,6 +45,14 @@ export function RunDetails(props: { summary: ThreadSummary; onStop: () => void }
               out: formatTokens(s.tokensOut),
             })}
           </span>
+          {s.resumedIn + s.resumedCached > 0 && (
+            <span class="s">
+              {t("chat.resumedRead", {
+                in: formatTokens(s.resumedIn + s.resumedCached),
+                cached: formatTokens(s.resumedCached),
+              })}
+            </span>
+          )}
         </div>
         <div class="card kpi">
           <span class="k">{t("chat.cost")}</span>

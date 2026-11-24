@@ -18,6 +18,7 @@ export * from "./queue.ts";
 export * from "./rooms.ts";
 export * from "./runs.ts";
 export * from "./schedules.ts";
+export * from "./sessions.ts";
 export * from "./settings.ts";
 export * from "./thread-work.ts";
 export * from "./threads.ts";

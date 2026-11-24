@@ -7,6 +7,7 @@ import {
   addChecklistItem,
   addComment,
   attachmentsDir,
+  chatCards,
   createMonitor,
   createPairingCode,
   createSchedule,
@@ -18,6 +19,7 @@ import {
   deleteMonitor,
   deleteSchedule,
   deleteThread,
+  endCardSessions,
   getMonitor,
   getRoom,
   getSchedule,
@@ -430,6 +432,10 @@ export function createApiHandler(deps: ApiDeps) {
         if (!updateThread(db, params[0] as string, patch)) {
           throw new HttpError(404, "no such chat");
         }
+        // ADR-0066: an archived chat's cards keep no agent sessions.
+        if (patch.archived && deps.home) {
+          endCardSessions(db, deps.home, chatCards(db, params[0] as string));
+        }
         return getThread(db, params[0] as string);
       },
     ],
@@ -438,7 +444,9 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/threads\/([\w-]{1,64})$/,
       ({ params }) => {
         const id = params[0] as string;
+        const cards = chatCards(db, id);
         if (!deleteThread(db, id)) throw new HttpError(404, "no such chat");
+        if (deps.home) endCardSessions(db, deps.home, cards);
         // Telegram wrote into this one: its next message starts a fresh chat.
         if (getSetting(db, "telegram.thread_id") === id) setSetting(db, "telegram.thread_id", "");
         log(`chat deleted in the web UI: ${id}`);
@@ -881,6 +889,7 @@ export function createApiHandler(deps: ApiDeps) {
               : "This is a step inside a card; delete the whole card instead.",
           );
         }
+        if (deps.home) endCardSessions(db, deps.home, [id]);
         log(`kanban: owner deleted task ${id} (${out.deleted} task(s) with its steps)`);
         return out;
       },

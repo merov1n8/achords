@@ -17,11 +17,14 @@ import {
   type Db,
   enqueue,
   finishRun,
+  getCardSession,
   getSetting,
   getThread,
   listMessages,
   openCoreDatabase,
   recordUsageWindows,
+  saveCardSession,
+  sessionDir,
   setRunProgress,
   setSetting,
   startRun,
@@ -506,6 +509,8 @@ describe("HTTP API", () => {
       tokensIn: 10,
       tokensCached: 0,
       tokensOut: 5,
+      resumedIn: 0,
+      resumedCached: 0,
       costUsd: 0.4,
       budgetDayUsd: 5,
       participants: [{ agent: "coder", name: "Coder", status: "queued" }],
@@ -618,6 +623,35 @@ describe("HTTP API", () => {
     expect(getSetting(db, "telegram.thread_id")).toBe("");
     expect((await call(`/api/threads/${b.id}`, { method: "DELETE" })).status).toBe(200);
     expect(await ids("?archived=1")).toEqual([]);
+  });
+
+  it("archiving or deleting a chat, or deleting a card, ends its agents' sessions (ADR-0066)", async () => {
+    const { call } = await pair();
+    const withSession = () => {
+      const thread = createThread(db, {});
+      const card = enqueue(db, { title: "build", threadId: thread.id });
+      const key = { card: card.id, agent: "coder", project: "" };
+      saveCardSession(db, { ...key, sessionId: "s", model: "cli-claude/sonnet", trust: "closed" });
+      mkdirSync(sessionDir(runDir, card.id, "coder"), { recursive: true });
+      const gone = () =>
+        getCardSession(db, key) === undefined && !existsSync(sessionDir(runDir, card.id));
+      return { thread, card, gone };
+    };
+    const archived = withSession();
+    await call(`/api/threads/${archived.thread.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ archived: true }),
+    });
+    expect(archived.gone()).toBe(true);
+    const deleted = withSession();
+    expect((await call(`/api/threads/${deleted.thread.id}`, { method: "DELETE" })).status).toBe(
+      200,
+    );
+    expect(deleted.gone()).toBe(true);
+    const card = withSession();
+    expect(card.gone()).toBe(false);
+    expect((await call(`/api/tasks/${card.card.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(card.gone()).toBe(true);
   });
 
   it("own accounts: read and save lists for work without a client project (ADR-0042)", async () => {

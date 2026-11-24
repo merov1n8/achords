@@ -9,6 +9,9 @@ export interface ThreadSummary {
   tokensIn: number;
   tokensCached: number;
   tokensOut: number;
+  /** ADR-0066: input of runs that resumed a card's session, and how much came from cache. */
+  resumedIn: number;
+  resumedCached: number;
   costUsd: number;
   budgetDayUsd?: number;
   participants: {

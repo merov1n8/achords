@@ -152,6 +152,30 @@ describe("cli-claude adapter", () => {
     ]);
   });
 
+  it("keeps the session and resumes it only when asked (ADR-0066)", async () => {
+    const id = "00000000-0000-0000-0000-000000000001";
+    await provider().run(req());
+    expect(JSON.parse(readFileSync(record, "utf8")).argv).toContain("--no-session-persistence");
+    await provider().run(req({ session: {} }));
+    const fresh = JSON.parse(readFileSync(record, "utf8")).argv as string[];
+    expect(fresh).not.toContain("--no-session-persistence");
+    expect(fresh).not.toContain("--resume");
+    const ok = await cliClaude({
+      command: [process.execPath, FAKE],
+      env: { FAKE_CLAUDE_RECORD: record, FAKE_CLAUDE_KNOWN: id },
+    }).run(req({ session: { resume: id } }));
+    expect(ok).toMatchObject({ ok: true, sessionId: id });
+    expect(JSON.parse(readFileSync(record, "utf8")).argv).toEqual(
+      expect.arrayContaining(["--resume", id]),
+    );
+  });
+
+  it("reports a resume the CLI rejects, so the caller can start afresh (ADR-0066)", async () => {
+    const res = await provider().run(req({ session: { resume: "gone" } }));
+    expect(res).toMatchObject({ ok: false, stopReason: "error", resumeRejected: true });
+    expect((await provider("crash").run(req())).resumeRejected).toBeUndefined();
+  });
+
   it("injects broker env only into the child process", async () => {
     await provider().run(req({ env: { ACHORDS_TEST_SECRET: "s3cret-value" } }));
     expect(JSON.parse(readFileSync(record, "utf8")).injected).toBe("s3cret-value");

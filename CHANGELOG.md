@@ -118,6 +118,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- An agent keeps its working memory on a card (ADR-0066): its next run on the same card (after
+  delegated work comes back, or after you answer its question) continues its own
+  Claude session and gets only what is new. Sessions live in `sessions/<card>/<agent>/` under the
+  achords home, never in your own `~/.claude`, sign in with the token for container runs, and
+  are deleted when the card reaches its finish column, is deleted, or its chat is archived or deleted.
+  Without that token runs start from scratch as before, and the chat says so once. The run
+  details show what resumed sessions read (and how much came from the cache); a run's input now
+  counts prompt-cache writes too.
 - A project can work in a folder outside Achords: add `workdir: ~/path/to/repo` to its
   `project.yaml` and its agents start there (and Unity is opened for that folder) instead of in
   the project's `files/`.

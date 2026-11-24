@@ -301,6 +301,16 @@ export function runGateway(home: string): Promise<number> {
         };
       },
     },
+    // ADR-0066: card runs with their own CLI config folder sign in with the same token.
+    claudeToken: () =>
+      existsSync(paths.vaultDb) && getVault().status(CLAUDE_CONTAINER_TOKEN).set
+        ? {
+            CLAUDE_CODE_OAUTH_TOKEN: getVault().resolve(
+              CLAUDE_CONTAINER_TOKEN,
+              "provider:cli-claude/session",
+            ),
+          }
+        : undefined,
     budget,
     // Price list for CLIs that report tokens only; read per run, so edits apply at once.
     price: (model, usage) => costOf(loadPricing(home), model, usage),

@@ -18,6 +18,7 @@ import {
   askOwner as askOwnerQuestion,
   attachmentsDir,
   type Channel,
+  carryCardSessions,
   childFinished,
   claim,
   clearActions,
@@ -29,13 +30,16 @@ import {
   type Db,
   defer,
   deleteThread,
+  dropCardSession,
   dueSchedules,
+  endCardSessions,
   enqueueChild,
   enqueueRoot,
   enqueueSuccessor,
   extendLease,
   fail,
   finishRun,
+  getCardSession,
   getRoom,
   getSetting,
   getTask,
@@ -62,6 +66,8 @@ import {
   roomsOf,
   runProgressItems,
   type Sensitivity,
+  saveCardSession,
+  sessionDir,
   setRunPid,
   setRunProgress,
   setSetting,
@@ -240,6 +246,11 @@ export interface OrchestratorDeps {
     /** CLAUDE_CODE_OAUTH_TOKEN for subscription runs; throws a plain reason when not set. */
     claudeLogin: () => Record<string, string>;
   };
+  /**
+   * ADR-0066: sign-in for host card runs that keep a session in their own CLI config folder
+   * (CLAUDE_CODE_OAUTH_TOKEN); undefined when no token is set.
+   */
+  claudeToken?: () => Record<string, string> | undefined;
   /** Applied to everything posted to threads (ADR-0012). */
   redact?: (text: string) => string;
   /** Long-term memory (ADR-0008); optional so the hub works without it. */
@@ -495,6 +506,7 @@ function containerMounts(
   m: Manifest,
   cwd: string,
   extra: string[],
+  writable: string[] = [],
 ): { path: string; readonly: boolean }[] {
   const out = new Map<string, boolean>();
   const add = (p: string, readonly: boolean) => {
@@ -509,7 +521,7 @@ function containerMounts(
       out.set(path, (out.get(path) ?? true) && readonly);
     }
   };
-  for (const p of [cwd, ...m.fs.write.map(expandHome)]) add(p, false);
+  for (const p of [cwd, ...m.fs.write.map(expandHome), ...writable]) add(p, false);
   for (const p of [...m.fs.read.map(expandHome), ...extra]) add(p, true);
   return [...out].map(([path, readonly]) => ({ path, readonly }));
 }
@@ -717,7 +729,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return {
       ...(cost !== null ? { costUsd: cost } : {}),
       tokens: {
-        input: res.usage.inputTokens,
+        // Cache writes are input read at full price: without them a resume after the cache
+        // expired would look free (ADR-0066).
+        input: res.usage.inputTokens + res.usage.cacheWriteTokens,
         output: res.usage.outputTokens,
         cached: res.usage.cacheReadTokens,
       },
@@ -892,6 +906,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const publishKey = (id: string) => `publish_req:${id}`;
   // A task that handed something to the owner ends with a short line, not a repeat of it.
   const awaitingKey = (taskId: string) => `publish_task:${taskId}`;
+  // ADR-0066: the chat was told once that its card runs cannot keep a session.
+  const sessionsOffKey = (threadId: string) => `sessions_off:${threadId}`;
 
   const elevationKey = (rootId: string) => `elevation:${rootId}`;
   /** Until when the chain has full access, if it has it now. */
@@ -902,6 +918,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   /** on_enter automation; `byOwner` skips nothing here (approval is checked before moving). */
   const enterColumn = (task: Task, column: string, wf: Workflow) => {
+    // ADR-0066: a done card's agents start afresh; its transcripts go with it.
+    if (column === wf.finish) endCardSessions(db, home, [task.id]);
     // A card that has not started has no work to review yet.
     if (task.parked) return;
     const assign = wf.on_enter[column]?.assign;
@@ -1031,6 +1049,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     });
     // The same card carries on (ADR-0059).
     takeOverCard(db, card.id, next.id, wf.start, "system");
+    carryCardSessions(db, home, card.id, next.id);
     say(t("thread.sentBack", { agent: card.assigneeAgentId }));
   };
 
@@ -2009,8 +2028,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         });
         // One chat, one card: further work in the chat continues its card (ADR-0059).
         const card = opts.newCard ? undefined : threadCard(db, from.threadId);
-        if (card) takeOverCard(db, card, t.id, workflowForTask(t).start, "system");
-        else placeCard(db, t.id, workflowForTask(t).start, "system");
+        if (card) {
+          takeOverCard(db, card, t.id, workflowForTask(t).start, "system");
+          carryCardSessions(db, home, card, t.id);
+        } else placeCard(db, t.id, workflowForTask(t).start, "system");
         return { ok: true, taskId: t.id };
       }
       const parent = getTask(db, from.taskId);
@@ -2393,6 +2414,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let codexRun = false;
     // Gemini (ADR-0045, stage 1): no achords MCP tools at all yet.
     let geminiRun = false;
+    // ADR-0066: the prompt for a resumed session, given its last turn.
+    let whatsNew: (since: number) => string = () => "";
     try {
       const all = agents();
       manifest = task.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
@@ -2694,10 +2717,53 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         : "";
       const room = task.roomId ? getRoom(db, task.roomId) : undefined;
       const turn = nextTurn(room);
+      // This run's own permissions and notes: a resumed session gets them anew as well.
+      const runNotes = `${geminiNote}${codexNote}${elevation}${commandsNote}${foldersNote}${checksNote}${imagesNote}${scopeNote ? `\n\n${scopeNote}` : ""}`;
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${geminiNote}${codexNote}${elevation}${commandsNote}${foldersNote}${checksNote}${imagesNote}${scopeNote ? `\n\n${scopeNote}` : ""}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${runNotes}`.trim();
+      // ADR-0066: a resumed session holds everything up to its last turn, so its prompt is what
+      // came since: children's results, the owner's answer, a review, the owner's follow-up.
+      // Only a run that succeeded left its turn in the session (failed runs store none).
+      const again =
+        db.prepare("SELECT 1 FROM runs WHERE task_id = ? AND status = 'succeeded'").get(task.id) !==
+        undefined;
+      const self = manifest.id;
+      whatsNew = (since) => {
+        const newer = (x: { createdAt: number; updatedAt?: number }) =>
+          (x.updatedAt ?? x.createdAt) > since;
+        const owner =
+          !task.parentId && task.threadId
+            ? listMessages(db, task.threadId)
+                .filter(
+                  (m) =>
+                    m.role === "user" &&
+                    m.visibility === "normal" &&
+                    m.createdAt > since &&
+                    m.createdAt <= task.createdAt,
+                )
+                .map((m) => m.content)
+            : [];
+        const notes = [
+          ...checklist.filter(newer).map((i) => `- [${i.done ? "x" : " "}] ${i.text}`),
+          ...comments.filter(newer).map((c) => `- ${c.text}`),
+        ];
+        const fresh = children.filter(newer);
+        const head = again
+          ? `# Continue: ${task.title}`
+          : `# Next task on this card: ${task.title}\n\n${task.description ?? ""}${previous && previous.assigneeAgentId !== self ? handedOver : ""}${owner.length ? `\n\nThe owner wrote:\n${owner.join("\n\n")}` : ""}`;
+        return `${head}${notes.length ? `\n\nNew on this card's checklist and comments:\n${notes.join("\n")}` : ""}${
+          fresh.length
+            ? `\n\nResults from delegated tasks:\n${fresh
+                .map(
+                  (c) =>
+                    `- ${c.title} (${c.assigneeAgentId}, ${c.status}): ${c.result ?? c.error ?? ""}`,
+                )
+                .join("\n")}\nUse these results and finish the task.`
+            : ""
+        }${discussions}${answer}${resume}${runNotes}`.trim();
+      };
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
       if (allowedCommands.length && built.req.allowedTools) {
@@ -2740,6 +2806,46 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         return;
       }
     }
+    // ADR-0066: one CLI session per agent and card, in the card's own config folder. Claude card
+    // runs only: workers and discussion turns never keep one.
+    const usedModel = `${built.provider.id}/${built.req.model}`;
+    const sessionKey = { card: rootId, agent: manifest.id, project: task.project ?? "" };
+    // Open web as in ADR-0066: the effective run has "*", WebSearch or full access.
+    const openWeb =
+      until !== undefined ||
+      manifest.network.allow.includes("*") ||
+      manifest.tools.includes("WebSearch");
+    const keyed = launches.some((l) => l.keyed);
+    const trust = openWeb ? "open-web" : keyed ? "keyed" : "closed";
+    let session: { dir: string; prompt: string } | undefined;
+    const cardRun = built.provider.id === "cli-claude" && !task.roomId && !task.workerSpec;
+    // Open web and credentials in one run: its transcript must never be resumed either way.
+    if (cardRun && !(openWeb && keyed)) {
+      // A separate config folder does not see the Mac's Keychain login: the container token
+      // signs in instead (container runs carry it already, API mode needs none).
+      const login = box || built.req.billing === "api" ? {} : deps.claudeToken?.();
+      if (login) {
+        const dir = sessionDir(home, sessionKey.card, sessionKey.agent);
+        const gone = !existsSync(dir);
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        built.req.env = { ...built.req.env, ...login, CLAUDE_CONFIG_DIR: dir };
+        session = { dir, prompt: built.req.prompt };
+        const prior = gone ? undefined : getCardSession(db, sessionKey);
+        if (prior && prior.model === usedModel && prior.trust === trust) {
+          built.req.session = { resume: prior.sessionId };
+          built.req.prompt = whatsNew(prior.lastUsedAt);
+        } else built.req.session = {};
+      } else if (
+        deps.claudeToken &&
+        task.threadId &&
+        !getSetting(db, sessionsOffKey(task.threadId))
+      ) {
+        setSetting(db, sessionsOffKey(task.threadId), "1");
+        post(task.threadId, t("thread.sessionsOff"));
+      }
+    }
+    // A run without the card's session (another model, no token): the next one starts afresh.
+    if (!session && !task.roomId && !task.workerSpec) dropCardSession(db, sessionKey);
     // Inside the VM the MCP servers run on the image's Node and reach the hub on the container
     // network; the code they need is shared read-only at the same paths.
     const node = box ? "node" : process.execPath;
@@ -2857,10 +2963,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           bin: box.bin,
           name: `${runContainerPrefix(home)}${randomUUID()}`,
           image: box.image,
-          mounts: containerMounts(manifest, built.req.cwd, [
-            ...(shared ? [shared, ...deps.container.codeDirs] : []),
-            ...skillRoots(manifest),
-          ]),
+          mounts: containerMounts(
+            manifest,
+            built.req.cwd,
+            [...(shared ? [shared, ...deps.container.codeDirs] : []), ...skillRoots(manifest)],
+            // The CLI's config folder: this card's session for this agent, nothing of the host's.
+            session ? [session.dir] : [],
+          ),
         };
       } catch (err) {
         hubRun?.revoke();
@@ -2890,18 +2999,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       taskId: task.id,
       agentId: manifest.id,
       billing: built.req.billing ?? "subscription",
+      resumed: built.req.session?.resume !== undefined,
     });
     const keepAlive = setInterval(
       () => extendLease(db, task.id, WORKER_ID, LEASE_MS),
       LEASE_MS / 3,
     );
     try {
-      const res = await built.provider.run({
-        ...built.req,
-        ...(signal ? { signal } : {}),
-        onSpawn: (pid) => setRunPid(db, run.id, pid),
-        onProgress: (p) => setRunProgress(db, run.id, p),
-      });
+      const runIt = () =>
+        built.provider.run({
+          ...built.req,
+          ...(signal ? { signal } : {}),
+          onSpawn: (pid) => setRunPid(db, run.id, pid),
+          onProgress: (p) => setRunProgress(db, run.id, p),
+        });
+      let res = await runIt();
+      if (res.resumeRejected && session) {
+        // The CLI no longer has the session: the same run starts afresh with the whole prompt.
+        built.req.session = {};
+        built.req.prompt = session.prompt;
+        db.prepare("UPDATE runs SET resumed = 0 WHERE id = ?").run(run.id);
+        res = await runIt();
+      }
       finishRun(
         db,
         run.id,
@@ -2913,6 +3032,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       );
       recordUsage(built.provider.id, res.windows);
       addSpend(db, rootId, spendInfo(built.provider.id, built.req.model, res).costUsd ?? 0);
+      if (session && res.ok && res.sessionId) {
+        // An agent may have moved its own card to done during the run: nothing to keep then.
+        const card = getTask(db, sessionKey.card);
+        if (card?.column && card.column === workflowForTask(card).finish) {
+          endCardSessions(db, home, [sessionKey.card]);
+        } else {
+          saveCardSession(db, {
+            ...sessionKey,
+            sessionId: res.sessionId,
+            model: usedModel,
+            trust,
+          });
+        }
+      }
       if (res.stopReason === "cancelled" && signal?.aborted) {
         // Planned stop: not the task's fault. Back to the queue with where it was, no attempt lost.
         requeueInterrupted(db, task.id, WORKER_ID, resumeNote(runProgressItems(db, run.id)));
@@ -2971,6 +3104,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         else {
           // The successor carries the same card on (ADR-0059).
           takeOverCard(db, task.id, next.id, workflowForTask(next).start, "system");
+          carryCardSessions(db, home, task.id, next.id);
           if (task.threadId) {
             post(
               task.threadId,
