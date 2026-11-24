@@ -1,0 +1,212 @@
+# ADR-0066: Stall watcher, card moves that start work, questions to the parent, room outcomes, sessions per card, and no memory from open-web runs
+
+Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, ADR-0039 and ADR-0051.
+
+- Context: what exists today, so each decision below covers only the gap. None of the six items is fully built.
+  - **Task state.** Task status is `queued | claimed | done | failed | cancelled`.
+    - "Waiting" is a counter or flag: `waiting_children` (ADR-0029), or `waiting_owner` with `owner_question` and `owner_answer`.
+    - `claim` skips tasks that are waiting or parked.
+    - The gateway works on one task at a time: one worker, a 1 s tick.
+    - A run has a 10 min lease, renewed while it lives. The renewal also bumps `tasks.updated_at`.
+    - A run is killed after 30 min, and a task has 3 attempts.
+  - **Budget.** The root holds `budget_usd` and `spent_usd`, taken from the agent's `budget.per_run_usd`; without it the budget is unlimited.
+    - Spend is booked after a run ends. The CLI caps a run in flight with `--max-budget-usd`.
+    - Guards (ADR-0029, ADR-0055): depth 3, 5 children per task, 6 handoff hops, 20 tasks per root.
+  - **1. Stall watcher.**
+    - The `stuck` monitor (ADR-0039) reports cards whose `updated_at` is older than N hours (default 48).
+    - The 80/95 % warnings exist only for subscription windows. Nothing watches a root chain.
+    - The boss is not a queued agent. It runs only when the owner writes, and its decision schema cannot inspect, stop or continue a chain.
+  - **2. Card moves.**
+    - Owner drag and drop goes through `ownerMove`, then `enterColumn`.
+    - `enterColumn` handles only `on_enter.assign: role:<x>` (a reviewer child) and `approve: owner`.
+    - Every move is logged in `task_moves.actor`: `owner`, `agent:<id>` or `system`.
+    - ADR-0062 restarts a card only after a review sends it back, at most three times. A parked card starts only from its Start button.
+    - An owner moving a card into a working column starts nothing.
+  - **3. ask_parent.**
+    - `ask_owner` sets `waiting_owner`. The owner's next chat message answers the oldest open question in the thread.
+    - The task is then queued again with "You asked the owner … / Owner's answer".
+    - A parent cannot be claimed while `waiting_children > 0`.
+    - There is no state, tool or prompt block for a child asking its parent.
+  - **4. Room outcome.**
+    - `closeRoom` appends the opener's result as a message in the room thread and sets `rooms.closed_at`. A finally failed turn closes the room with no decision.
+    - Nothing reaches the card. Later runs of the card see a room only indirectly, through earlier results.
+    - Rooms stay out of chats and Telegram (ADR-0032).
+  - **5. Sessions.**
+    - Claude runs use `--no-session-persistence` (ADR-0024) and the owner's default Claude config directory.
+    - `session_id` is parsed (`RunResult.sessionId`) but never stored.
+    - Container runs are `--rm` (ADR-0051).
+    - Every prompt is rebuilt from scratch: chat block, memories, children's results, the owner's answer, the review text for rework.
+  - **6. Memory writes.**
+    - There is no memory tool, no daily journal and no pre-compaction save.
+    - The only durable write is automatic: after a successful run (not a room turn or handoff), the result becomes a `summary` memory of up to 1500 characters, recalled unmarked into later prompts.
+    - Skills already go to review when the caller reads the open web (ADR-0049). That check reads the raw manifest: it counts a project-sites-only WebFetch (ADR-0057) as open web and misses `network.allow: ["*"]` without WebSearch.
+
+- Decision, part 1: stall watcher (amends ADR-0039)
+  - **What a stall is.** The gateway checks on its tick, without a model call, root chains that are not finished and not waiting on the owner. A chain is stalled when either holds:
+    - **No progress:** nothing in the chain has made progress for N minutes (default 15, a setting). Progress means:
+      - a run starts or ends;
+      - a run sends a stream event;
+      - a message or move is posted;
+      - a child finishes.
+      Lease renewal and `updated_at` do not count.
+    - **Spend:** 80 % of the root's budget is spent (a setting). This is checked only when the root has a budget.
+  - **Not a stall:**
+    - A chain whose next task waits for the single worker. Its clock restarts when one of its tasks is claimed.
+    - A chain waiting on the owner.
+  - **Notice.** The gateway calls the boss once, in the root's thread, with the facts: the chain (tasks, agents, status), the last activity and its time, and spend against budget. The boss's decision schema gets three actions:
+    - `ask_owner(text)`: the boss asks the owner.
+    - `stop_chain`: the same as ADR-0052 Stop for that root.
+    - `let_run`: nothing happens.
+  - **Once per stall.** The root stores `stall_noticed_at` and the reason. A no-progress notice resets only after new progress. The 80 % notice fires once per root. A boss call is not a task, so it is never watched and never causes a notice of its own.
+  - **Guards.** The watcher only reports. Depth, fan-out, budgets and the ADR-0055 limits are untouched.
+  - **Tests:**
+    - One notice after N idle minutes, and none on the next tick.
+    - A new notice after new progress and a new idle period.
+    - Lease renewal alone is not progress.
+    - A task queued behind another chain gives no notice.
+    - `waiting_owner` gives no notice.
+    - 80 % gives one notice, and 95 % no second one.
+    - No spend notice without a budget.
+    - `stop_chain` cancels like Stop.
+    - The boss call produces no notice.
+
+- Decision, part 2: an owner's card move starts work (amends ADR-0030)
+  - **Working column.** A workflow column's `on_enter` may say `start: assignee`. The seeded workflow sets it on `in_progress`, and a project's own workflow may set it on any column. Without the key, nothing changes.
+  - **Dispatch.** When the **owner** moves a card into such a column, the assignee's run is queued with the card as its task:
+    - a parked card starts as with its Start button;
+    - a done or failed card gets a successor on the same card (ADR-0059, as in ADR-0062);
+    - a card that is already queued or claimed is left as it is.
+  - **Guards:**
+    - Only owner moves dispatch. A move by an agent, and so by the assignee or by a run already working on the card, never does.
+    - No dispatch without an agent assignee, or when the owner is the assignee.
+    - One dispatch per move.
+    - The successor shares the root's budget and the 20-task limit. A spent budget refuses the dispatch with a chat message.
+    - Owner moves do not count toward ADR-0062's three automatic restarts.
+    - ADR-0065 checks apply to the new task.
+  - **Tests:**
+    - An owner move queues the assignee once.
+    - The same move by an agent queues nothing.
+    - A card assigned to the owner queues nothing.
+    - A card already queued or claimed gets no second task.
+    - A parked card starts with its budget.
+    - A done card gets a successor.
+    - A spent budget gives a refusal message.
+    - A custom column with the key also starts work.
+    - A column without the key behaves as today.
+
+- Decision, part 3: `ask_parent` (amends ADR-0029)
+  - **Tool.** The hub tool `ask_parent(question)` is given to a task that has a parent task: a delegated task, or a handoff successor whose line has a parent.
+    - It is absent for the root, whose parent is the boss. There `ask_owner` stays the only way.
+    - It is also absent for workflow review tasks, workers and room turns.
+  - **Flow:**
+    1. The child's run ends, and the child is marked `waiting_parent` with `parent_question`.
+    2. The parent becomes claimable despite `waiting_children > 0`.
+    3. The parent's prompt gets "<agent> (task #id) asks: …" and the hub tool `answer_child(task, answer)`.
+    4. After answering, the parent waits for its children again.
+    5. The answer clears `waiting_parent`, and the child is queued with "You asked <parent> … / Answer".
+    6. A parent run that ends without answering leaves the question open.
+  - **Guards:**
+    - At most 3 questions per child task (a setting, which may be lower). The fourth is refused with "ask the owner or decide".
+    - The parent's wake is a run paid from the root's budget. Questions do not create tasks and do not count toward the 20 tasks per root.
+    - The parent may ask the owner before answering. The child then waits, and the stall watcher does not count a chain that is waiting on the owner.
+    - A handoff with an open parent question is refused.
+    - The owner's chat reply never answers a parent question: the two use separate fields.
+    - Depth, cycles, fan-out and the shared budget are unchanged.
+  - **Tests:**
+    - The child asks; the parent is woken despite its children, answers, and the child continues with the answer.
+    - The fourth question is refused.
+    - Neither the root nor a review task has `ask_parent`.
+    - Questions do not count toward the 20 tasks, but their runs are booked to the root's budget.
+    - The owner's reply does not answer a parent question.
+    - The parent can ask the owner while the child waits.
+    - A handoff is refused while a question is open.
+
+- Decision, part 4: rooms close with a recorded outcome (amends ADR-0032)
+  - **Outcome.** `closeRoom` takes an outcome `{decision, decided_by, open_points[]}` and stores it as `rooms.outcome`. The opener's run after a room gets the hub tool `record_room_outcome(room, decision, decided_by, open_points)`.
+  - **Fallback.**
+    - If the opener's run ends without calling the tool, the room is closed with the run's result as the decision, the opener as `decided_by`, and the open point "not stated".
+    - A room whose turn finally fails gets "no decision: room failed".
+    - An outcome is never empty.
+  - **On the card.**
+    - The outcome is posted as a card comment on the card of the opener's root.
+    - Comments already move with `takeOverCard` (ADR-0059), so later tasks of the same card keep it.
+    - Card runs get the card's room outcomes in their prompt, newest first, at most 5.
+  - **Visibility.** The outcome appears on the card, not in the chat or on Telegram.
+  - **Tests:**
+    - With the tool, the outcome is stored and commented on the card.
+    - Without it, the fallback is used.
+    - A failed room records "no decision".
+    - A later successor of the card sees the outcome.
+    - A child opener's outcome lands on the root's card.
+    - Nothing is posted to the chat.
+
+- Decision, part 5: one CLI session per agent and card (amends ADR-0024 and ADR-0051)
+  - **Where sessions live.** Claude card runs use `CLAUDE_CONFIG_DIR=$ACHORDS_HOME/sessions/<card>/<agent>/` and keep session persistence on. Agent transcripts therefore never mix with the owner's own Claude sessions, and each card's sessions can be removed as one folder.
+    - The run still authenticates with the owner's subscription. Implementation verifies that login works with a separate config directory (a `claude setup-token` token on servers, the keychain login on a desktop). If it does not, the runs stay on today's fresh prompts and the problem is reported. Sessions never move back into the owner's `~/.claude`.
+  - **Key.** `card_sessions(card, agent, project, session_id, model, trust, created_at, last_used_at)`. A session never crosses a card, an agent or a project.
+  - **Resume.** A later run of the same agent on the same card starts with `--resume <id>`. There is no time window: the owner chose continuity over cost. Its prompt holds only what is new since the session's last turn:
+    - the children's results for a re-queued parent;
+    - the answer to `ask_parent` or `ask_owner`;
+    - the review verdict for rework (ADR-0062);
+    - the owner's message for a follow-up in the chat or a card move (part 2).
+  - **New chat, new session.** A new chat is a new card (ADR-0059), so it starts a new session. A follow-up in the same chat continues it.
+  - **Containers (amends ADR-0051).** The card's session folder for that agent is mounted read-write into the container as the CLI config directory, beside the run's own folders. Nothing else of the host's config is mounted.
+  - **Fresh prompt instead of resume.** The run never fails, and the stored session is replaced, when:
+    - the session is gone or the CLI rejects it;
+    - the model or provider differs (including a fallback, ADR-0058);
+    - the run's trust differs from the session's (see guards).
+  - **End.** The record and the folder are deleted when the card is done (finish column), archived or deleted.
+  - **Guards:**
+    - **Trust.** A session that read the open web (elevation, `network.allow: ["*"]` or WebSearch in the effective run) is never resumed in a run with keyed integrations or without open web. Otherwise open-web content would reach credentials through the transcript, which ADR-0035 and ADR-0055 forbid.
+    - **Sensitivity.** A `local-only` session is never resumed by another model.
+    - **Permissions.** A resume carries no permissions. Each run gets its tools, MCP config and run token anew.
+    - **Workers and room turns** never keep sessions.
+  - **Cost display.** The run details (ADR-0052) show the input tokens a resume read, and how many of them came from the cache. The owner can then see what continuity costs.
+  - **Tests:**
+    - The config dir is per card and agent.
+    - The session id is stored.
+    - The next run on the same card and agent gets `--resume` and a short prompt.
+    - Another card, agent or project gets a fresh run.
+    - A new chat gets a fresh run.
+    - A fallback model gives a fresh run.
+    - A container run mounts the session folder and resumes.
+    - A rejected resume falls back to fresh and succeeds.
+    - An open-web session is not resumed in a keyed run.
+    - A done card deletes the folder and the record.
+
+- Decision, part 6: no memory from open-web runs (applies ADR-0049's rule to memory)
+  - **One definition of "open web"** for skills, memory and the publishing guard (ADR-0038): the effective run (not the raw manifest) has `network.allow` containing `"*"`, or WebSearch, or an active elevation.
+    - A WebFetch limited to project sites (ADR-0057) is not open web.
+    - `skillCaller` moves to this definition.
+  - **Memory.** A run that reads the open web writes no summary memory. Its result stays in its report, on its card and in the chat. Durable knowledge from such work reaches memory only through a later run without open web, or as a skill proposal under ADR-0049 review.
+  - **Unchanged:** skills (beyond the shared definition), and runs without open web.
+  - **Tests:**
+    - An open-web run writes no summary.
+    - An elevated run writes none.
+    - A project-sites-only run writes as before.
+    - `skill_propose` from a manifest with `"*"` but no WebSearch goes to review.
+    - A run without web is unchanged.
+
+- Consequences:
+  - Stuck chains reach the owner within minutes, with one notice per stall.
+  - Dragging a card starts its work, and only the owner's drag does.
+  - Children ask their delegator instead of guessing, at most three times per task.
+  - A room's result outlives the room on its card.
+  - An agent keeps its working memory across runs on one card.
+  - **Token cost.** Each resume re-reads the whole session as input. Within the prompt cache's lifetime (minutes) that costs about a tenth of the full price. After a long pause (an answer the next morning) the whole history is billed again at full price, often more than today's rebuilt prompt. On a subscription that is window usage rather than money. The run details make it visible.
+  - **Data.** Agent transcripts sit on disk under `$ACHORDS_HOME/sessions/` until the card is done. They are part of the install's data, like memory.
+  - **Memory.** Research on the open web no longer feeds memory. Its value survives on the card and in reports.
+  - **Schema changes:**
+    - core migration 0025:
+      - on `tasks`: `stall_noticed_at`, `stall_reason`, `waiting_parent`, `parent_question`, `parent_answer`, `parent_questions`;
+      - `rooms.outcome`;
+      - table `card_sessions`;
+    - workflow schema: `on_enter.start: assignee`;
+    - settings: stall minutes and stall percentage.
+  - **UI changes:**
+    - the stall notice in the chat (the boss's message);
+    - working columns start work when the owner drops a card;
+    - the card modal shows room outcomes as comments;
+    - the run details show parent questions and answers, and the input tokens a resume read (cached and uncached);
+    - Settings show the stall thresholds.
+  - **Unchanged:** depth 3, cycles, fan-out 5, the shared budget, the ADR-0055 hop and task limits, and rooms staying out of chats.
