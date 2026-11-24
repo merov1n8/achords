@@ -58,8 +58,6 @@ export interface CompileInput {
     /** provider/model the run uses. */
     model: string;
     mode?: RunMode | null | undefined;
-    /** Full access (ADR-0035) for this chain: a split agent works in web mode meanwhile. */
-    elevated?: boolean | undefined;
     /** The install can run Apple containers (ADR-0051). */
     containerAvailable: boolean;
   };
@@ -131,12 +129,7 @@ function compileAt(
   // and no host run with a shell (level 4+). Such an agent works in two modes: work (shell and
   // account tools, no open web) and web (open web, neither of them).
   const split = level >= 3 && !local && (level >= 4 || grants.some(({ e, g }) => writesOf(e, g)));
-  // Full access opens the web, so a split agent spends it in web mode (never web beside a shell).
-  const mode: RunMode | undefined = split
-    ? run.elevated
-      ? "web"
-      : (run.mode ?? "accounts")
-    : undefined;
+  const mode: RunMode | undefined = split ? (run.mode ?? "accounts") : undefined;
   const web = level >= 2 && !local && mode !== "accounts";
   // Work mode keeps the documentation hosts of the remit (never "*"); project sites (ADR-0057)
   // and the package registries are added by the run.

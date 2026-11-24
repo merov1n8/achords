@@ -248,22 +248,6 @@ describe("compileLevel (ADR-0067)", () => {
     expect(levelConflicts(m, catalog)).toEqual([]);
   });
 
-  it("full access gives a split agent web mode: no shell, no draft+ account tools", () => {
-    const m = agent("level: 4\nmcp: [meta, blender]\nkeys_beside_host_shell: true");
-    const c = compile(m, 4, { run: { elevated: true } });
-    expect(c.mode).toBe("web");
-    expect(c.sandbox).toBeUndefined();
-    expect(c.manifest.tools).not.toContain("Bash");
-    expect(c.manifest.tools).toContain("WebSearch");
-    expect(c.manifest.container).toBe(true);
-    // Keyed integrations leave, and the local app is not reachable from the container.
-    expect(c.integrations).toEqual({});
-    // Whatever mode the task was in.
-    expect(compile(m, 4, { run: { elevated: true, mode: "accounts" } }).mode).toBe("web");
-    // An agent without a split is not affected (the run adds the web on top, as before).
-    expect(compile(agent("level: 2"), 2, { run: { elevated: true } }).mode).toBeUndefined();
-  });
-
   it("level 4 with keyed integrations runs in a container, without local apps (conflict)", () => {
     const m = agent("level: 4\nmcp: [meta, blender]");
     const c = compile(m, 4);

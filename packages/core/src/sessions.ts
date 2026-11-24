@@ -70,6 +70,21 @@ export function dropCardSession(db: Db, k: CardSessionKey): void {
 export function carryCardSessions(db: Db, home: string, from: string, to: string): void {
   if (from === to) return;
   db.prepare("UPDATE card_sessions SET card = ? WHERE card = ?").run(to, from);
+  // ADR-0067 step 4: so do its "for this card" approvals (JSON lists, merged).
+  const approvals = (card: string): unknown[] =>
+    JSON.parse(
+      String(
+        db.prepare("SELECT value FROM settings WHERE key = ?").get(`approval:${card}`)?.value ||
+          "[]",
+      ),
+    );
+  const carried = approvals(from);
+  if (carried.length) {
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+    ).run(`approval:${to}`, JSON.stringify([...approvals(to), ...carried]));
+    db.prepare("DELETE FROM settings WHERE key = ?").run(`approval:${from}`);
+  }
   if (existsSync(sessionDir(home, from))) {
     mkdirSync(join(home, "sessions"), { recursive: true, mode: 0o700 });
     renameSync(sessionDir(home, from), sessionDir(home, to));
@@ -80,6 +95,8 @@ export function carryCardSessions(db: Db, home: string, from: string, to: string
 export function endCardSessions(db: Db, home: string, cards: string[]): void {
   for (const card of cards) {
     db.prepare("DELETE FROM card_sessions WHERE card = ?").run(card);
+    // ADR-0067 step 4: "for this card" approvals end with the card (done, archived, deleted).
+    db.prepare("DELETE FROM settings WHERE key = ?").run(`approval:${card}`);
     rmSync(sessionDir(home, card), { recursive: true, force: true });
   }
 }

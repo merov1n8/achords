@@ -3,6 +3,18 @@ export const PACKAGE_NAME = "@achords/policy";
 
 export { agentSummary } from "./agent-doc.ts";
 export {
+  alwaysAskCommand,
+  applyGrants,
+  deletesOutside,
+  expandPath,
+  type Grant,
+  inFolders,
+  keyFolder,
+  PERMISSION_KINDS,
+  type PermissionKind,
+  refusedCommand,
+} from "./approvals.ts";
+export {
   accountRef,
   accountRefs,
   allowedIntegrationTools,

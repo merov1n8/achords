@@ -1,16 +1,26 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  answerOwnerQuestion,
+  cardKey,
   createThread,
+  getSetting,
   getTask,
   handoffHops,
   listMessages,
   openCoreDatabase,
   setSetting,
   type Task,
+  threadCard,
 } from "@achords/core";
-import { createProject, loadCatalog, updateProject } from "@achords/policy";
+import {
+  createProject,
+  type LiveGuard,
+  liveRefusal,
+  loadCatalog,
+  updateProject,
+} from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMcpTickets, createRunTokens, type McpLaunch } from "../mcp/tokens.ts";
@@ -311,7 +321,7 @@ describe("permission levels in runs (ADR-0067)", () => {
     expect(getTask(db, r.taskId)?.error).toMatch(/cannot run agents in a container/);
   });
 
-  it("full access gives a split agent web mode: no shell, no account tools that write", async () => {
+  it("a chain's full access (ADR-0035) does not reach a leveled agent: the scopes replace it", async () => {
     const thread = createThread(db, { project: "acme" });
     const r = orch.delegate(
       { from: "boss", threadId: thread.id },
@@ -320,24 +330,13 @@ describe("permission levels in runs (ADR-0067)", () => {
     if (!r.ok) throw new Error(r.reason);
     const task = getTask(db, r.taskId) as Task;
     setSetting(db, `elevation:${task.rootId ?? task.id}`, String(Date.now() + 60_000));
-    let switched: unknown;
-    onRun = (t) => {
-      switched = orch.handoff(
-        { from: "task", taskId: t.id },
-        { agent: "designer", title: "x", instructions: "x" },
-      );
-    };
     for (let i = 0; i < 5 && (await orch.workOnce()); i++);
     const req = seen[0]?.req;
-    expect(req?.tools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
-    expect(req?.tools).not.toContain("Bash");
-    expect(req?.container).toBeDefined();
-    // Keyed integrations leave, and the local app is not reachable from the container.
-    expect(req?.allowedTools.some((t) => t.startsWith("mcp__social__"))).toBe(false);
-    expect(req?.allowedTools.some((t) => t.startsWith("mcp__blender__"))).toBe(false);
-    expect(req?.prompt).toMatch(/web mode until/);
-    // Switching back is pointless while full access lasts.
-    expect(switched).toMatchObject({ ok: false, reason: expect.stringMatching(/web mode until/) });
+    // Work mode as without it: the shell and the accounts, no open web.
+    expect(req?.tools).toContain("Bash");
+    expect(req?.tools).not.toContain("WebSearch");
+    expect(req?.allowedTools).toContain("mcp__social__save_draft");
+    expect(req?.prompt).not.toMatch(/full access/);
   });
 
   it("level 4 in work mode without keys: a free shell in the CLI's host sandbox", async () => {
@@ -444,7 +443,238 @@ describe("permission levels in runs (ADR-0067)", () => {
     };
     await give("builder");
     await give("legacy");
-    expect(leveled).toMatchObject({ ok: false, reason: expect.stringMatching(/no command list/) });
+    expect(leveled).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/request_permission/),
+    });
     expect(legacy).toMatchObject({ ok: false, reason: expect.stringMatching(/force push/) });
+  });
+  describe("approvals: once, for this card, always (ADR-0067 step 4)", () => {
+    const drain = async () => {
+      for (let i = 0; i < 12 && (await orch.workOnce()); i++);
+    };
+    const ask = (taskId: string, kind: string, target: string) =>
+      orch.requestPermission({ from: "task", taskId }, { kind, target, reason: "needed" });
+    const last = (threadId: string) => listMessages(db, threadId).at(-1);
+    const buttons = (threadId: string) =>
+      last(threadId)?.actions?.map((a) => a.data.split(":").slice(0, 2).join(":"));
+    const idOf = (threadId: string) => last(threadId)?.actions?.[0]?.data.split(":")[2] as string;
+    const yaml = (id: string) => readFileSync(join(home, "agents", id, "agent.yaml"), "utf8");
+    /** Starts a card; its first run asks, later runs do `then`. */
+    const askFirst = async (
+      agentId: string,
+      project: string,
+      kind: string,
+      target: string,
+      then?: (t: Task, run: number) => void,
+    ) => {
+      let run = 0;
+      let out: unknown;
+      onRun = (t) => {
+        if (t.assigneeAgentId !== agentId) return;
+        run++;
+        if (run === 1) out = ask(t.id, kind, target);
+        else then?.(t, run);
+      };
+      const r = await give(agentId, project);
+      return { ...r, out: () => out };
+    };
+
+    it("a leveled agent asks with request_permission; request_access and request_command are not its tools", async () => {
+      agent("legacy", 'tools: [Read, Bash]\nshell:\n  allow: ["git status"]');
+      orch.syncAgents();
+      await give("reader", "lab");
+      await give("legacy");
+      expect(hubTools(seen[0]?.config)).toContain("request_permission");
+      expect(hubTools(seen[0]?.config)).not.toContain("request_access");
+      expect(hubTools(seen[1]?.config)).toEqual(
+        expect.arrayContaining(["request_access", "request_command"]),
+      );
+      expect(hubTools(seen[1]?.config)).not.toContain("request_permission");
+      expect(
+        orch.requestAccess({ from: "task", taskId: seen[0]?.task.id as string }, "x"),
+      ).toMatchObject({ ok: false, reason: expect.stringMatching(/request_permission/) });
+      expect(ask(seen[1]?.task.id as string, "web", "web")).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/request_access or request_command/),
+      });
+    });
+
+    it("once covers exactly the next run", async () => {
+      const { thread, task } = await askFirst("reader", "lab", "web", "web", (t, run) => {
+        if (run === 2) orch.askOwner({ from: "task", taskId: t.id }, "which source?");
+      });
+      expect(buttons(thread.id)).toEqual(["perm:once", "perm:card", "perm:always", "perm:reject"]);
+      expect(last(thread.id)?.content).toMatch(/reader asks for level 2 \(the open web/);
+      expect(seen[0]?.req.tools).not.toContain("WebSearch");
+      expect(orch.runAction(`perm:once:${idOf(thread.id)}`).message).toMatch(/Allowed once/);
+      expect(orch.runAction(`perm:once:${idOf(thread.id)}`).ok).toBe(false);
+      await drain();
+      expect(seen[1]?.req.tools).toEqual(expect.arrayContaining(["WebSearch", "Edit"]));
+      expect(seen[1]?.req.prompt).toMatch(/approved for this run, beyond your settings: level 2/);
+      answerOwnerQuestion(db, thread.id, "any");
+      await drain();
+      expect(seen[2]?.task.id).toBe(task.id);
+      expect(seen[2]?.req.tools).not.toContain("WebSearch");
+      expect(getSetting(db, `approval:${cardKey(task)}`) ?? "").toBe("");
+    });
+
+    it("for this card covers the card's later tasks, a review rework included, and ends when it is done", async () => {
+      agent("dev1", "level: 1\nroles: [dev]");
+      agent("qa", "level: 1\nroles: [qa]");
+      orch.syncAgents();
+      let reviews = 0;
+      const threadOf: { id?: string } = {};
+      const prev = { onRun: undefined as ((t: Task) => void) | undefined };
+      const { thread, task } = await askFirst("dev1", "lab", "folder", "/srv/shared-assets");
+      prev.onRun = onRun;
+      threadOf.id = thread.id;
+      onRun = (t) => {
+        if (t.assigneeAgentId === "qa") {
+          reviews++;
+          orch.moveTask(
+            { from: "task", taskId: t.id },
+            {
+              taskId: String(threadCard(db, thread.id)),
+              to: reviews === 1 ? "in_progress" : "done",
+            },
+          );
+          return;
+        }
+        prev.onRun?.(t);
+      };
+      expect(orch.runAction(`perm:card:${idOf(thread.id)}`).message).toMatch(/this card/);
+      expect(JSON.parse(getSetting(db, `approval:${cardKey(task)}`) ?? "[]")).toEqual([
+        { kind: "folder", folders: ["/srv/shared-assets"] },
+      ]);
+      await drain();
+      const dev = seen.filter((r) => r.task.assigneeAgentId === "dev1");
+      // The resumed run, and the successor the review sent back: both have the folder.
+      expect(dev).toHaveLength(3);
+      expect(dev[2]?.task.id).not.toBe(task.id);
+      expect(dev[0]?.req.allowedTools.some((r) => r.includes("/srv/shared-assets"))).toBe(false);
+      for (const run of dev.slice(1)) {
+        expect(run.req.allowedTools.some((r) => r.includes("/srv/shared-assets"))).toBe(true);
+      }
+      // Reviewed into done: the approval is gone.
+      const held = getTask(db, String(threadCard(db, thread.id))) as Task;
+      expect(held.column).toBe("done");
+      expect(getSetting(db, `approval:${cardKey(held)}`) ?? "").toBe("");
+      expect(yaml("dev1")).not.toMatch(/shared-assets/);
+    });
+
+    it("always extends the remit, keeping the file's layout, and the question is not asked again", async () => {
+      writeFileSync(
+        join(home, "agents", "reader", "agent.yaml"),
+        `# Reads the client's files.\n${yaml("reader")}`,
+      );
+      const { thread, task } = await askFirst("reader", "acme", "folder", "/srv/briefs");
+      expect(buttons(thread.id)).toContain("perm:always");
+      expect(orch.runAction(`perm:always:${idOf(thread.id)}`).message).toMatch(/from now on/);
+      expect(yaml("reader")).toMatch(/^# Reads the client's files\./);
+      expect(yaml("reader")).toMatch(/\/srv\/briefs/);
+      expect(ask(task.id, "folder", "/srv/briefs/2026")).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/already in your folders/),
+      });
+      await drain();
+      expect(seen.at(-1)?.req.allowedTools.some((r) => r.includes("/srv/briefs"))).toBe(true);
+    });
+
+    it("always on an experimental project sets an override; asked again, it is refused", async () => {
+      const { thread, task } = await askFirst("reader", "lab", "level", "3");
+      expect(orch.runAction(`perm:always:${idOf(thread.id)}`).ok).toBe(true);
+      expect(readFileSync(join(home, "overrides.yaml"), "utf8")).toMatch(
+        /agent: reader\n {2}project: lab\n {2}level: 3/,
+      );
+      expect(ask(task.id, "level", "3")).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/level 3 already/),
+      });
+      expect(ask(task.id, "web", "web")).toMatchObject({ ok: false });
+      // An integration joins the mcp remit the same way.
+      const op = await askFirst("operator", "lab", "integration", "blender");
+      expect(buttons(op.thread.id)).toContain("perm:always");
+      expect(orch.runAction(`perm:always:${idOf(op.thread.id)}`).ok).toBe(true);
+      expect(yaml("operator")).toMatch(/mcp: \[social, blender\]|- blender/);
+      expect(ask(op.task.id, "integration", "blender")).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/already in your integrations/),
+      });
+    });
+
+    it("no approval lifts the secured-live rule", async () => {
+      // Above the secured ceiling: refused with the live rule, no buttons.
+      agent("op2", "level: 3");
+      orch.syncAgents();
+      const high = await askFirst("full", "acme", "level", "5");
+      expect(high.out()).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/ceiling \(4\).*read-only.*staging/),
+      });
+      expect(buttons(high.thread.id) ?? []).not.toContain("perm:once");
+      // An integration granted for the card (here a client site with per-project credentials)
+      // still carries the live guard into the run: its writes are refused there.
+      writeFileSync(
+        join(home, "catalog", "site.yaml"),
+        `id: site\nname: Site\ncommand: npx\nargs: ["site@1.0.0"]\nenv:\n  KEY: "vault:{project}-site"\ntools:\n  read: [get_page]\n  write: [save_page]\n  class:\n    save_page: draft\n`,
+      );
+      const { thread } = await askFirst("op2", "acme", "integration", "site");
+      expect(orch.runAction(`perm:card:${idOf(thread.id)}`).ok).toBe(true);
+      await drain();
+      expect(seen.at(-1)?.req.allowedTools).toContain("mcp__site__save_page");
+      const live = launches.at(-1)?.live;
+      expect(live).toBeDefined();
+      expect(liveRefusal(live as LiveGuard, "save_page", { title: "x" })).toMatch(
+        /treated as live.*staging/,
+      );
+    });
+
+    it("always is not offered for force push, always-ask items or a secured level raise", async () => {
+      // Force push and push: refused outright, nothing posted.
+      const push = await askFirst("reader", "lab", "command", "git push --force origin main");
+      expect(push.out()).toMatchObject({ ok: false, reason: expect.stringMatching(/force push/) });
+      expect(ask(push.task.id, "command", "git push origin main")).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/credential helper/),
+      });
+      expect(buttons(push.thread.id) ?? []).not.toContain("perm:once");
+      // Reading keys.
+      const keys = await askFirst("reader", "lab", "folder", "~/.ssh");
+      expect(buttons(keys.thread.id)).toEqual(["perm:once", "perm:card", "perm:reject"]);
+      expect(last(keys.thread.id)?.content).toMatch(/reading keys is asked every time/);
+      expect(orch.runAction(`perm:always:${idOf(keys.thread.id)}`)).toMatchObject({ ok: false });
+      expect(yaml("reader")).not.toMatch(/\.ssh/);
+      // A new paid service (an integration with a spend tool).
+      agent("op3", "level: 3");
+      orch.syncAgents();
+      const paid = await askFirst("op3", "lab", "integration", "social");
+      expect(buttons(paid.thread.id)).toEqual(["perm:once", "perm:card", "perm:reject"]);
+      expect(last(paid.thread.id)?.content).toMatch(/a new paid service is asked every time/);
+      // Deleting outside its folders, from a level 4 shell.
+      const del = await askFirst("builder", "lab", "command", "rm -rf /srv/old-builds");
+      expect(buttons(del.thread.id)).toEqual(["perm:once", "perm:card", "perm:reject"]);
+      expect(last(del.thread.id)?.content).toMatch(/deleting outside its folders/);
+      expect(ask(del.task.id, "command", "make test")).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/run the command directly/),
+      });
+      // A level raise on a secured project: once or for this card only.
+      const sec = await askFirst("reader", "acme", "level", "2");
+      expect(buttons(sec.thread.id)).toEqual(["perm:once", "perm:card", "perm:reject"]);
+      expect(orch.runAction(`perm:always:${idOf(sec.thread.id)}`)).toMatchObject({ ok: false });
+      expect(existsSync(join(home, "overrides.yaml"))).toBe(false);
+    });
+
+    it("web: a split agent switches by handoff; a level 1 agent asks for level 2", async () => {
+      const split = await askFirst("operator", "lab", "web", "web");
+      expect(split.out()).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/hand off to yourself/),
+      });
+      const l1 = await askFirst("reader", "acme", "web", "any");
+      expect(l1.out()).toEqual({ ok: true });
+      expect(last(l1.thread.id)?.content).toMatch(/level 2/);
+    });
   });
 });

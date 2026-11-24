@@ -161,6 +161,7 @@ export interface ApiDeps {
     | "openRoom"
     | "requestAccess"
     | "requestCommand"
+    | "requestPermission"
     | "reportChecks"
     | "requestPublish"
     | "testIntegration"
@@ -1054,7 +1055,7 @@ export function createApiHandler(deps: ApiDeps) {
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
         if (
-          !/^((proposal|move|access|publish|skill):(approve|reject)|cmd:(task|always|reject)):[\w-]{1,36}$/.test(
+          !/^((proposal|move|publish|skill):(approve|reject)|access:(once|approve|reject)|cmd:(once|task|always|reject)|perm:(once|card|always|reject)):[\w-]{1,36}$/.test(
             data,
           )
         ) {
@@ -2020,6 +2021,7 @@ export function createApiHandler(deps: ApiDeps) {
           "open_room",
           "request_access",
           "request_command",
+          "request_permission",
           "report_checks",
         ];
         if (method !== "POST" || !AGENT_TOOLS.includes(tool)) throw new HttpError(404, "not found");
@@ -2072,21 +2074,27 @@ export function createApiHandler(deps: ApiDeps) {
                               command: str(b.command, "command", 300),
                               reason: str(b.reason, "reason", 2000),
                             })
-                          : tool === "ask_parent"
-                            ? o.askParent(from, str(b.question, "question", 2000))
-                            : tool === "answer_child"
-                              ? o.answerChild(from, {
-                                  taskId: str(b.task_id, "task_id", 64),
-                                  answer: str(b.answer, "answer", 5000),
-                                })
-                              : tool === "record_room_outcome"
-                                ? o.recordRoomOutcome(from, {
-                                    room: str(b.room, "room", 64),
-                                    decision: str(b.decision, "decision", 5000),
-                                    decidedBy: str(b.decided_by, "decided_by", 200),
-                                    openPoints: strList(b.open_points, "open_points"),
+                          : tool === "request_permission"
+                            ? o.requestPermission(from, {
+                                kind: str(b.kind, "kind", 16),
+                                target: str(b.target, "target", 300),
+                                reason: str(b.reason, "reason", 2000),
+                              })
+                            : tool === "ask_parent"
+                              ? o.askParent(from, str(b.question, "question", 2000))
+                              : tool === "answer_child"
+                                ? o.answerChild(from, {
+                                    taskId: str(b.task_id, "task_id", 64),
+                                    answer: str(b.answer, "answer", 5000),
                                   })
-                                : o.askOwner(from, str(b.question, "question", 2000));
+                                : tool === "record_room_outcome"
+                                  ? o.recordRoomOutcome(from, {
+                                      room: str(b.room, "room", 64),
+                                      decision: str(b.decision, "decision", 5000),
+                                      decidedBy: str(b.decided_by, "decided_by", 200),
+                                      openPoints: strList(b.open_points, "open_points"),
+                                    })
+                                  : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

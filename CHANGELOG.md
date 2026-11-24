@@ -22,8 +22,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   account tools that write), switching by handing the work to itself. Shell runs without keyed
   accounts therefore stay on this Mac in Claude's sandbox instead of Apple's container, so an
   agent like web-dev is no longer always containerized. Web mode runs in Apple's container like
-  every run with the open web, so apps on this Mac are not reachable from it. Full access puts
-  such an agent in web mode for the chain rather than giving its shell the web.
+  every run with the open web, so apps on this Mac are not reachable from it.
+- Agents with a level ask you for what is beyond their level or settings (ADR-0067): another
+  folder or project, an integration, a higher level, a command or the open web. You answer with
+  Once (its next run only), For this card (every task of the card until it is done, archived or
+  deleted) or Always (added to the agent's settings, or a level override on an experimental
+  project; it is not asked again). Always is not offered for deleting outside its folders,
+  changing permissions, reading keys, a new paid service or a higher level on a secured project.
+  No approval makes live targets of a secured project writable, and force push, history
+  rewrite and git push stay refused. The 4-hour full access no longer applies to these agents.
+  Agents without a level keep their requests; their buttons are now Once and For this card (the
+  former "This task"/Approve, still 4 hours), with Always for commands as before.
 - Force pushes and git history rewrites are refused for every agent.
 - Live sites and accounts of secured projects are read-only for every agent (ADR-0067): no
   level, approval (your Approve button included), override or full access lets an agent write

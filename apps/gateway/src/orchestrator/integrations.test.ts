@@ -10,7 +10,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  answerOwnerQuestion,
   createThread,
+  getSetting,
   getTask,
   listMessages,
   openCoreDatabase,
@@ -390,7 +392,7 @@ describe("integrations in runs (ADR-0034)", () => {
     const idOf = (threadId: string) =>
       listMessages(db, threadId).at(-1)?.actions?.[0]?.data.split(":")[2] as string;
 
-    it("asks with three buttons; this task allows exactly that command for the chain", async () => {
+    it("asks with once, this card, always and reject; this card allows exactly that command for the chain", async () => {
       agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
       ask("git fetch origin audit");
       const { thread, taskId } = start("dev");
@@ -399,7 +401,13 @@ describe("integrations in runs (ADR-0034)", () => {
       expect(listMessages(db, thread.id).at(-1)?.content).toMatch(
         /dev asks to run a command \(Merge the audit\):\ngit fetch origin audit\nWhy: audit/,
       );
-      expect(lastActions(thread.id)).toEqual(["cmd:task", "cmd:always", "cmd:reject"]);
+      // ADR-0067 step 4 naming: "This task" is now "For this card" (same 4 h chain grant).
+      expect(lastActions(thread.id)).toEqual(["cmd:once", "cmd:task", "cmd:always", "cmd:reject"]);
+      expect(
+        listMessages(db, thread.id)
+          .at(-1)
+          ?.actions?.map((a) => a.label),
+      ).toEqual(["1️⃣ Once", "🗂️ For this card", "♾️ Always", "❌ Reject"]);
       expect(await orch.workOnce()).toBe(false); // waits for the owner
       const id = idOf(thread.id);
       expect(orch.runAction(`cmd:task:${id}`).message).toMatch(/until \d\d:\d\d: git fetch/);
@@ -442,9 +450,32 @@ describe("integrations in runs (ADR-0034)", () => {
       ask("git push origin audit");
       const { thread } = start("dev");
       await drain();
-      expect(lastActions(thread.id)).toEqual(["cmd:task", "cmd:reject"]);
+      expect(lastActions(thread.id)).toEqual(["cmd:once", "cmd:task", "cmd:reject"]);
       expect(orch.runAction(`cmd:always:${idOf(thread.id)}`).ok).toBe(false);
       expect(readFileSync(join(home, "agents", "dev", "agent.yaml"), "utf8")).not.toMatch(/push/);
+    });
+
+    it("once allows the exact command for the next run only", async () => {
+      agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
+      let runs = 0;
+      onRun = (task) => {
+        runs++;
+        if (runs === 1) {
+          orch.requestCommand({ from: "task", taskId: task.id }, { command: "make", reason: "x" });
+        }
+        // The resumed run asks a question, so the task runs a third time.
+        if (runs === 2) orch.askOwner({ from: "task", taskId: task.id }, "which target?");
+      };
+      const { thread } = start("dev");
+      await drain();
+      expect(orch.runAction(`cmd:once:${idOf(thread.id)}`).message).toMatch(/once.*make/);
+      await drain();
+      expect(seen[1]?.req.allowedTools).toContain("Bash(make)");
+      expect(seen[1]?.req.prompt).toMatch(/allowed exactly `make` once/);
+      answerOwnerQuestion(db, thread.id, "all");
+      await drain();
+      expect(seen[2]?.req.allowedTools).not.toContain("Bash(make)");
+      expect(readFileSync(join(home, "agents", "dev", "agent.yaml"), "utf8")).not.toMatch(/make/);
     });
 
     it("refuses chained commands, allowed ones and agents without a shell", async () => {
@@ -503,6 +534,7 @@ describe("integrations in runs (ADR-0034)", () => {
       const msg = listMessages(db, thread.id).at(-1);
       expect(msg?.content).toMatch(/maker asks for full access \(Glass effect\): video/);
       expect(msg?.actions?.map((a) => a.data)).toEqual([
+        `access:once:${taskId}`,
         `access:approve:${taskId}`,
         `access:reject:${taskId}`,
       ]);
@@ -521,6 +553,25 @@ describe("integrations in runs (ADR-0034)", () => {
       expect(second?.req.allowedTools?.some((t) => t.startsWith("mcp__wp__"))).toBe(false);
       expect(JSON.parse(second?.config ?? "{}").mcpServers.wp).toBeUndefined();
       expect(getTask(db, taskId)?.status).toBe("done");
+    });
+
+    it("once opens only the next run, without a chain grant", async () => {
+      let runs = 0;
+      onRun = (task) => {
+        runs++;
+        if (runs === 1) orch.requestAccess({ from: "task", taskId: task.id }, "video");
+        if (runs === 2) orch.askOwner({ from: "task", taskId: task.id }, "which scene?");
+      };
+      const { thread, taskId } = start("maker");
+      await drain();
+      expect(orch.runAction(`access:once:${taskId}`).message).toMatch(/next run only/);
+      expect(getSetting(db, `elevation:${taskId}`)).toBeUndefined();
+      await drain();
+      expect(seen[1]?.req.allowedTools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+      expect(seen[1]?.req.prompt).toMatch(/full access for this run/);
+      answerOwnerQuestion(db, thread.id, "the first");
+      await drain();
+      expect(seen[2]?.req.allowedTools).not.toContain("WebSearch");
     });
 
     it("a refusal resumes the task without access", async () => {

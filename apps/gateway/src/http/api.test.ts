@@ -175,6 +175,13 @@ describe("HTTP API", () => {
             questions.push({ from, question: `command: ${request.command} (${request.reason})` });
             return { ok: true };
           },
+          requestPermission: (from, request) => {
+            questions.push({
+              from,
+              question: `permission: ${request.kind} ${request.target} (${request.reason})`,
+            });
+            return { ok: true };
+          },
           requestPublish: (from, request) => {
             questions.push({ from, question: `publish: ${JSON.stringify(request)}` });
             return { ok: true, text: "sent" };
@@ -1083,6 +1090,27 @@ describe("HTTP API", () => {
     expect((await post(tokens.issue("task-4", "dev", ["ask_owner"]).token)).status).toBe(403);
   });
 
+  it("agent endpoint: request_permission reaches the orchestrator only when granted (ADR-0067)", async () => {
+    const post = (token: string, body: object) =>
+      fetch(`${base}/api/agent/request_permission`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    const granted = tokens.issue("task-4", "dev", ["request_permission"]).token;
+    const ask = { kind: "folder", target: "/srv/shared", reason: "read the shared assets" };
+    expect(await (await post(granted, ask)).json()).toEqual({ ok: true });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-4" },
+      question: "permission: folder /srv/shared (read the shared assets)",
+    });
+    expect((await post(granted, { kind: "folder", reason: "x" })).status).toBe(400);
+    // A leveled run is not given the old tools, and a legacy one not this one.
+    expect((await post(tokens.issue("task-4", "dev", ["request_access"]).token, ask)).status).toBe(
+      403,
+    );
+  });
+
   it("publish endpoints need a token granting that integration (ADR-0037)", async () => {
     const post = (token: string, path: string, body: object) =>
       fetch(`${base}/api/agent/${path}`, {
@@ -1350,14 +1378,20 @@ describe("HTTP API", () => {
     expect(
       (await call("/api/actions", { method: "POST", body: '{"data":"rm:-rf:/"}' })).status,
     ).toBe(400);
-    // Command requests (ADR-0056): all three buttons reach the orchestrator.
-    for (const verb of ["task", "always", "reject"]) {
-      const res = await call("/api/actions", {
-        method: "POST",
-        body: JSON.stringify({ data: `cmd:${verb}:b8746623` }),
-      });
+    // Command requests (ADR-0056) with "once" added, full access (ADR-0035) and permission
+    // requests (ADR-0067 step 4): every button reaches the orchestrator.
+    for (const data of [
+      ...["once", "task", "always", "reject"].map((v) => `cmd:${v}:b8746623`),
+      ...["once", "approve", "reject"].map((v) => `access:${v}:b8746623`),
+      ...["once", "card", "always", "reject"].map((v) => `perm:${v}:b8746623`),
+    ]) {
+      const res = await call("/api/actions", { method: "POST", body: JSON.stringify({ data }) });
       expect(res.status).toBe(200);
       expect(decisions.at(-1)?.id).toBe("b8746623");
+    }
+    for (const data of ["perm:approve:b8746623", "cmd:card:b8746623", "access:always:b8746623"]) {
+      const res = await call("/api/actions", { method: "POST", body: JSON.stringify({ data }) });
+      expect(res.status).toBe(400);
     }
     const noCsrf = await fetch(`${base}/api/actions`, {
       method: "POST",

@@ -53,6 +53,7 @@ describe("static web UI", () => {
           recordRoomOutcome: () => ({ ok: false, reason: "n/a" }),
           requestAccess: () => ({ ok: false, reason: "n/a" }),
           requestCommand: () => ({ ok: false, reason: "n/a" }),
+          requestPermission: () => ({ ok: false, reason: "n/a" }),
           reportChecks: () => ({ ok: false, reason: "n/a" }),
           requestPublish: () => ({ ok: false, reason: "n/a" }),
           logPublish: () => ({ ok: false, reason: "n/a" }),

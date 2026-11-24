@@ -15,6 +15,7 @@ import {
   saveCardSession,
   sessionDir,
 } from "./sessions.ts";
+import { getSetting, setSetting } from "./settings.ts";
 import { createThread } from "./threads.ts";
 
 describe("card sessions (ADR-0066)", () => {
@@ -80,5 +81,21 @@ describe("card sessions (ADR-0066)", () => {
     save(b.id, "s2", 1);
     expect(deleteCard(db, b.id).ok).toBe(true);
     expect(getCardSession(db, key(b.id))).toBeUndefined();
+  });
+  it("card approvals (ADR-0067 step 4) move with the card and end with it", () => {
+    const thread = createThread(db, {});
+    const t = enqueue(db, { title: "build", threadId: thread.id });
+    const next = enqueue(db, { title: "fix", threadId: thread.id });
+    setSetting(db, `approval:${t.id}`, JSON.stringify([{ kind: "level", level: 2 }]));
+    setSetting(db, `approval:${next.id}`, JSON.stringify([{ kind: "integration", id: "x" }]));
+    carryCardSessions(db, home, t.id, next.id);
+    expect(getSetting(db, `approval:${t.id}`)).toBeUndefined();
+    expect(JSON.parse(getSetting(db, `approval:${next.id}`) ?? "[]")).toEqual([
+      { kind: "integration", id: "x" },
+      { kind: "level", level: 2 },
+    ]);
+    // Done, archived or deleted: every path ends the card's sessions, and its approvals.
+    endCardSessions(db, home, chatCards(db, thread.id));
+    expect(getSetting(db, `approval:${next.id}`)).toBeUndefined();
   });
 });

@@ -140,6 +140,18 @@ const TOOLS = [
     done: "Request sent to the owner. End your turn now; you will be resumed with the decision.",
   },
   {
+    name: "request_permission",
+    description:
+      "Ask the owner for something beyond your level or settings: kind folder (target: absolute path), project (another project's slug, its folders), integration (catalog id), level (1-5), command (a command your level cannot run) or web (the open web). The owner allows it once, for this card, always, or refuses; your task resumes with the decision. Use this instead of asking in chat: a yes in chat changes no permission.",
+    input: z.object({
+      kind: z.enum(["folder", "integration", "project", "level", "command", "web"]),
+      target: text.describe("What exactly: the path, slug, integration id, level or command"),
+      reason: text.describe("What you need it for, in one sentence"),
+    }),
+    endpoint: "/api/agent/request_permission",
+    done: "Request sent to the owner. End your turn now; you will be resumed with the decision.",
+  },
+  {
     name: "move_task",
     description:
       "Move a kanban card to another column (e.g. your finished work to review, or reviewed work to done). Only moves the workspace workflow allows for your role are accepted; some need the owner's approval.",
