@@ -98,6 +98,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Agents no longer propose skills for working around a failing tool, a missing permission or a
+  problem of the machine; they report it so the owner can fix the cause (ADR-0049).
 - Codex and Gemini runs give git a neutral global config (`GIT_CONFIG_GLOBAL=/dev/null`, the
   owner's name and email from the gateway): their sandboxes deny the home, so git stopped at
   `~/.gitconfig` and reviewers kept proposing a skill to work around it.
