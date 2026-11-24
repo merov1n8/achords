@@ -50,6 +50,8 @@ export interface RunRequest {
   onSpawn?: (pid: number) => void;
   /** The agent's own checklist changed (done of total, the step in progress). */
   onProgress?: (p: RunProgress) => void;
+  /** ADR-0066: the run sent a stream event (the stall watcher's sign of life). */
+  onActivity?: () => void;
 }
 
 export interface RunProgress {

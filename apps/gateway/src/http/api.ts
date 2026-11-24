@@ -50,11 +50,14 @@ import {
   removeChecklistItem,
   revokeSession,
   type ScheduleInput,
+  STALL_MINUTES_KEY,
+  STALL_PERCENT_KEY,
   saveImage,
   setSetting,
   setThreadProject,
   spendBy,
   spendSince,
+  stallSettings,
   stopThread,
   threadSummary,
   updateChecklistItem,
@@ -603,6 +606,26 @@ export function createApiHandler(deps: ApiDeps) {
         }
         setSetting(db, "monitors.quiet_hours", hours);
         return { hours };
+      },
+    ],
+    // Stall watcher thresholds (ADR-0066 part 1).
+    ["GET", /^\/api\/monitors\/stalls$/, () => stallSettings(db)],
+    [
+      "PUT",
+      /^\/api\/monitors\/stalls$/,
+      async ({ body }) => {
+        const b = await body();
+        const minutes = Number(b.minutes);
+        const percent = Number(b.percent);
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+          throw new HttpError(400, "minutes: a whole number from 1 to 1440");
+        }
+        if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+          throw new HttpError(400, "percent: a whole number from 1 to 100");
+        }
+        setSetting(db, STALL_MINUTES_KEY, String(minutes));
+        setSetting(db, STALL_PERCENT_KEY, String(percent));
+        return { minutes, percent };
       },
     ],
     [

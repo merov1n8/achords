@@ -100,12 +100,31 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
  * cancelled first, so the worker that sees its run die cannot put the task back in the queue.
  */
 export function stopThread(db: Db, threadId: string): { cancelled: number; stopped: number } {
-  const open = db
-    .prepare(
-      `SELECT id FROM tasks WHERE id IN (${THREAD_TASKS}) AND status IN ('queued', 'claimed')`,
-    )
-    .all(threadId, threadId)
-    .map((r) => String(r.id));
+  return stopTasks(
+    db,
+    db
+      .prepare(
+        `SELECT id FROM tasks WHERE id IN (${THREAD_TASKS}) AND status IN ('queued', 'claimed')`,
+      )
+      .all(threadId, threadId)
+      .map((r) => String(r.id)),
+  );
+}
+
+/** ADR-0066: the boss's stop_chain after a stall notice, the same Stop for one root's chain. */
+export function stopChain(db: Db, rootId: string): { cancelled: number; stopped: number } {
+  return stopTasks(
+    db,
+    db
+      .prepare(
+        "SELECT id FROM tasks WHERE (id = ? OR root_id = ?) AND status IN ('queued', 'claimed')",
+      )
+      .all(rootId, rootId)
+      .map((r) => String(r.id)),
+  );
+}
+
+function stopTasks(db: Db, open: string[]): { cancelled: number; stopped: number } {
   let cancelled = 0;
   for (const id of open) if (cancel(db, id)) cancelled++;
   const ids = new Set(open);

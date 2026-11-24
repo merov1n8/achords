@@ -64,6 +64,7 @@ License: Apache-2.0 (core). Premium packs are separate, closed repos.
 - Decomposes tasks, assigns to sub-agents, tracks them on the kanban, asks the user only when blocked or when approval is required.
 - Sub-agents get a default model per role; orchestrator may choose within an allowed set (autonomy setting).
 - Each agent has an `AGENT.md` next to its `agent.yaml`: its scope (what it does, what it does not, what it hands to whom) and way of working. Its own runs get it as system prompt; whoever routes work (the boss, delegating agents) sees the first paragraph after each agent's name. Hard limits stay in `agent.yaml`: the boss has no tools, so it cannot do the work itself whatever model it runs on. Older installs' `prompt.md` is still read when there is no `AGENT.md`.
+- The boss runs only for the owner's message or for a stall notice (ADR-0066): both are one structured decision in the chat's thread (history, team, memories), not a task. A notice gets the chain's facts and answers with `ask_owner` (posts the question), `stop_chain` (the ADR-0052 Stop for that root's chain only, `stopChain` in core) or `let_run` (nothing posted); for an owner's message these three are only a reply.
 
 ### 4.3.1 Inter-agent delegation (ADR-0029)
 
@@ -145,6 +146,7 @@ Default layout, configurable:
 ### 4.10 Scheduler and heartbeat
 
 - Implemented (ADR-0039): `site` and `stuck` monitors in the gateway tick, notify on change only, quiet hours; integration checks with local triage are next.
+- Stall watcher (ADR-0066): the gateway tick checks unfinished root chains without a model call (not while paused, draining or in quiet hours). A chain is stalled after N minutes without progress (`stalls.minutes`, default 15) or at a share of its root's budget (`stalls.percent`, default 80; only with a budget). Progress: a run starting, ending or reporting its checklist, a stream event or a claim (kept in the orchestrator's memory), a message in the root's thread (not the boss's or the system's), a card move, a task of the chain created or finished; lease renewal is not. Not stalled: a chain with a claimable task (it waits for the single worker), a chain waiting on the owner, a parked card. A chain whose only blocker is an unanswered `ask_parent` (`waiting_parent = 2`) is stalled. Each stall gets one boss notice in the root's thread: the root stores `stall_noticed_at` and `stall_reason` (migration 0028); an idle notice comes again only after new progress, the spend notice once per root. Thresholds: Settings → Monitors.
 
 - Cron-style schedules stored in SQLite, editable in the UI (list, daily timeline, weekly view). Every run reports a result. Implemented (ADR-0033): own 5-field cron parser in local time; the gateway tick delegates due schedules to their agent like the boss would; results go to the schedule's own thread; missed runs are caught up once, a still-running previous task skips the occurrence; seeds are inserted once, switched off.
 - Heartbeat monitors: cheap periodic checks (calendar, mail, kanban, ads metrics) that notify only when something matters. Prefer local models for heartbeat triage.

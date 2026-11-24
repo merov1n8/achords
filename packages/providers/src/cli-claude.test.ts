@@ -136,6 +136,12 @@ describe("cli-claude adapter", () => {
     ]);
   });
 
+  it("signals every stream event (ADR-0066 stall watcher)", async () => {
+    let events = 0;
+    await provider("todo").run(req({ onActivity: () => events++ }));
+    expect(events).toBeGreaterThan(2);
+  });
+
   it("reports usage, cost, session and subscription windows", async () => {
     const res = await provider().run(req());
     expect(res.usage).toEqual({

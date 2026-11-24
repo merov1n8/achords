@@ -20,6 +20,7 @@ export * from "./runs.ts";
 export * from "./schedules.ts";
 export * from "./sessions.ts";
 export * from "./settings.ts";
+export * from "./stalls.ts";
 export * from "./thread-work.ts";
 export * from "./threads.ts";
 export * from "./usage.ts";

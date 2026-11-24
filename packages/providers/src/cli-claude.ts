@@ -212,6 +212,7 @@ function runOnce(
       }
       if (typeof event !== "object" || event === null) return;
       opts.onEvent?.(event);
+      req.onActivity?.();
       if (event.type === "rate_limit_event") windows = parseWindows(event.rate_limit_info);
       if (event.type === "assistant" && req.onProgress) {
         const progress = parseTodos(event);

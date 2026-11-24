@@ -399,6 +399,7 @@ export function runGateway(home: string): Promise<number> {
     let working: Promise<unknown> | undefined;
     let delivering = false;
     let monitoring = false;
+    let watchingStalls = false;
     let sweepingApps = false;
     let updating = false;
     let ticks = 0;
@@ -481,6 +482,16 @@ export function runGateway(home: string): Promise<number> {
           .catch((err) => log(`monitor error: ${(err as Error).message}`))
           .finally(() => {
             monitoring = false;
+          });
+      }
+      // Stall watcher (ADR-0066): cheap checks; a stalled chain gets one boss notice.
+      if (!watchingStalls) {
+        watchingStalls = true;
+        orchestrator
+          .watchStalls()
+          .catch((err) => log(`stall watcher error: ${(err as Error).message}`))
+          .finally(() => {
+            watchingStalls = false;
           });
       }
       if (apps && !sweepingApps && ticks % APPS_EVERY_TICKS === 0) {

@@ -23,6 +23,7 @@ import {
   cardHolder,
   cardKey,
   carryCardSessions,
+  chainTasks,
   childFinished,
   childQuestions,
   childQuestionsSeen,
@@ -44,6 +45,7 @@ import {
   enqueueSuccessor,
   extendLease,
   fail,
+  findStalls,
   finishRun,
   getCardSession,
   getRoom,
@@ -59,6 +61,7 @@ import {
   listComments,
   listMessages,
   markScheduleRun,
+  markStallNoticed,
   moveCard,
   NOT_STATED,
   nextTurn,
@@ -74,14 +77,17 @@ import {
   roomsOf,
   runProgressItems,
   type Sensitivity,
+  type Stall,
   saveCardSession,
   sessionDir,
   setRunPid,
   setRunProgress,
   setSetting,
   setThreadProject,
+  stallSettings,
   startParked,
   startRun,
+  stopChain,
   type Task,
   takeOverCard,
   threadCard,
@@ -135,6 +141,7 @@ import type { Apps } from "../apps.ts";
 import type { Prepared } from "../container.ts";
 import { readGuide } from "../guide.ts";
 import type { McpLaunch, McpTickets, RunTokens } from "../mcp/tokens.ts";
+import { inQuietHours, QUIET_HOURS_KEY } from "../monitors.ts";
 import { describeCall, describeResult } from "./publish-text.ts";
 import { createSkillFlow, type SkillRequest } from "./skills.ts";
 
@@ -178,6 +185,8 @@ const BUDGET_DEFER_MS = 30 * 60_000;
 // Reworks a reviewer may ask for before the card waits for the owner (ADR-0062).
 const MAX_SEND_BACKS = 3;
 const SUMMARY_CHARS = 1500;
+// In-memory signs of life (claims, stream events) older than this are covered by the database.
+const ACTIVITY_KEEP_MS = 24 * 60 * 60_000;
 
 const listChange = z
   .object(
@@ -188,7 +197,18 @@ const listChange = z
   .partial();
 
 const decisionSchema = z.object({
-  action: z.enum(["answer", "ask", "delegate", "change_agent", "update_project"]),
+  action: z
+    .enum([
+      "answer",
+      "ask",
+      "delegate",
+      "change_agent",
+      "update_project",
+      "ask_owner",
+      "stop_chain",
+      "let_run",
+    ])
+    .describe("ask_owner, stop_chain and let_run answer a stall notice only (ADR-0066)"),
   message: z.string().min(1).describe("What the owner reads. One line for delegate."),
   task: z
     .object({
@@ -299,6 +319,11 @@ export interface OrchestratorDeps {
 }
 
 export interface Orchestrator {
+  /**
+   * Stall watcher (ADR-0066 part 1), from the gateway tick: each newly stalled root chain gets
+   * one boss notice in its thread. Returns how many were noticed.
+   */
+  watchStalls(now?: number): Promise<number>;
   handleMessage(
     threadId: string,
     text: string,
@@ -590,6 +615,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     for (const m of all.values()) upsertAgent(db, m);
     return all;
   };
+
+  // ADR-0066: the latest claim or stream event per root chain, the stall watcher's in-memory
+  // signs of life (the database has run starts and ends, messages, moves and finished tasks).
+  const activity = new Map<string, number>();
 
   const post = (threadId: string, content: string, author = BOSS_ID) =>
     appendMessage(db, {
@@ -2321,80 +2350,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         }
       }
       try {
-        const all = agents();
-        const boss = all.get(BOSS_ID);
-        if (!boss) throw new Error("boss agent is not configured");
-        const sensitivity = getThread(db, threadId)?.sensitivity ?? "normal";
-        const bossModel = pickModel(boss, sensitivity);
-        const team = [...all.values()]
-          .filter((m) => m.id !== BOSS_ID)
-          .map(teamLine)
-          .join("\n");
-        const history = listMessages(db, threadId)
-          .slice(-HISTORY)
-          .map((m) => `${m.role === "user" ? "owner" : (m.author ?? m.role)}: ${m.content}`)
-          .join("\n");
-        // The boss works for the owner across all business branches.
-        const workspaces = [...new Set([...all.values()].map((m) => m.workspace))];
-        const threadProject = getThread(db, threadId)?.project;
-        const project = threadProject ? projects().get(threadProject) : undefined;
-        if (threadProject && !project) throw new Error(`unknown project ${threadProject}`);
-        const memories = await recall(
+        const { decision, all, project } = await bossDecide(
+          threadId,
           text,
-          [...workspaces, ...(project ? [projectSpace(project)] : [])],
-          isLocalModel(bossModel),
+          "Decide what to do with the owner's latest message.",
         );
-        // For change_agent (ADR-0041): what each agent has now, and what exists to give.
-        const settings = [...all.values()]
-          .map(
-            (m) =>
-              `- ${m.id}: mcp [${m.mcp.join(", ")}]; tools [${m.tools.join(", ")}]; models [${m.models.allowed.join(", ")}] default ${m.models.default}; write [${m.fs.write.join(", ")}]; read [${m.fs.read.join(", ")}]; websites [${m.network.allow.join(", ")}]; shell [${m.shell?.allow.join(", ") ?? ""}]; delegate_to [${m.delegation.can_delegate_to.join(", ")}]; accept_from [${m.delegation.accepts_from.join(", ")}]`,
-          )
-          .join("\n");
-        const catalogIds = deps.integrations
-          ? [...deps.integrations.catalog().keys()].join(", ")
-          : "";
-        const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nSkills: when the owner sends a link to a skill to build in, delegate it to the agent whose work it fits; agents can fetch the link and save or merge the skill.\n\nConversation so far (latest last):\n${history}\n\nDecide what to do with the owner's latest message.`;
-
-        const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
-        const bossBudget = req.billing === "api" ? deps.budget?.(provider.id) : undefined;
-        if (bossBudget) throw new Error(bossBudget);
-        // Structured output is an internal tool call, so allow a few turns.
-        // Recorded like any run: cost, quota windows, `achords kill`, the live bar.
-        const bossRun = startRun(db, {
-          provider: provider.id,
-          model: req.model,
-          agentId: boss.id,
-          billing: req.billing ?? "subscription",
-        });
-        const res = await provider
-          .run({
-            ...req,
-            jsonSchema: DECISION_JSON_SCHEMA,
-            maxTurns: 4,
-            onSpawn: (pid) => setRunPid(db, bossRun.id, pid),
-          })
-          .catch((err: Error) => {
-            // Never leave a run "running" (live bar, `achords kill`).
-            finishRun(db, bossRun.id, "failed", { error: err.message });
-            throw err;
-          });
-        finishRun(db, bossRun.id, res.ok ? "succeeded" : "failed", {
-          ...(res.error ? { error: res.error } : {}),
-          ...spendInfo(provider.id, req.model, res),
-        });
-        recordUsage(provider.id, res.windows);
-        if (res.stopReason === "unavailable") {
-          const used = `${provider.id}/${req.model}`;
-          if (isLocalModel(used)) {
-            throw new Error("the local model is not available right now (is Ollama running?)");
-          }
-          // The boss's next message starts on its next allowed model (ADR-0058).
-          setSetting(db, modelOutKey(used), String(Date.now() + MODEL_OUT_MS));
-          throw new Error(`${used} reached its usage limit; please send the message again`);
-        }
-        if (!res.ok) throw new Error(res.error ?? "boss run failed");
-        const decision = decisionSchema.parse(res.structured);
 
         if (decision.action === "change_agent") {
           const c = decision.change;
@@ -2461,6 +2421,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           if (!r.ok) throw new Error(r.reason);
         }
         post(threadId, decision.message);
+        // The stall actions belong to a notice; for an owner's message they are only a reply.
+        if (decision.action === "ask_owner") return "ask";
+        if (decision.action === "stop_chain" || decision.action === "let_run") return "answer";
         return decision.action;
       } catch (err) {
         post(threadId, t("thread.bossError", { reason: (err as Error).message }));
@@ -2498,11 +2461,144 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (isPaused(db) || isDraining(db)) return false;
       const task = claim(db, { workerId: WORKER_ID, leaseMs: LEASE_MS });
       if (!task) return false;
+      // The chain's clock restarts on claim (ADR-0066): it no longer waits for the worker.
+      activity.set(task.rootId ?? task.id, Date.now());
       await runTask(task, signal);
       return true;
     },
+
+    async watchStalls(now = Date.now()) {
+      if (isPaused(db) || isDraining(db)) return 0;
+      if (inQuietHours(getSetting(db, QUIET_HOURS_KEY), new Date(now).getHours())) return 0;
+      for (const [id, at] of activity) if (now - at > ACTIVITY_KEEP_MS) activity.delete(id);
+      const { minutes, percent } = stallSettings(db);
+      let noticed = 0;
+      for (const s of findStalls(db, {
+        now,
+        minutes,
+        percent,
+        activity: (id) => activity.get(id),
+      })) {
+        // Marked first: a failing boss must not bring the same notice back on every tick.
+        markStallNoticed(db, s.rootId, s.reason, now);
+        if (!s.threadId) continue;
+        await stallNotice(s, s.threadId, percent, now);
+        noticed++;
+      }
+      return noticed;
+    },
   };
   return orchestrator;
+
+  /** The boss decides on a stalled chain in its root's thread (ADR-0066 part 1). */
+  async function stallNotice(s: Stall, threadId: string, percent: number, now: number) {
+    const mins = Math.max(0, Math.round((now - s.lastAt) / 60_000));
+    const chain = chainTasks(db, s.rootId)
+      .map((c) => `- ${c.title} (task #${c.id}, ${c.agent ?? "no agent"}): ${c.state}`)
+      .join("\n");
+    const spend =
+      s.budgetUsd === null
+        ? `$${s.spentUsd.toFixed(2)}, no budget`
+        : `$${s.spentUsd.toFixed(2)} of $${s.budgetUsd.toFixed(2)}`;
+    const facts = `Chain:\n${chain}\nLast activity: ${s.lastWhat}, ${new Date(s.lastAt).toISOString()} (${mins} min ago)\nSpend: ${spend}`;
+    const why =
+      s.reason === "spend"
+        ? `it has spent at least ${percent}% of its budget`
+        : `nothing in it has made progress for ${mins} minutes`;
+    try {
+      const { decision } = await bossDecide(
+        threadId,
+        getTask(db, s.rootId)?.title ?? "",
+        `Stall notice from the gateway (not a message from the owner): the work of this chat looks stuck, because ${why}.\n${facts}\n\nChoose one action: ask_owner (\`message\` is your question to the owner, with the facts they need, in the owner's language), stop_chain (stops this work; \`message\` tells the owner why), or let_run (nothing happens).`,
+      );
+      if (decision.action === "let_run") return;
+      if (decision.action === "stop_chain") stopChain(db, s.rootId);
+      // Any other action from a notice is only a message: the owner did not ask for work.
+      post(threadId, decision.message);
+    } catch (err) {
+      post(threadId, t("thread.stallNoBoss", { reason: (err as Error).message, facts }));
+    }
+  }
+
+  /**
+   * One boss turn in a thread (ADR-0025): for the owner's latest message, or for a stall notice
+   * (ADR-0066). `query` finds memories, `ask` ends the prompt. Not a task: never watched.
+   */
+  async function bossDecide(threadId: string, query: string, ask: string) {
+    const all = agents();
+    const boss = all.get(BOSS_ID);
+    if (!boss) throw new Error("boss agent is not configured");
+    const sensitivity = getThread(db, threadId)?.sensitivity ?? "normal";
+    const bossModel = pickModel(boss, sensitivity);
+    const team = [...all.values()]
+      .filter((m) => m.id !== BOSS_ID)
+      .map(teamLine)
+      .join("\n");
+    const history = listMessages(db, threadId)
+      .slice(-HISTORY)
+      .map((m) => `${m.role === "user" ? "owner" : (m.author ?? m.role)}: ${m.content}`)
+      .join("\n");
+    // The boss works for the owner across all business branches.
+    const workspaces = [...new Set([...all.values()].map((m) => m.workspace))];
+    const threadProject = getThread(db, threadId)?.project;
+    const project = threadProject ? projects().get(threadProject) : undefined;
+    if (threadProject && !project) throw new Error(`unknown project ${threadProject}`);
+    const memories = await recall(
+      query,
+      [...workspaces, ...(project ? [projectSpace(project)] : [])],
+      isLocalModel(bossModel),
+    );
+    // For change_agent (ADR-0041): what each agent has now, and what exists to give.
+    const settings = [...all.values()]
+      .map(
+        (m) =>
+          `- ${m.id}: mcp [${m.mcp.join(", ")}]; tools [${m.tools.join(", ")}]; models [${m.models.allowed.join(", ")}] default ${m.models.default}; write [${m.fs.write.join(", ")}]; read [${m.fs.read.join(", ")}]; websites [${m.network.allow.join(", ")}]; shell [${m.shell?.allow.join(", ") ?? ""}]; delegate_to [${m.delegation.can_delegate_to.join(", ")}]; accept_from [${m.delegation.accepts_from.join(", ")}]`,
+      )
+      .join("\n");
+    const catalogIds = deps.integrations ? [...deps.integrations.catalog().keys()].join(", ") : "";
+    const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nSkills: when the owner sends a link to a skill to build in, delegate it to the agent whose work it fits; agents can fetch the link and save or merge the skill.\n\nConversation so far (latest last):\n${history}\n\n${ask}`;
+
+    const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
+    const bossBudget = req.billing === "api" ? deps.budget?.(provider.id) : undefined;
+    if (bossBudget) throw new Error(bossBudget);
+    // Structured output is an internal tool call, so allow a few turns.
+    // Recorded like any run: cost, quota windows, `achords kill`, the live bar.
+    const bossRun = startRun(db, {
+      provider: provider.id,
+      model: req.model,
+      agentId: boss.id,
+      billing: req.billing ?? "subscription",
+    });
+    const res = await provider
+      .run({
+        ...req,
+        jsonSchema: DECISION_JSON_SCHEMA,
+        maxTurns: 4,
+        onSpawn: (pid) => setRunPid(db, bossRun.id, pid),
+      })
+      .catch((err: Error) => {
+        // Never leave a run "running" (live bar, `achords kill`).
+        finishRun(db, bossRun.id, "failed", { error: err.message });
+        throw err;
+      });
+    finishRun(db, bossRun.id, res.ok ? "succeeded" : "failed", {
+      ...(res.error ? { error: res.error } : {}),
+      ...spendInfo(provider.id, req.model, res),
+    });
+    recordUsage(provider.id, res.windows);
+    if (res.stopReason === "unavailable") {
+      const used = `${provider.id}/${req.model}`;
+      if (isLocalModel(used)) {
+        throw new Error("the local model is not available right now (is Ollama running?)");
+      }
+      // The boss's next message starts on its next allowed model (ADR-0058).
+      setSetting(db, modelOutKey(used), String(Date.now() + MODEL_OUT_MS));
+      throw new Error(`${used} reached its usage limit; please send the message again`);
+    }
+    if (!res.ok) throw new Error(res.error ?? "boss run failed");
+    const decision = decisionSchema.parse(res.structured);
+    return { decision, all, project };
+  }
 
   async function runTask(task: Task, signal?: AbortSignal) {
     const rootId = task.rootId ?? task.id;
@@ -3197,6 +3293,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           ...(signal ? { signal } : {}),
           onSpawn: (pid) => setRunPid(db, run.id, pid),
           onProgress: (p) => setRunProgress(db, run.id, p),
+          onActivity: () => activity.set(rootId, Date.now()),
         });
       let res = await runIt();
       if (res.resumeRejected && session) {

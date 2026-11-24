@@ -139,6 +139,7 @@ function runGemini(
     });
     createInterface({ input: child.stdout }).on("line", (line) => {
       out += `${line}\n`;
+      req.onActivity?.();
     });
     child.on("close", (code) => {
       try {

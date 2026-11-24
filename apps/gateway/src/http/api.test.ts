@@ -606,6 +606,21 @@ describe("HTTP API", () => {
     expect(
       (await call("/api/monitors/quiet", { method: "PUT", body: '{"hours":"late"}' })).status,
     ).toBe(400);
+    // Stall watcher thresholds (ADR-0066): defaults 15 minutes and 80 %.
+    expect(await (await call("/api/monitors/stalls")).json()).toEqual({ minutes: 15, percent: 80 });
+    expect(
+      (
+        await call("/api/monitors/stalls", {
+          method: "PUT",
+          body: '{"minutes":30,"percent":90}',
+        })
+      ).status,
+    ).toBe(200);
+    expect(await (await call("/api/monitors/stalls")).json()).toEqual({ minutes: 30, percent: 90 });
+    expect(
+      (await call("/api/monitors/stalls", { method: "PUT", body: '{"minutes":30,"percent":120}' }))
+        .status,
+    ).toBe(400);
     expect((await call(`/api/monitors/${id}`, { method: "DELETE" })).status).toBe(200);
   });
 

@@ -118,6 +118,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Stuck work reaches you within minutes (ADR-0066): when a chat's work makes no progress for 15
+  minutes, or has spent 80 % of its budget, the boss looks at it once and asks you, stops it, or
+  lets it run. Queued work waiting for its turn and work waiting for your answer are left alone.
+  Both thresholds are in Settings → Monitors.
 - Dragging a card into "in progress" now starts its agent (ADR-0066): a card that was not
   started starts as with its Start button, a finished or failed card continues as a new run on
   the same card (same chat, same budget, same agent session), and a card already queued or running
