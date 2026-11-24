@@ -99,6 +99,7 @@ Single interface `ModelProvider { run(task, tools, limits) }` with adapters:
   Usage meters per provider:
 - CLI mode: rolling window usage (5h / weekly) as reported by the CLI (`rate_limit_event` in stream-json, recorded after each run).
 - API mode: spend and remaining balance/credits from the provider's billing/usage endpoints where available; otherwise locally computed cost from token counts.
+- Who pays (ADR-0044, ADR-0068): per provider a setting (subscription or API key), overridden per agent by `billing: api | subscription` in `agent.yaml`. API budgets per provider and day/month (ADR-0046): at 100 % API work waits, or with `budget.<provider>.fallback` on, runs on the subscription until the next period or a higher budget. The decision lives in `apps/gateway/src/billing.ts`.
 
 ### 4.6 Policy engine
 
@@ -106,6 +107,7 @@ Per agent (declared in `agents/<id>/agent.yaml`):
 
 - `workspace`: which business branch it belongs to.
 - `models`: allowed providers/models.
+- `billing` (ADR-0068): `api` or `subscription` for this agent's runs; absent = the provider's setting.
 - `tools` / `mcp`: allow-list; everything else denied.
 - `fs`: readable / writable paths.
 - `shell`: allow-list commands run directly; others require approval.

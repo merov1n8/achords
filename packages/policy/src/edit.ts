@@ -108,6 +108,8 @@ export function updateAgent(agentsDir: string, id: string, f: AgentFields): void
     else doc.deleteIn(["budget"]);
     if (f.effort) doc.setIn(["effort"], f.effort);
     else doc.deleteIn(["effort"]);
+    if (f.billing) doc.setIn(["billing"], f.billing);
+    else doc.deleteIn(["billing"]);
   });
   const tmp = join(dir, `AGENT.md.tmp-${process.pid}`);
   writeFileSync(tmp, f.doc.endsWith("\n") ? f.doc : `${f.doc}\n`);
@@ -135,6 +137,8 @@ export interface NewAgent {
   container?: boolean;
   delegation?: { can_delegate_to?: string[]; accepts_from?: string[] };
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
+  /** ADR-0068: absent = the provider's setting. */
+  billing?: "api" | "subscription";
   budget?: { per_run_usd?: number };
   /** Scope paragraph for AGENT.md. */
   description: string;
@@ -183,6 +187,7 @@ export function createAgentFiles(agentsDir: string, a: NewAgent): { id: string }
     ...(a.delegation ? { delegation: a.delegation } : {}),
     ...(a.budget?.per_run_usd ? { budget: a.budget } : {}),
     ...(a.effort ? { effort: a.effort } : {}),
+    ...(a.billing ? { billing: a.billing } : {}),
   };
   const text = stringify(manifest, { flowCollectionPadding: false });
   refuseUnrunnable(parseManifest(text, `${a.id}/agent.yaml`)); // throws with field paths if invalid

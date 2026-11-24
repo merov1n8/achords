@@ -13,9 +13,18 @@ type Provider = {
   containerTokenId?: string;
   containerTokenSet?: boolean;
 };
-type Budget = { day: number; month: number; spentDay: number; spentMonth: number };
+type Budget = {
+  day: number;
+  month: number;
+  spentDay: number;
+  spentMonth: number;
+  fallback: boolean;
+};
 
-/** API budget of one provider: warn at 80%, new work waits at 100% (Phase 4). */
+/**
+ * API budget of one provider: warn at 80%; at 100% new work waits (Phase 4), or runs on the
+ * subscription with the fallback on (ADR-0068).
+ */
 function BudgetForm(props: { provider: string; budget: Budget | undefined; onSaved: () => void }) {
   const b = props.budget;
   const [day, setDay] = useState(String(b?.day ?? 0));
@@ -29,6 +38,14 @@ function BudgetForm(props: { provider: string; budget: Budget | undefined; onSav
         body: { day: Number(day), month: Number(month) },
       });
       setStatus({ ok: true, text: t("projects.saved") });
+      props.onSaved();
+    } catch (err) {
+      setStatus({ ok: false, text: (err as Error).message });
+    }
+  };
+  const setFallback = async (on: boolean) => {
+    try {
+      await api(`/api/budgets/${props.provider}`, { method: "PUT", body: { fallback: on } });
       props.onSaved();
     } catch (err) {
       setStatus({ ok: false, text: (err as Error).message });
@@ -60,6 +77,14 @@ function BudgetForm(props: { provider: string; budget: Budget | undefined; onSav
           {t("common.save")}
         </button>
       </div>
+      <label class="row small">
+        <input
+          type="checkbox"
+          checked={b?.fallback ?? false}
+          onChange={(e) => setFallback(e.currentTarget.checked)}
+        />
+        {t("access.fallback")}
+      </label>
       {b && (
         <span class="muted small">
           {t("access.spent", { day: b.spentDay.toFixed(2), month: b.spentMonth.toFixed(2) })}

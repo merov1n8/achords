@@ -17,7 +17,6 @@ import {
   setDraining,
   setSetting,
 } from "@achords/core";
-import { t } from "@achords/i18n";
 import { ollamaEmbedder, openMemory } from "@achords/memory";
 import { findTailscaleHost, macApps } from "@achords/platform";
 import {
@@ -29,9 +28,10 @@ import {
   loadProjects,
   ownProject,
 } from "@achords/policy";
-import { CODEX_API_KEY_ENV, cliClaude, cliCodex, cliGemini, localOpenAI } from "@achords/providers";
+import { cliClaude, cliCodex, cliGemini, localOpenAI } from "@achords/providers";
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApps } from "./apps.ts";
+import { BILLING, createBilling, fallbackKey, periodStart } from "./billing.ts";
 import { containerHost } from "./container.ts";
 import { pushBranch } from "./git-push.ts";
 import { createApiHandler } from "./http/api.ts";
@@ -67,12 +67,6 @@ const MCP_RELAY = new URL("./mcp/relay.ts", import.meta.url).pathname;
 const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
 const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
 const SEED_CONTAINER = new URL("../../../seed/container/", import.meta.url).pathname;
-// Phase 4 providers: vault key and the variable each official CLI reads in API mode.
-export const BILLING: Record<string, { label: string; key: string; env: string }> = {
-  "cli-claude": { label: "Claude", key: "anthropic-api-key", env: "ANTHROPIC_API_KEY" },
-  "cli-codex": { label: "OpenAI", key: "openai-api-key", env: CODEX_API_KEY_ENV },
-  "cli-gemini": { label: "Google Gemini", key: "gemini-api-key", env: "GEMINI_API_KEY" },
-};
 // ADR-0051: subscription runs in a container sign in with a `claude setup-token` token.
 export const CLAUDE_CONTAINER_TOKEN = "claude-oauth-token";
 
@@ -235,55 +229,14 @@ export function runGateway(home: string): Promise<number> {
   };
   let stopForUpdate: ((code: number) => Promise<void>) | undefined;
 
-  // Phase 4: subscription or API key per provider; the key goes only to that run's CLI.
-  const billing = (provider: string) => {
-    const p = BILLING[provider];
-    if (!p || getSetting(db, `billing.${provider}`) !== "api")
-      return { mode: "subscription" as const };
-    if (!existsSync(paths.vaultDb) || !getVault().status(p.key).set) {
-      throw new Error(`API mode for ${p.label} needs its API key (Settings → Model access)`);
-    }
-    return {
-      mode: "api" as const,
-      env: { [p.env]: getVault().resolve(p.key, `provider:${provider}`) },
-    };
-  };
-
-  // Phase 4 budgets: API money per provider and day/month; warn at 80%, wait at 100%.
-  const periodStart = (period: "day" | "month") => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    if (period === "month") d.setDate(1);
-    return d.getTime();
-  };
-  const budget = (provider: string): string | undefined => {
-    const label = BILLING[provider]?.label ?? provider;
-    for (const period of ["day", "month"] as const) {
-      const limit = Number(getSetting(db, `budget.${provider}.${period}`) ?? 0);
-      if (!limit) continue;
-      const since = periodStart(period);
-      const spent = apiSpendSince(db, provider, since);
-      const once = (what: string, text: string) => {
-        const key = `budget.told.${provider}.${period}.${what}.${since}`;
-        if (getSetting(db, key)) return;
-        setSetting(db, key, "1");
-        notifyOwner(text);
-      };
-      const vars = {
-        provider: label,
-        period: t(`budget.${period}`),
-        spent: spent.toFixed(2),
-        limit: limit.toFixed(2),
-      };
-      if (spent >= limit) {
-        const reason = t("budget.reached", vars);
-        once("stop", `⛔ ${reason}`);
-        return reason;
-      }
-      if (spent >= limit * 0.8) once("warn", `⚠️ ${t("budget.warning", vars)}`);
-    }
-    return undefined;
-  };
+  // Phase 4: subscription or API key per provider, or per agent (ADR-0068); the key goes only
+  // to that run's CLI.
+  const { billing, budget, fallsBack } = createBilling({
+    db,
+    notify: (text) => notifyOwner(text),
+    keySet: (id) => existsSync(paths.vaultDb) && getVault().status(id).set,
+    resolveKey: (id, audit) => getVault().resolve(id, audit),
+  });
 
   // ADR-0051: the agent API is also served on the container network's host address, for
   // agent runs inside Apple containers; the Host allow-list grows when that listener binds.
@@ -595,12 +548,17 @@ export function runGateway(home: string): Promise<number> {
                   month: Number(getSetting(db, `budget.${p}.month`) ?? 0),
                   spentDay: apiSpendSince(db, p, periodStart("day")),
                   spentMonth: apiSpendSince(db, p, periodStart("month")),
+                  fallback: fallsBack(p),
                 },
               ]),
             ),
           setBudget: (provider, period, usd) => {
             if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
             setSetting(db, `budget.${provider}.${period}`, String(usd));
+          },
+          setFallback: (provider, on) => {
+            if (!BILLING[provider]) throw new Error(`unknown provider ${provider}`);
+            setSetting(db, fallbackKey(provider), on ? "subscription" : "");
           },
         },
         update: {

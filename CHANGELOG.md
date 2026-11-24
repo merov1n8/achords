@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Billing per agent: an agent can run on the API key or the subscription regardless of its
+  provider's setting (agent form → Billing, or `billing: api | subscription` in `agent.yaml`).
+  Model access has a new switch per provider: when the API budget is used up, API work runs on
+  the subscription instead of waiting, until the next period or a higher budget (ADR-0068).
 - Question mode: when you only ask an agent something, it answers read-only (no file changes,
   shell, drafts, delegation or handoff, whatever its level) and its card goes straight to done,
   without checks or review. The boss decides this from your message; start a message with `?:`

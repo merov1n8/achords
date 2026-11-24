@@ -78,6 +78,7 @@ describe("HTTP API", () => {
   let runDir: string;
   let projectsDir: string;
   let budgetDay = 0;
+  let budgetFallback = false;
   const heard: number[] = [];
   let tokenServer: Server;
   let tokenReply: object = {};
@@ -247,10 +248,19 @@ describe("HTTP API", () => {
           list: () => [],
           setMode: () => {},
           budgets: () => ({
-            "cli-claude": { day: budgetDay, month: 0, spentDay: 1.5, spentMonth: 3 },
+            "cli-claude": {
+              day: budgetDay,
+              month: 0,
+              spentDay: 1.5,
+              spentMonth: 3,
+              fallback: budgetFallback,
+            },
           }),
           setBudget: (_p, period, usd) => {
             if (period === "day") budgetDay = usd;
+          },
+          setFallback: (_p, on) => {
+            budgetFallback = on;
           },
         },
         runTokens: tokens,
@@ -887,6 +897,13 @@ describe("HTTP API", () => {
     expect(await put.json()).toMatchObject({ "cli-claude": { day: 5, spentDay: 1.5 } });
     expect(
       (await call("/api/budgets/cli-claude", { method: "PUT", body: '{"day": -1}' })).status,
+    ).toBe(400);
+    // ADR-0068: the subscription fallback is a switch.
+    const fb = await call("/api/budgets/cli-claude", { method: "PUT", body: '{"fallback": true}' });
+    expect(await fb.json()).toMatchObject({ "cli-claude": { fallback: true } });
+    expect(
+      (await call("/api/budgets/cli-claude", { method: "PUT", body: '{"fallback": "yes"}' }))
+        .status,
     ).toBe(400);
     const usage = (await (await call("/api/usage")).json()) as {
       spend: { today: { provider: unknown[] } };

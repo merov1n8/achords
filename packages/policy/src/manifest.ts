@@ -87,6 +87,8 @@ export const manifestSchema = z
     container: z.boolean().optional(),
     // Claude --effort (codex reasoning effort, capped at high); absent = the CLI's default.
     effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    // ADR-0068: who pays for this agent's runs; absent = the provider's setting (Model access).
+    billing: z.enum(["api", "subscription"]).optional(),
     publish_mode: z
       .object({
         default: publish.default("review"),
