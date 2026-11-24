@@ -88,6 +88,21 @@ describe("cli-codex (ADR-0040)", () => {
     expect(fsOf(args)).not.toContain('"" = "read"');
   });
 
+  it("runs the inbox hook after tool calls and at the stop, without a trust prompt (ADR-0069)", () => {
+    const files = { last: "/t/last.txt" };
+    const args = codexArgs(req({ inboxHook: { post: "h 'a' post", stop: "h stop" } }), files, host);
+    expect(args).toContain("--dangerously-bypass-hook-trust");
+    expect(args).toContain(
+      `hooks.PostToolUse=[{ "matcher" = "*", "hooks" = [{ "type" = "command", "command" = "h 'a' post" }] }]`,
+    );
+    expect(args).toContain(
+      `hooks.Stop=[{ "hooks" = [{ "type" = "command", "command" = "h stop" }] }]`,
+    );
+    // Before the prompt marker, and nothing without a hook.
+    expect(args.indexOf("--dangerously-bypass-hook-trust")).toBeLessThan(args.indexOf("-"));
+    expect(codexArgs(req({}), files, host)).not.toContain("--dangerously-bypass-hook-trust");
+  });
+
   it("maps the agent's effort to codex reasoning effort (max and xhigh become high)", () => {
     const files = { last: "/t/last.txt" };
     expect(codexArgs(req({ effort: "low" }), files, host)).toContain(

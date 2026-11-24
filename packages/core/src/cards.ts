@@ -18,8 +18,16 @@ export interface TaskComment {
   author: string | null;
   /** The room whose outcome this comment is. */
   roomId: string | null;
+  /** ADR-0069: a note to running work, an approved request's result, or a dropped note. */
+  kind: CommentKind;
+  /** The task a note or request result was meant for. */
+  forTask: string | null;
+  /** When the running agent got it; null while waiting (or never, after the run). */
+  deliveredAt: number | null;
   createdAt: number;
 }
+
+export type CommentKind = "comment" | "note" | "request_result" | "dropped";
 
 const toItem = (r: Record<string, unknown>): ChecklistItem => ({
   id: Number(r.id),
@@ -34,6 +42,10 @@ const toComment = (r: Record<string, unknown>): TaskComment => ({
   text: r.text as string,
   author: (r.author as string | null) ?? null,
   roomId: (r.room_id as string | null) ?? null,
+  kind: ((r.kind as string | null) ?? "comment") as CommentKind,
+  forTask: (r.for_task as string | null) ?? null,
+  deliveredAt:
+    r.delivered_at === null || r.delivered_at === undefined ? null : Number(r.delivered_at),
   createdAt: Number(r.created_at),
 });
 
@@ -194,6 +206,64 @@ export function addComment(
     .prepare("INSERT INTO task_comments (task_id, text, created_at) VALUES (?, ?, ?) RETURNING *")
     .get(taskId, text, now);
   return toComment(row as Record<string, unknown>);
+}
+
+/**
+ * ADR-0069: a note for the running task `forTask`, or an approved request's result, on card
+ * `cardId`. The owner's (author null), so later prompts read it like the owner's comments.
+ */
+export function addNote(
+  db: Db,
+  cardId: string,
+  input: { text: string; forTask: string; kind: "note" | "request_result" },
+  now = Date.now(),
+): TaskComment | undefined {
+  if (!exists(db, cardId)) return undefined;
+  const row = db
+    .prepare(
+      "INSERT INTO task_comments (task_id, text, kind, for_task, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *",
+    )
+    .get(cardId, input.text, input.kind, input.forTask, now);
+  return toComment(row as Record<string, unknown>);
+}
+
+/** Marks notes as received by the running agent; returns those newly marked. */
+export function markDelivered(db: Db, ids: number[], now = Date.now()): TaskComment[] {
+  const out: TaskComment[] = [];
+  const stmt = db.prepare(
+    "UPDATE task_comments SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL RETURNING *",
+  );
+  for (const id of ids) {
+    const row = stmt.get(now, id);
+    if (row) out.push(toComment(row as Record<string, unknown>));
+  }
+  return out;
+}
+
+/** Notes and request results for `forTask` that its agent has not received. */
+export function undeliveredNotes(db: Db, forTask: string): TaskComment[] {
+  return db
+    .prepare(
+      "SELECT * FROM task_comments WHERE for_task = ? AND delivered_at IS NULL AND kind IN ('note', 'request_result') ORDER BY id",
+    )
+    .all(forTask)
+    .map(toComment);
+}
+
+/** Undelivered notes go to another task (the work that now continues the card). */
+export function retargetNotes(db: Db, ids: number[], forTask: string): void {
+  const stmt = db.prepare(
+    "UPDATE task_comments SET for_task = ? WHERE id = ? AND delivered_at IS NULL",
+  );
+  for (const id of ids) stmt.run(forTask, id);
+}
+
+/** The owner dropped undelivered notes: they stay on the card, out of later prompts. */
+export function dropNotes(db: Db, ids: number[]): void {
+  const stmt = db.prepare(
+    "UPDATE task_comments SET kind = 'dropped' WHERE id = ? AND kind = 'note' AND delivered_at IS NULL",
+  );
+  for (const id of ids) stmt.run(id);
 }
 
 export function deleteComment(db: Db, taskId: string, commentId: number): boolean {

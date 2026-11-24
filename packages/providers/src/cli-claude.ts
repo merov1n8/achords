@@ -59,7 +59,8 @@ export function buildArgs(req: RunRequest): string[] {
     "--setting-sources",
     "",
   );
-  if (req.settings) args.push("--settings", req.settings);
+  const settings = withInboxHook(req.settings, req.inboxHook);
+  if (settings) args.push("--settings", settings);
   if (req.addDirs?.length) args.push("--add-dir", ...req.addDirs);
   if (req.jsonSchema) args.push("--json-schema", JSON.stringify(req.jsonSchema));
   if (req.appendSystemPrompt) args.push("--append-system-prompt", req.appendSystemPrompt);
@@ -380,4 +381,20 @@ function runOnce(
     });
     child.stdin.end(req.prompt);
   });
+}
+
+/** ADR-0069: the inbox hook beside the run's own hooks, none of which it replaces. */
+export function withInboxHook(
+  settings: string | undefined,
+  hook: { post: string; stop: string } | undefined,
+): string | undefined {
+  if (!hook) return settings;
+  const s = (settings ? JSON.parse(settings) : {}) as { hooks?: Record<string, unknown[]> };
+  const hooks = { ...s.hooks };
+  hooks.PostToolUse = [
+    ...(hooks.PostToolUse ?? []),
+    { matcher: "*", hooks: [{ type: "command", command: hook.post }] },
+  ];
+  hooks.Stop = [...(hooks.Stop ?? []), { hooks: [{ type: "command", command: hook.stop }] }];
+  return JSON.stringify({ ...s, hooks });
 }

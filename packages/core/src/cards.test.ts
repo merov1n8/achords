@@ -3,13 +3,18 @@ import { placeCard } from "./board.ts";
 import {
   addChecklistItem,
   addComment,
+  addNote,
   type ChecklistItem,
   deleteCard,
   deleteComment,
+  dropNotes,
   listChecklist,
   listComments,
+  markDelivered,
   removeChecklistItem,
+  retargetNotes,
   startParked,
+  undeliveredNotes,
   updateChecklistItem,
   updateTask,
 } from "./cards.ts";
@@ -148,5 +153,36 @@ describe("startParked", () => {
     const t = enqueue(db, { title: "later", parked: true, budgetUsd: 3 }, 1);
     startParked(db, t.id, { assigneeAgentId: "dev" });
     expect(getTask(db, t.id)?.budgetUsd).toBe(3);
+  });
+});
+
+describe("notes to running work (ADR-0069)", () => {
+  it("keeps notes waiting until delivered, once, and lets the owner drop the rest", () => {
+    const db = openCoreDatabase(":memory:");
+    const card = enqueue(db, { title: "card" });
+    const plain = addComment(db, card.id, "plain", 1);
+    expect(plain).toMatchObject({ kind: "comment", forTask: null, deliveredAt: null });
+    const a = addNote(db, card.id, { text: "use main", forTask: card.id, kind: "note" }, 2);
+    const b = addNote(db, card.id, { text: "skip PlayMode", forTask: card.id, kind: "note" }, 3);
+    const r = addNote(db, card.id, { text: "result", forTask: card.id, kind: "request_result" }, 4);
+    expect(addNote(db, "missing", { text: "x", forTask: "x", kind: "note" })).toBeUndefined();
+    expect(undeliveredNotes(db, card.id).map((c) => c.text)).toEqual([
+      "use main",
+      "skip PlayMode",
+      "result",
+    ]);
+    expect(markDelivered(db, [a?.id as number], 10).map((c) => c.deliveredAt)).toEqual([10]);
+    expect(markDelivered(db, [a?.id as number], 11)).toEqual([]); // once only
+    retargetNotes(db, [a?.id as number, b?.id as number], "next");
+    expect(undeliveredNotes(db, "next").map((c) => c.text)).toEqual(["skip PlayMode"]);
+    retargetNotes(db, [b?.id as number], card.id);
+    dropNotes(db, [b?.id as number, r?.id as number]);
+    expect(undeliveredNotes(db, card.id).map((c) => c.text)).toEqual(["result"]);
+    expect(listComments(db, card.id).map((c) => c.kind)).toEqual([
+      "comment",
+      "note",
+      "dropped",
+      "request_result",
+    ]);
   });
 });

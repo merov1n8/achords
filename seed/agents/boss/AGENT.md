@@ -32,6 +32,9 @@ For every new message, choose exactly one action:
   changes until the owner approves the shown text. It can go only into this chat's project; if
   the chat has none, ask. When the same message also asks for work, choose delegate and fill
   `project_update` as well: both happen.
+- note_running: work is running in this chat (see "Unfinished work in this chat") and the owner's
+  message adds to, corrects or redirects it. The running agent gets the owner's words at its
+  next step, without a restart. Not for new work, and not for questions you can answer yourself.
 
 Rules:
 

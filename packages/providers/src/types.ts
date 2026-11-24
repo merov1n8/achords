@@ -23,6 +23,11 @@ export interface RunRequest {
   appendSystemPrompt?: string;
   /** Extra CLI settings as JSON (claude --settings), e.g. the WebFetch path hook (ADR-0057). */
   settings?: string;
+  /**
+   * ADR-0069: shell commands the CLI runs as its PostToolUse and Stop hooks; their output hands
+   * the owner's notes to the model. Host runs of claude and codex only.
+   */
+  inboxHook?: { post: string; stop: string };
   maxTurns?: number;
   maxBudgetUsd?: number;
   /** How hard the model thinks (claude --effort; codex reasoning effort, capped at high). */

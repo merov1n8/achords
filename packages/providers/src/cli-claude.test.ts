@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isAlive } from "@achords/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cliClaude } from "./cli-claude.ts";
+import { cliClaude, withInboxHook } from "./cli-claude.ts";
 import type { ContainerSpec, RunRequest } from "./types.ts";
 
 const FAKE = new URL("./fake-claude.test-helper.mjs", import.meta.url).pathname;
@@ -85,6 +85,23 @@ describe("cli-claude adapter", () => {
     await provider().run(req({ settings: '{"hooks":{}}' }));
     const seen = JSON.parse(readFileSync(record, "utf8"));
     expect(seen.argv).toEqual(expect.arrayContaining(["--settings", '{"hooks":{}}']));
+  });
+
+  it("adds the inbox hook beside the run's own hooks (ADR-0069)", async () => {
+    const own = '{"attribution":{"pr":""},"hooks":{"PreToolUse":[{"matcher":"Bash"}]}}';
+    await provider().run(req({ settings: own, inboxHook: { post: "h post", stop: "h stop" } }));
+    const seen = JSON.parse(readFileSync(record, "utf8"));
+    const s = JSON.parse(seen.argv[seen.argv.indexOf("--settings") + 1]);
+    expect(s).toEqual({
+      attribution: { pr: "" },
+      hooks: {
+        PreToolUse: [{ matcher: "Bash" }],
+        PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "h post" }] }],
+        Stop: [{ hooks: [{ type: "command", command: "h stop" }] }],
+      },
+    });
+    expect(withInboxHook(own, undefined)).toBe(own);
+    expect(withInboxHook(undefined, undefined)).toBeUndefined();
   });
 
   it("adds extra directories and a JSON schema, and returns the structured output", async () => {

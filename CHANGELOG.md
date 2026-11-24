@@ -7,6 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Notes to running work: while an agent is working on a chat's card, write to it in the chat
+  (the boss passes on what adds to or corrects the work) or comment on its card. Claude and
+  Codex agents get the note at their next step, without a restart, and the chat says when it
+  arrived. If the run ends first, you choose: continue with the note, or drop it. The result of
+  a request you approve during a run now reaches the agent that asked (ADR-0069).
 - Billing per agent: an agent can run on the API key or the subscription regardless of its
   provider's setting (agent form → Billing, or `billing: api | subscription` in `agent.yaml`).
   Model access has a new switch per provider: when the API budget is used up, API work runs on

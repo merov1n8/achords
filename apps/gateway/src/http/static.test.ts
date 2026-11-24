@@ -63,6 +63,7 @@ describe("static web UI", () => {
           decideProposal: () => ({ ok: false, reason: "n/a" }),
           moveTask: () => ({ ok: false, reason: "n/a" }),
           ownerMove: () => ({ ok: false, reason: "n/a" }),
+          noteRunning: () => undefined,
           runAction: () => ({ ok: false, message: "n/a" }),
           workflow: () => {
             throw new Error("n/a");
