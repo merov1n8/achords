@@ -384,6 +384,7 @@ export function runGateway(home: string): Promise<number> {
       ),
     },
     redact,
+    log,
     notify: (text) => notifyOwner(text),
   });
   // A previous `achords stop` may have left the drain flag; a new gateway works normally.

@@ -2,7 +2,7 @@
 // Stand-in for the `claude` CLI in tests. Emits stream-json in the shape of claude 2.1.x
 // (recorded from a real `claude -p --output-format stream-json --verbose` run, ids replaced).
 // FAKE_CLAUDE_RECORD: file to write {argv, stdin, cwd, env subset} into.
-// FAKE_CLAUDE_MODE: ok | structured | error | limit | crash | hang | hang-child
+// FAKE_CLAUDE_MODE: ok | structured | error | limit | crash | hang | hang-child | todo | denied
 // FAKE_CLAUDE_KNOWN: session ids `--resume` accepts (comma-separated); others are rejected the
 // way the real CLI does it.
 import { spawn } from "node:child_process";
@@ -76,6 +76,45 @@ process.stdin.on("end", () => {
     out(todo(["in_progress", "pending", "pending", "pending"]));
     out(todo(["completed", "completed", "in_progress", "pending"]));
   }
+  if (mode === "denied") {
+    // A sandboxed Bash call refused, one that asked to leave the sandbox, and a tool that just
+    // failed (not a refusal). Shapes as claude 2.1.x prints them.
+    const call = (id, name, input) => ({
+      type: "assistant",
+      session_id,
+      message: { content: [{ type: "tool_use", id, name, input }] },
+    });
+    const fail = (tool_use_id, content) => ({
+      type: "user",
+      session_id,
+      message: { content: [{ type: "tool_result", tool_use_id, is_error: true, content }] },
+    });
+    out(call("toolu_a", "Bash", { command: "curl https://example.com", description: "fetch" }));
+    out(fail("toolu_a", "curl: (6) Could not resolve host: Operation not permitted"));
+    out(
+      call("toolu_b", "Bash", {
+        command: "rm -rf build TOKEN=abcdefgh12345678", // gitleaks:allow (fake test fixture)
+        dangerouslyDisableSandbox: true,
+      }),
+    );
+    out(
+      fail("toolu_b", [
+        {
+          type: "text",
+          text: "This command requires approval because it runs outside the sandbox",
+        },
+      ]),
+    );
+    out(call("toolu_c", "Read", { file_path: "/nope" }));
+    out(fail("toolu_c", "File does not exist."));
+    out(call("toolu_d", "WebFetch", { url: "https://example.org" }));
+    out(
+      fail(
+        "toolu_d",
+        "Claude requested permissions to use WebFetch, but you haven't granted it yet.",
+      ),
+    );
+  }
   out({
     type: "assistant",
     session_id,
@@ -114,7 +153,21 @@ process.stdin.on("end", () => {
       cache_read_input_tokens: 0,
       output_tokens: 4,
     },
-    permission_denials: [],
+    permission_denials:
+      mode === "denied"
+        ? [
+            {
+              tool_name: "WebFetch",
+              tool_use_id: "toolu_d",
+              tool_input: { url: "https://example.org" },
+            },
+            {
+              tool_name: "Write",
+              tool_use_id: "toolu_e",
+              tool_input: { file_path: "/etc/x", content: "y" },
+            },
+          ]
+        : [],
     ...(mode === "structured" ? { structured_output: { action: "delegate" } } : {}),
     terminal_reason: mode === "error" ? "max_turns" : "completed",
   });

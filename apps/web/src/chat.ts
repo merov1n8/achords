@@ -28,6 +28,14 @@ export interface ThreadSummary {
     question: string;
     answer: string | null;
   }[];
+  /** Runs whose tool calls were refused (input and reason redacted), oldest first. */
+  refusedCalls?: {
+    run: string;
+    agent: string;
+    name: string;
+    title: string;
+    denials: { tool: string; input: string; reason: string; unsandboxed?: boolean }[];
+  }[];
 }
 
 export function formatTokens(n: number): string {

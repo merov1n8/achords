@@ -880,5 +880,8 @@
   "env.help": "Live or staging: on a secured project agents never write to live targets.",
   "chat.parentQuestions": "Questions to the parent",
   "chat.parentAsked": "{agent} on \"{title}\"",
-  "chat.parentOpen": "not answered yet"
+  "chat.parentOpen": "not answered yet",
+  "chat.refusedCalls": "Refused tool calls",
+  "chat.refusedIn": "{agent} on \"{title}\"",
+  "chat.unsandboxed": "outside the sandbox"
 }

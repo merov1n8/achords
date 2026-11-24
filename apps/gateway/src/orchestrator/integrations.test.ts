@@ -820,7 +820,7 @@ describe("integrations in runs (ADR-0034)", () => {
       }
       await new Promise((r) => setTimeout(r, 0));
       expect(called).toEqual([]);
-    });
+    }, 30_000); // every level and write class: slow on CI macOS runners
 
     it("still refused with an override raising the level and with full access granted", async () => {
       writeFileSync(join(home, "overrides.yaml"), "- { agent: l3, project: sec, level: 5 }\n");

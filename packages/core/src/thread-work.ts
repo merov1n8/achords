@@ -1,7 +1,7 @@
 import type { Db } from "./db/database.ts";
 import { killRun } from "./emergency.ts";
 import { cancel } from "./queue.ts";
-import { finishRun, listActiveRuns } from "./runs.ts";
+import { finishRun, listActiveRuns, type RunDenial } from "./runs.ts";
 
 export type ParticipantStatus = "running" | "queued" | "idle" | "waiting";
 
@@ -34,6 +34,8 @@ export interface ThreadSummary {
     question: string;
     answer: string | null;
   }[];
+  /** Runs of the chat whose tool calls were refused, with each call and why. Oldest first. */
+  refusedCalls: { run: string; agent: string; name: string; title: string; denials: RunDenial[] }[];
 }
 
 // Delegated children carry the thread too; the root clause also catches older rows without it.
@@ -106,6 +108,21 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
       question: String(r.parent_question),
       answer: r.parent_answer === null ? null : String(r.parent_answer),
     }));
+  const refusedCalls = db
+    .prepare(
+      `SELECT r.id, r.agent_id AS agent, a.name, t.title, r.denials
+       FROM runs r JOIN tasks t ON t.id = r.task_id LEFT JOIN agents a ON a.id = r.agent_id
+       WHERE r.task_id IN (${THREAD_TASKS}) AND r.denials IS NOT NULL
+       ORDER BY r.started_at, r.rowid`,
+    )
+    .all(threadId, threadId)
+    .map((r) => ({
+      run: String(r.id),
+      agent: String(r.agent ?? ""),
+      name: String(r.name ?? r.agent ?? ""),
+      title: String(r.title),
+      denials: JSON.parse(String(r.denials)) as RunDenial[],
+    }));
   return {
     agentsWorking: participants.filter((p) => p.status === "running").length,
     agentsTotal: participants.length,
@@ -120,6 +137,7 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
     costUsd: Number(totals?.usd ?? 0),
     participants,
     parentQuestions: questions,
+    refusedCalls,
   };
 }
 

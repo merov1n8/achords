@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { containerRunArgs, stopContainer } from "./container.ts";
 import type {
+  Denial,
   ModelProvider,
   RunProgress,
   RunRequest,
@@ -103,6 +104,43 @@ function parseTodos(event: Record<string, unknown>): RunProgress | undefined {
   };
 }
 
+const MAX_DENIALS = 20;
+const DENIAL_INPUT_LIMIT = 500;
+const DENIAL_REASON_LIMIT = 300;
+// Error tool results that mean the call itself was refused, not that the tool failed.
+const REFUSED =
+  /requires approval|has been denied|haven't granted|permission denied|not permitted|sandbox/i;
+
+type ToolUse = { name: string; input: Record<string, unknown> };
+
+function toDenial(use: ToolUse, reason: string): Denial {
+  const command = use.input.command;
+  const input =
+    use.name === "Bash" && typeof command === "string" ? command : JSON.stringify(use.input);
+  return {
+    tool: use.name,
+    input: input.slice(0, DENIAL_INPUT_LIMIT),
+    reason: reason.replace(/\s+/g, " ").trim().slice(0, DENIAL_REASON_LIMIT),
+    ...(use.name === "Bash" ? { unsandboxed: use.input.dangerouslyDisableSandbox === true } : {}),
+  };
+}
+
+function blocks(event: Record<string, unknown>): Record<string, unknown>[] {
+  const content = (event.message as { content?: unknown } | undefined)?.content;
+  return Array.isArray(content)
+    ? content.filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
+    : [];
+}
+
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((c) => (typeof c?.text === "string" ? c.text : ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
 function parseWindows(info: unknown): UsageWindow[] {
   const windows = (info as { unifiedWindows?: Record<string, Record<string, unknown>> })
     ?.unifiedWindows;
@@ -126,6 +164,10 @@ function runOnce(
     let result: Record<string, unknown> | undefined;
     let windows: UsageWindow[] = [];
     let stderr = "";
+    // Tool calls by id, so a refused result names the call that caused it.
+    const toolUses = new Map<string, ToolUse>();
+    const denials = new Map<string, Denial>();
+    const denied = () => (denials.size ? { denials: [...denials.values()] } : {});
     let stop: RunResult["stopReason"] | undefined;
     let settled = false;
 
@@ -224,7 +266,47 @@ function runOnce(
         const progress = parseTodos(event);
         if (progress) req.onProgress(progress);
       }
-      if (event.type === "result") result = event;
+      if (event.type === "assistant") {
+        for (const b of blocks(event)) {
+          if (b.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+            const input = typeof b.input === "object" && b.input !== null ? b.input : {};
+            toolUses.set(b.id, { name: b.name, input: input as Record<string, unknown> });
+          }
+        }
+      }
+      if (event.type === "user") {
+        for (const b of blocks(event)) {
+          if (b.type !== "tool_result" || b.is_error !== true) continue;
+          const use = typeof b.tool_use_id === "string" ? toolUses.get(b.tool_use_id) : undefined;
+          const text = resultText(b.content);
+          if (use && REFUSED.test(text) && denials.size < MAX_DENIALS) {
+            denials.set(String(b.tool_use_id), toDenial(use, text));
+          }
+        }
+      }
+      if (event.type === "result") {
+        result = event;
+        const listed = Array.isArray(event.permission_denials) ? event.permission_denials : [];
+        for (const d of listed as {
+          tool_name?: unknown;
+          tool_use_id?: unknown;
+          tool_input?: unknown;
+        }[]) {
+          const id = String(d?.tool_use_id ?? "");
+          if (denials.has(id) || denials.size >= MAX_DENIALS || typeof d?.tool_name !== "string") {
+            continue;
+          }
+          const input =
+            typeof d.tool_input === "object" && d.tool_input !== null ? d.tool_input : {};
+          denials.set(
+            id || `denial-${denials.size}`,
+            toDenial(
+              { name: d.tool_name, input: input as Record<string, unknown> },
+              "permission not granted",
+            ),
+          );
+        }
+      }
     });
 
     child.on("close", (code) => {
@@ -246,6 +328,7 @@ function runOnce(
           error: stop,
           usage: emptyUsage(),
           windows,
+          ...denied(),
         });
         return;
       }
@@ -258,6 +341,7 @@ function runOnce(
           error: `claude exited with exit code ${code} and no result${detail}`,
           usage: emptyUsage(),
           windows,
+          ...denied(),
           ...(req.session?.resume && /no conversation found/i.test(stderr)
             ? { resumeRejected: true }
             : {}),
@@ -287,6 +371,7 @@ function runOnce(
         windows,
         ...(typeof result.session_id === "string" ? { sessionId: result.session_id } : {}),
         ...(result.structured_output !== undefined ? { structured: result.structured_output } : {}),
+        ...denied(),
       });
     });
 
