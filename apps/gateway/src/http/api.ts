@@ -216,9 +216,11 @@ export interface ApiDeps {
     setMode: (provider: string, mode: "subscription" | "api") => void;
     budgets: () => Record<
       string,
-      { day: number; month: number; spentDay: number; spentMonth: number }
+      { day: number; month: number; spentDay: number; spentMonth: number; fallback: boolean }
     >;
     setBudget: (provider: string, period: "day" | "month", usd: number) => void;
+    /** ADR-0068: the subscription takes over when the API budget is used up. */
+    setFallback: (provider: string, on: boolean) => void;
   };
   /** Auto-update from main (owner decision 2026-11-21). */
   update?: {
@@ -1392,6 +1394,12 @@ export function createApiHandler(deps: ApiDeps) {
           }
           attempt(() => deps.billing?.setBudget(params[0] as string, period, usd));
         }
+        if (b.fallback !== undefined) {
+          if (typeof b.fallback !== "boolean")
+            throw new HttpError(400, "fallback must be true or false");
+          const on = b.fallback;
+          attempt(() => deps.billing?.setFallback(params[0] as string, on));
+        }
         return deps.billing.budgets();
       },
     ],
@@ -1566,6 +1574,7 @@ export function createApiHandler(deps: ApiDeps) {
           delegation: m.delegation,
           ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
           ...(m.effort ? { effort: m.effort } : {}),
+          ...(m.billing ? { billing: m.billing } : {}),
           ...(m.level !== undefined ? levelInfo(m) : {}),
           doc: existsSync(docPath) ? readFileSync(docPath, "utf8") : "",
           // Aliases always run the newest model of a family; local models as pulled.
@@ -1970,6 +1979,9 @@ export function createApiHandler(deps: ApiDeps) {
       ...(perRun > 0 ? { budget: { per_run_usd: perRun } } : {}),
       ...(b.effort
         ? { effort: str(b.effort, "effort", 10) as NonNullable<AgentFields["effort"]> }
+        : {}),
+      ...(b.billing
+        ? { billing: str(b.billing, "billing", 20) as NonNullable<AgentFields["billing"]> }
         : {}),
     };
   };

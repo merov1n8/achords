@@ -331,7 +331,11 @@ export interface OrchestratorDeps {
    * Phase 4: subscription or API key per provider ("cli-claude", "cli-codex", …). Throws when API
    * mode is chosen but its key is missing; the run fails with that reason.
    */
-  billing?: (provider: string) => { mode: "subscription" | "api"; env?: Record<string, string> };
+  billing?: (
+    provider: string,
+    /** ADR-0068: the agent's own choice, over the provider's setting. */
+    prefer?: "subscription" | "api",
+  ) => { mode: "subscription" | "api"; env?: Record<string, string> };
   /** Phase 4: cost from tokens for CLIs that report none (price list), or null. */
   price?: (model: string, usage: Usage) => number | null;
   /** Phase 4: why API work on this provider must wait (budget used up), or undefined. */
@@ -822,7 +826,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const slash = model.indexOf("/");
     const provider = deps.providers[model.slice(0, slash)];
     if (!provider) throw new Error(`no provider for ${model}`);
-    const pay = deps.billing?.(model.slice(0, slash));
+    const pay = deps.billing?.(model.slice(0, slash), m.billing);
 
     const roots = [...m.fs.write, ...m.fs.read].map(expandHome);
     const skillDirs = skillRoots(m).filter((p) => !roots.includes(p));

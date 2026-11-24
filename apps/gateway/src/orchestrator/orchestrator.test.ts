@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -152,13 +153,15 @@ describe("orchestrator", () => {
   it("subscription or API key per provider; a missing key fails with where to set it (Phase 4)", async () => {
     let mode: "subscription" | "api" = "subscription";
     let key: string | undefined = "sk-test";
+    const prefers: (string | undefined)[] = [];
     const fake = fakeProvider(() => result({ structured: { action: "answer", message: "ok" } }));
     const orch = createOrchestrator({
       db,
       home,
       providers: { "cli-claude": fake.provider },
-      billing: (provider) => {
+      billing: (provider, prefer) => {
         expect(provider).toBe("cli-claude");
+        prefers.push(prefer);
         if (mode === "subscription") return { mode };
         if (!key)
           throw new Error("API mode for Claude needs its API key (Settings → Model access)");
@@ -179,6 +182,13 @@ describe("orchestrator", () => {
     expect(listMessages(db, t.id).at(-1)?.content).toMatch(
       /needs its API key \(Settings → Model access\)/,
     );
+    // ADR-0068: an agent's own billing reaches the decision; without it, none is passed.
+    expect(prefers).toEqual([undefined, undefined, undefined]);
+    appendFileSync(join(home, "agents", "boss", "agent.yaml"), "billing: api\n");
+    orch.syncAgents();
+    key = "sk-test";
+    await orch.handleMessage(t.id, "hi", "web");
+    expect(prefers.at(-1)).toBe("api");
   });
 
   it("prices token-only runs, records API billing, and holds API work over budget (Phase 4)", async () => {

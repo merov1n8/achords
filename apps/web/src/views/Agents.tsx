@@ -24,6 +24,7 @@ type AgentDetail = {
   workspace: string;
   roles: string[];
   effort?: string;
+  billing?: string;
   models: Models;
   tools: string[];
   fs: { read: string[]; write: string[] };
@@ -142,6 +143,7 @@ function AgentForm({
     workspace: "",
     roles: [] as string[],
     effort: "",
+    billing: "",
     description: "",
     models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] } as Models,
     /** null: an agent without a level (old per-agent lists). */
@@ -176,6 +178,7 @@ function AgentForm({
           workspace: d.workspace,
           roles: d.roles,
           effort: d.effort ?? "",
+          billing: d.billing ?? "",
           description: d.doc,
           models: { default: d.models.default, allowed: d.models.allowed ?? [d.models.default] },
           level: d.level ?? null,
@@ -239,6 +242,7 @@ function AgentForm({
         workspace: f.workspace,
         roles: f.roles,
         ...(f.effort ? { effort: f.effort } : {}),
+        ...(f.billing ? { billing: f.billing } : {}),
         models: f.models,
         fs: { write: lines(f.write), read: lines(f.read) },
         // ADR-0067: the level replaces the tool, shell, network and container lists.
@@ -364,6 +368,19 @@ function AgentForm({
             ))}
           </select>
           <span class="muted small">{t("agents.form.effortHelp")}</span>
+        </label>
+        <label class="field">
+          {t("agents.form.billing")}
+          <select
+            class="input"
+            value={f.billing}
+            onChange={(e) => set({ billing: e.currentTarget.value })}
+          >
+            <option value="">{t("agents.form.billingDefault")}</option>
+            <option value="api">{t("access.api")}</option>
+            <option value="subscription">{t("access.subscription")}</option>
+          </select>
+          <span class="muted small">{t("agents.form.billingHelp")}</span>
         </label>
         <div class="field">
           {t("agents.form.models")}

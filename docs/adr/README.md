@@ -67,3 +67,4 @@
 - [ADR-0065: Checks before review](0065-checks-before-review.md)
 - [ADR-0066: Stall watcher, card moves that start work, questions to the parent, room outcomes, sessions per card, and no memory from open-web runs](0066-stalls-card-moves-parent-questions-room-outcomes-and-sessions.md)
 - [ADR-0067: Permission levels, remit and project class instead of per-agent lists](0067-permission-levels.md)
+- [ADR-0068: Billing per agent, and the subscription as fallback when the API budget is used up](0068-billing-per-agent-and-subscription-fallback.md)
