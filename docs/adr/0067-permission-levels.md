@@ -102,6 +102,11 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
       - An agent's remit may therefore list `unsandboxed` commands: exact executables that run outside the sandbox (the CLI's `sandbox.excludedCommands`). Only game-dev's Unity editor binary is listed. Every other command of that agent stays sandboxed.
       - The agent page shows the exception.
       - The exception is removed when ADR-0055 stage 2 (host runs under a dedicated macOS user) exists. game-dev's Unity work then moves there.
+    - **Second owner-approved exception (2026-11-24, same terms).**
+      - The 3d-designer is at level 4 and has keyed integrations (Meshy, fal) as well as a host app (Blender). Under the ADR-0055 rule it would have to run in a container, where Blender is unreachable.
+      - The remit flag `keys_beside_host_shell: true` lets such an agent run its shell on the host in the CLI sandbox, with the same folder and read-deny limits as other host runs. Its keyed integrations stay gateway-side (ADR-0055).
+      - The open-web split still applies.
+      - The flag is shown on the agent page and ends with ADR-0055 stage 2.
   - **Keys stay behind the gateway** (ADR-0055).
     - `git push` at level 5 goes through a git credential helper answered by the gateway, the use-without-read mechanism ADR-0055 left open. Its credentials are per project, in the vault.
     - No push credential is ever placed in the run. A host git login on a development machine is not a supported path.
@@ -141,7 +146,7 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
   | web-dev                      | 4     | Gains build and packages. Its host shell moves into the CLI sandbox.                                                               |
   | wp-maintainer                | 4     | Gains a free shell, commit, build and packages.                                                                                    |
   | game-dev                     | 4     | Its host shell moves into the CLI sandbox, except the Unity editor binary (owner-approved exception, see guards). Local apps stay. |
-  | 3d-designer                  | 4     | Gains a shell.                                                                                                                     |
+  | 3d-designer                  | 4     | Gains a shell, on the host in the CLI sandbox beside its keyed integrations and Blender (owner-approved exception, see guards).    |
   | video-producer               | 4     | None. Spending asks.                                                                                                               |
   | boss                         | —     | No level.                                                                                                                          |
   - Agents named in the original assignment that are no longer installed (audio, image) are left out.
@@ -162,7 +167,7 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
     - adds `spend_without_asking: bool`, for `experimental` only;
     - account and site entries become `{url|id, env: live|staging}`; a plain string is read as `env: live`.
   - **accounts.yaml:** the same entry shape.
-  - **Manifest remit:** `unsandboxed: [exact executable paths]`, the owner-approved exception (only game-dev's Unity binary).
+  - **Manifest remit:** `unsandboxed: [exact executable paths]` (game-dev's Unity binary) and `keys_beside_host_shell: true` (3d-designer), the owner-approved exceptions until ADR-0055 stage 2.
   - **`~/.achords/overrides.yaml`:** `{agent, project, level, requires_skills[]}`.
   - **Catalog:** every tool gets `class`.
   - **Approvals:** `approval:<card>` settings keys.
