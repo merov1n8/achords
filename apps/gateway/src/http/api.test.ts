@@ -1563,10 +1563,12 @@ describe("HTTP API", () => {
     expect(
       (await call("/api/actions", { method: "POST", body: '{"data":"rm:-rf:/"}' })).status,
     ).toBe(400);
-    // Command requests (ADR-0056) with "once" added, full access (ADR-0035) and permission
-    // requests (ADR-0067 step 4): every button reaches the orchestrator.
+    // Command requests (ADR-0056) with "once" added, full access (ADR-0035), permission
+    // requests (ADR-0067 step 4) and the send-back limit (ADR-0062): every button reaches the
+    // orchestrator.
     for (const data of [
       ...["once", "task", "always", "reject"].map((v) => `cmd:${v}:b8746623`),
+      ...["continue", "accept"].map((v) => `review:${v}:b8746623`),
       ...["once", "approve", "reject"].map((v) => `access:${v}:b8746623`),
       ...["once", "card", "always", "reject"].map((v) => `perm:${v}:b8746623`),
     ]) {
@@ -1574,7 +1576,12 @@ describe("HTTP API", () => {
       expect(res.status).toBe(200);
       expect(decisions.at(-1)?.id).toBe("b8746623");
     }
-    for (const data of ["perm:approve:b8746623", "cmd:card:b8746623", "access:always:b8746623"]) {
+    for (const data of [
+      "perm:approve:b8746623",
+      "cmd:card:b8746623",
+      "access:always:b8746623",
+      "review:approve:b8746623",
+    ]) {
       const res = await call("/api/actions", { method: "POST", body: JSON.stringify({ data }) });
       expect(res.status).toBe(400);
     }

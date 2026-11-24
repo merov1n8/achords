@@ -1092,7 +1092,7 @@ export function createApiHandler(deps: ApiDeps) {
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
         if (
-          !/^((proposal|move|publish|skill):(approve|reject)|access:(once|approve|reject)|cmd:(once|task|always|reject)|perm:(once|card|always|reject)):[\w-]{1,36}$/.test(
+          !/^((proposal|move|publish|skill):(approve|reject)|access:(once|approve|reject)|review:(continue|accept)|cmd:(once|task|always|reject)|perm:(once|card|always|reject)):[\w-]{1,36}$/.test(
             data,
           )
         ) {

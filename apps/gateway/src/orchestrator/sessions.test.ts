@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  appendMessage,
   createThread,
   getCardSession,
   getTask,
@@ -217,12 +218,57 @@ describe("one CLI session per agent and card (ADR-0066)", () => {
     expect(dev[1]?.req.session).toEqual({ resume: dev[0]?.req.session?.resume ?? "s-1" });
     expect(dev[1]?.req.prompt).toMatch(/^# Next task on this card/);
     expect(dev[1]?.req.prompt).toMatch(/the button is dead/i);
+    // The description quotes the review already: the chat's copy is not repeated.
+    expect(dev[1]?.req.prompt).not.toMatch(/New in this chat/);
     // Approved into done: the card's transcripts go, under whichever task now holds the card.
     const held = String(threadCard(db, threadId));
     expect(getTask(db, held)?.column).toBe("done");
     expect(getCardSession(db, { card: held, agent: "coder", project: "" })).toBeUndefined();
     expect(existsSync(sessionDir(home, held))).toBe(false);
     expect(taskId).not.toBe(held);
+  });
+
+  it("a resumed run after the send-back limit sees the review, not the boss's status lines (ADR-0062)", async () => {
+    agent("coder", ["roles: [dev]"]);
+    agent("qa", ["roles: [qa]"]);
+    start();
+    const { threadId } = card();
+    let reviews = 0;
+    behave = (_req, task) => {
+      if (task.assigneeAgentId !== "qa") return undefined;
+      // The review comes after the coder's last turn, never in the same millisecond.
+      const t0 = Date.now();
+      while (Date.now() <= t0);
+      reviews++;
+      orch.moveTask(
+        { from: "task", taskId: task.id },
+        { taskId: String(threadCard(db, threadId)), to: "in_progress" },
+      );
+      return result({ text: `Verdict ${reviews}: the button is dead.`, sessionId: `q-${n}` });
+    };
+    for (let i = 0; i < 40 && (await orch.workOnce()); i++);
+    expect(calls.filter((c) => c.agent === "coder")).toHaveLength(4);
+    expect(listMessages(db, threadId).at(-1)?.content).toMatch(/waits for you/);
+    // The owner says to go on in the chat; the boss hands the next task to the coder.
+    appendMessage(db, { threadId, role: "user", channel: "web", content: "Go on with it." });
+    const r = orch.delegate(
+      { from: "boss", threadId },
+      { agent: "coder", title: "Continue", instructions: "continue the work" },
+    );
+    expect(r.ok).toBe(true);
+    await orch.workOnce();
+    const next = calls.at(-1);
+    expect(next?.agent).toBe("coder");
+    expect(next?.req.session?.resume).toBeDefined();
+    const prompt = next?.req.prompt ?? "";
+    expect(prompt).toMatch(/^# Next task on this card: Continue/);
+    expect(prompt).toMatch(/The owner wrote:\nGo on with it\./);
+    expect(prompt).toContain(
+      "New in this chat since your last turn:\nqa: Review (qa): Build the page\n\nVerdict 4: the button is dead.",
+    );
+    // Not the boss's routing and status lines, nor the coder's own report.
+    expect(prompt).not.toMatch(/waits for you|continues with what the review found|Done \(coder\)/);
+    expect(prompt).not.toMatch(/Verdict [123]/);
   });
 
   it("another card, agent or project, or a new chat, starts afresh", async () => {

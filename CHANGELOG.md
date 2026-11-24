@@ -7,6 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- When a card has been sent back from review too often and waits for you, its message has two
+  buttons (web and Telegram): "Continue with the review's findings" restarts its agent with the
+  last review, as a normal send-back would (your decision does not count toward the limit), and
+  "Accept, move to Done" moves the card past review as your own move. Replying in the chat
+  still works.
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
   task's title; renaming the card in its detail view sticks across follow-up tasks, and an empty
   name goes back to the chat's name. The current task's title is shown below the field.
@@ -98,6 +103,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- An agent that continues its session on a card now sees what other agents posted in the chat
+  since its last turn, above all the reviewer's verdict, so you no longer have to paste the
+  review after the send-back limit; the boss's status lines and button requests are left out.
+  A new task on the card always gets the latest review, even when the chat is long.
 - Codex and Gemini runs give git a neutral global config (`GIT_CONFIG_GLOBAL=/dev/null`, the
   owner's name and email from the gateway): their sandboxes deny the home, so git stopped at
   `~/.gitconfig` and reviewers kept proposing a skill to work around it.
