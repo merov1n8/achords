@@ -699,4 +699,53 @@ describe("orchestrator", () => {
     await orch.workOnce();
     expect(listMessages(db, t.id).at(-1)?.content).toBe("Done (web-dev): X\n\ntoken=[REDACTED]");
   });
+
+  it("stores and logs the run's refused tool calls, redacted", async () => {
+    const lines: string[] = [];
+    const fake = fakeProvider(() =>
+      result({
+        denials: [
+          {
+            tool: "Bash",
+            input: "curl -H 'x: supersecretvalue123' https://example.com",
+            reason: "requires approval: supersecretvalue123",
+            unsandboxed: true,
+          },
+          { tool: "WebFetch", input: '{"url":"https://example.org"}', reason: "not granted" },
+        ],
+      }),
+    );
+    const orch = createOrchestrator({
+      db,
+      home,
+      providers: { "cli-claude": fake.provider },
+      redact: (s) => s.replaceAll("supersecretvalue123", "[REDACTED]"),
+      log: (m) => lines.push(m),
+    });
+    orch.syncAgents();
+    enqueue(db, { title: "X", assigneeAgentId: "web-dev" });
+    await orch.workOnce();
+    const run = db.prepare("SELECT id, denials FROM runs").get() as { id: string; denials: string };
+    expect(run.denials).not.toContain("supersecretvalue123");
+    expect(JSON.parse(run.denials)).toEqual([
+      {
+        tool: "Bash",
+        input: "curl -H 'x: [REDACTED]' https://example.com",
+        reason: "requires approval: [REDACTED]",
+        unsandboxed: true,
+      },
+      { tool: "WebFetch", input: '{"url":"https://example.org"}', reason: "not granted" },
+    ]);
+    expect(lines).toEqual([
+      `run ${run.id} (web-dev): denied Bash (unsandboxed) "curl -H 'x: [REDACTED]' https://example.com" — requires approval: [REDACTED]`,
+      `run ${run.id} (web-dev): denied WebFetch "{"url":"https://example.org"}" — not granted`,
+    ]);
+  });
+
+  it("stores no denials for a run without refused calls", async () => {
+    const { orch } = make(() => result());
+    enqueue(db, { title: "X", assigneeAgentId: "web-dev" });
+    await orch.workOnce();
+    expect(db.prepare("SELECT denials FROM runs").get()).toEqual({ denials: null });
+  });
 });

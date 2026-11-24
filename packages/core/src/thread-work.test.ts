@@ -9,7 +9,7 @@ import {
   enqueueRoot,
 } from "./delegation.ts";
 import { claim, enqueue, getTask } from "./queue.ts";
-import { finishRun, listActiveRuns, startRun } from "./runs.ts";
+import { finishRun, listActiveRuns, type RunDenial, startRun } from "./runs.ts";
 import { stopThread, threadSummary } from "./thread-work.ts";
 import { createThread } from "./threads.ts";
 
@@ -103,7 +103,49 @@ describe("thread work", () => {
       costUsd: 0,
       participants: [],
       parentQuestions: [],
+      refusedCalls: [],
     });
+  });
+
+  it("lists the chat's runs with refused tool calls, oldest first", () => {
+    const { db, thread } = setup();
+    const root = enqueueRoot(db, {
+      title: "Site",
+      threadId: thread.id,
+      assigneeAgentId: "coder",
+      caller: "boss",
+    });
+    const child = enqueueChild(db, root, {
+      title: "Test",
+      caller: "coder",
+      assigneeAgentId: "tester",
+    });
+    const other = enqueue(db, { title: "Elsewhere", assigneeAgentId: "writer" });
+    const denied = {
+      tool: "Bash",
+      input: "curl x",
+      reason: "Operation not permitted",
+      unsandboxed: false,
+    };
+    const run = (taskId: string, agentId: string, denials?: RunDenial[], at = 1) => {
+      const r = startRun(db, { provider: "cli-claude", taskId, agentId }, at);
+      finishRun(db, r.id, "succeeded", denials ? { denials } : {});
+      return r.id;
+    };
+    const first = run(root.id, "coder", [denied], 1);
+    run(root.id, "coder", [], 2);
+    const second = run(child.id, "tester", [{ tool: "WebFetch", input: "{}", reason: "no" }], 3);
+    run(other.id, "writer", [denied], 4);
+    expect(threadSummary(db, thread.id).refusedCalls).toEqual([
+      { run: first, agent: "coder", name: "Coder", title: "Site", denials: [denied] },
+      {
+        run: second,
+        agent: "tester",
+        name: "Tester",
+        title: "Test",
+        denials: [{ tool: "WebFetch", input: "{}", reason: "no" }],
+      },
+    ]);
   });
 
   it("shows a child's question to its parent and the parent's answer (ADR-0066)", () => {

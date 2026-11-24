@@ -312,6 +312,8 @@ export interface OrchestratorDeps {
   claudeToken?: () => Record<string, string> | undefined;
   /** Applied to everything posted to threads (ADR-0012). */
   redact?: (text: string) => string;
+  /** The gateway's log (refused tool calls). Default: stdout with the gateway prefix. */
+  log?: (msg: string) => void;
   /** Long-term memory (ADR-0008); optional so the hub works without it. */
   memory?: Memory;
   embedder?: Embedder;
@@ -655,6 +657,7 @@ function containerMounts(
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const { db, home } = deps;
   const redact = deps.redact ?? ((s: string) => s);
+  const log = deps.log ?? ((m: string) => console.log(`${new Date().toISOString()} gateway: ${m}`));
   const agentsDir = join(home, "agents");
   /** A run's working folder: its first own folder (writable whenever it has write folders). */
   const workFolder = (m: Manifest) =>
@@ -887,6 +890,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return workflowFor(workspaceOf(task));
   };
   const projectSpace = (p: Project) => `${p.workspace}/${p.slug}`;
+  /**
+   * The run's refused tool calls, redacted for storing, and one gateway log line each, so the
+   * owner can see why an agent could not do something.
+   */
+  const refusedCalls = (runId: string, agentId: string, res: RunResult) => {
+    const denials = (res.denials ?? []).map((d) => ({
+      ...d,
+      input: redact(d.input),
+      reason: redact(d.reason),
+    }));
+    for (const d of denials) {
+      const input = d.input.length > 120 ? `${d.input.slice(0, 120)}…` : d.input;
+      log(
+        `run ${runId} (${agentId}): denied ${d.tool}${d.unsandboxed ? " (unsandboxed)" : ""} "${input}" — ${d.reason.slice(0, 200)}`,
+      );
+    }
+    return denials.length ? { denials } : {};
+  };
   /** Cost and tokens of a finished run for the spend meters (Phase 4). */
   const spendInfo = (provider: string, model: string, res: RunResult) => {
     const cost = res.usage.costUsd ?? deps.price?.(`${provider}/${model}`, res.usage) ?? null;
@@ -3165,6 +3186,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     finishRun(db, bossRun.id, res.ok ? "succeeded" : "failed", {
       ...(res.error ? { error: res.error } : {}),
       ...spendInfo(provider.id, req.model, res),
+      ...refusedCalls(bossRun.id, boss.id, res),
     });
     recordUsage(provider.id, res.windows);
     if (res.stopReason === "unavailable") {
@@ -4039,6 +4061,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         {
           ...(res.error ? { error: res.error } : {}),
           ...spendInfo(built.provider.id, built.req.model, res),
+          ...refusedCalls(run.id, manifest.id, res),
         },
       );
       recordUsage(built.provider.id, res.windows);

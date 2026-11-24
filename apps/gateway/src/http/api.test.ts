@@ -523,9 +523,11 @@ describe("HTTP API", () => {
     const thread = createThread(db, { title: "Auth" });
     const task = enqueue(db, { title: "Refactor", threadId: thread.id, assigneeAgentId: "coder" });
     const run = startRun(db, { provider: "cli-claude", taskId: task.id, agentId: "coder" });
+    const denial = { tool: "Bash", input: "curl x", reason: "Operation not permitted" };
     finishRun(db, run.id, "succeeded", {
       costUsd: 0.4,
       tokens: { input: 10, output: 5, cached: 0 },
+      denials: [denial],
     });
     budgetDay = 5;
     expect(await (await call(`/api/threads/${thread.id}/summary`)).json()).toEqual({
@@ -543,6 +545,10 @@ describe("HTTP API", () => {
       budgetDayUsd: 5,
       participants: [{ agent: "coder", name: "Coder", status: "queued" }],
       parentQuestions: [],
+      // Refused tool calls per run, for the run details.
+      refusedCalls: [
+        { run: run.id, agent: "coder", name: "Coder", title: "Refactor", denials: [denial] },
+      ],
     });
     // ADR-0066: a child's question to its parent and the answer show in the run details.
     const kid = enqueueChild(db, task, {

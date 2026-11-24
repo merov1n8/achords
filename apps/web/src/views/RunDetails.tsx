@@ -100,6 +100,27 @@ export function RunDetails(props: { summary: ThreadSummary; onStop: () => void }
           </ul>
         </div>
       )}
+      {(s.refusedCalls?.length ?? 0) > 0 && (
+        <div class="card kpi participants">
+          <div class="k">{t("chat.refusedCalls")}</div>
+          <ul class="comments">
+            {s.refusedCalls?.map((r) => (
+              <li key={r.run}>
+                <div class="muted small">
+                  {t("chat.refusedIn", { agent: r.name, title: r.title })}
+                </div>
+                {r.denials.map((d, i) => (
+                  <div key={i} class="content">
+                    <strong>{d.tool}</strong>
+                    {d.unsandboxed ? ` (${t("chat.unsandboxed")})` : ""}: <code>{d.input}</code>
+                    <div class="muted small">{d.reason}</div>
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {hasOpenWork(s) && (
         <button type="button" class="btn danger stop-run" onClick={props.onStop}>
           {t("chat.stop")}

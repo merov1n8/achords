@@ -90,7 +90,21 @@ export interface RunResult {
   /** The CLI did not find the session to resume (ADR-0066): run again with a fresh prompt. */
   resumeRejected?: boolean;
   structured?: unknown;
+  /**
+   * Tool calls the CLI refused (permission not granted, needs approval, blocked by the sandbox).
+   * Raw: the caller redacts before storing or logging.
+   */
+  denials?: Denial[];
   durationMs: number;
+}
+
+/** One refused tool call; `input` is the Bash command or short JSON of the input. */
+export interface Denial {
+  tool: string;
+  input: string;
+  reason: string;
+  /** A Bash call that asked to run outside the sandbox (dangerouslyDisableSandbox). */
+  unsandboxed?: boolean;
 }
 
 export interface ModelProvider {

@@ -15,6 +15,14 @@ export interface Run {
   startedAt: number;
 }
 
+/** A tool call the run's CLI refused; `input` and `reason` are stored redacted. */
+export interface RunDenial {
+  tool: string;
+  input: string;
+  reason: string;
+  unsandboxed?: boolean;
+}
+
 const toRun = (r: Record<string, unknown>): Run => ({
   id: r.id as string,
   taskId: r.task_id as string | null,
@@ -85,13 +93,14 @@ export function finishRun(
     error?: string;
     costUsd?: number;
     tokens?: { input: number; output: number; cached: number };
+    denials?: RunDenial[];
   },
   now = Date.now(),
 ): boolean {
   const r = db
     .prepare(
       `UPDATE runs SET status = ?, exit_code = ?, error = ?, cost_usd = ?, ended_at = ?,
-         input_tokens = ?, output_tokens = ?, cached_tokens = ?
+         input_tokens = ?, output_tokens = ?, cached_tokens = ?, denials = ?
        WHERE id = ? AND status = 'running'`,
     )
     .run(
@@ -103,6 +112,7 @@ export function finishRun(
       info.tokens?.input ?? null,
       info.tokens?.output ?? null,
       info.tokens?.cached ?? null,
+      info.denials?.length ? JSON.stringify(info.denials) : null,
       id,
     );
   return r.changes === 1;

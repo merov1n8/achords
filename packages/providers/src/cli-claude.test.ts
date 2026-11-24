@@ -136,6 +136,39 @@ describe("cli-claude adapter", () => {
     ]);
   });
 
+  it("reports refused tool calls with the call that caused them, at most once each", async () => {
+    const res = await provider("denied").run(req());
+    expect(res.ok).toBe(true);
+    expect(res.denials).toEqual([
+      {
+        tool: "Bash",
+        input: "curl https://example.com",
+        reason: "curl: (6) Could not resolve host: Operation not permitted",
+        unsandboxed: false,
+      },
+      {
+        tool: "Bash",
+        // Raw here: the orchestrator redacts before storing or logging.
+        input: "rm -rf build TOKEN=abcdefgh12345678", // gitleaks:allow (fake test fixture)
+        reason: "This command requires approval because it runs outside the sandbox",
+        unsandboxed: true,
+      },
+      // A tool that merely failed ("File does not exist.") is not a refusal.
+      {
+        tool: "WebFetch",
+        input: '{"url":"https://example.org"}',
+        reason: "Claude requested permissions to use WebFetch, but you haven't granted it yet.",
+      },
+      // Only in the result's permission_denials.
+      {
+        tool: "Write",
+        input: '{"file_path":"/etc/x","content":"y"}',
+        reason: "permission not granted",
+      },
+    ]);
+    expect((await provider().run(req())).denials).toBeUndefined();
+  });
+
   it("signals every stream event (ADR-0066 stall watcher)", async () => {
     let events = 0;
     await provider("todo").run(req({ onActivity: () => events++ }));
