@@ -38,6 +38,9 @@ describe("i18n", () => {
       "status.failed",
       "status.cancelled",
       ...["running", "queued", "waiting", "idle"].map((k) => `chat.status.${k}`),
+      ...["done", "review", "question", "command", "skillNew", "skillChange"].map(
+        (k) => `chat.tag.${k}`,
+      ),
       "appearance.theme.system",
       "appearance.theme.light",
       "appearance.theme.dark",

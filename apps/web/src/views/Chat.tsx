@@ -19,6 +19,7 @@ import { Confirm } from "../components/Modal.tsx";
 import { loadDraft, pruneDrafts, saveDraft } from "../drafts.ts";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
+import { messageTags } from "../messageTags.ts";
 import { usePoll } from "../poll.ts";
 import { useRecorder } from "../recorder.ts";
 import { canSpeak, speak, stopSpeaking } from "../speech.ts";
@@ -333,55 +334,66 @@ function Conversation(props: {
         <progress class="thread-progress" max={Math.max(s.tasksTotal, 1)} value={s.tasksDone} />
       )}
       <div class="messages">
-        {list.map((m) => (
-          <div
-            key={m.id}
-            class={`msg ${m.role}`}
-            title={m.role === "user" ? `${m.channel} · ${ago(m.createdAt)}` : undefined}
-          >
-            {/* Your own bubble shows only the text (design); the time is in its tooltip. */}
-            {m.role !== "user" && (
-              <div class="meta">
-                {m.author ?? m.role} · {m.channel} · {ago(m.createdAt)}
-                {canSpeak() && (
-                  <button
-                    type="button"
-                    class="iconbtn speak"
-                    onClick={() => {
-                      if (speaking === m.id) {
-                        stopSpeaking();
-                        setSpeaking(undefined);
-                      } else {
-                        setSpeaking(m.id);
-                        speak(m.content, () => setSpeaking((s) => (s === m.id ? undefined : s)));
-                      }
-                    }}
-                    aria-label={t(speaking === m.id ? "chat.stopReading" : "chat.readAloud")}
-                    title={t(speaking === m.id ? "chat.stopReading" : "chat.readAloud")}
-                  >
-                    {speaking === m.id ? <Square class="icon" /> : <Volume2 class="icon" />}
-                  </button>
-                )}
-              </div>
-            )}
-            {/* Agents answer in Markdown; the owner's own words stay as typed. */}
-            <MessageBody threadId={threadId} content={m.content} markdown={m.role === "agent"} />
-            {m.actions && (
-              <div class="actions">
-                {m.actions.map((a, i) => (
-                  <button
-                    key={a.data}
-                    type="button"
-                    class={`btn ${i === 0 ? "primary" : ""}`}
-                    onClick={() => runAction(a.data)}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+        {list.map((m) => {
+          const tags = messageTags(m);
+          return (
+            <div
+              key={m.id}
+              class={`msg ${m.role}`}
+              title={m.role === "user" ? `${m.channel} · ${ago(m.createdAt)}` : undefined}
+            >
+              {/* Your own bubble shows only the text (design); the time is in its tooltip. */}
+              {m.role !== "user" && (
+                <div class="meta">
+                  <span class="chip agent-tag">{tags.agent}</span>
+                  {tags.kind && (
+                    <span class={`chip kind-tag ${tags.kind}`}>{t(`chat.tag.${tags.kind}`)}</span>
+                  )}
+                  {m.channel} · {ago(m.createdAt)}
+                  {canSpeak() && (
+                    <button
+                      type="button"
+                      class="iconbtn speak"
+                      onClick={() => {
+                        if (speaking === m.id) {
+                          stopSpeaking();
+                          setSpeaking(undefined);
+                        } else {
+                          setSpeaking(m.id);
+                          speak(m.content, () => setSpeaking((s) => (s === m.id ? undefined : s)));
+                        }
+                      }}
+                      aria-label={t(speaking === m.id ? "chat.stopReading" : "chat.readAloud")}
+                      title={t(speaking === m.id ? "chat.stopReading" : "chat.readAloud")}
+                    >
+                      {speaking === m.id ? <Square class="icon" /> : <Volume2 class="icon" />}
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* Agents answer in Markdown; the owner's own words stay as typed. */}
+              <MessageBody
+                threadId={threadId}
+                content={tags.content}
+                markdown={m.role === "agent"}
+              />
+              {m.actions && (
+                <div class="actions">
+                  {m.actions.map((a, i) => (
+                    <button
+                      key={a.data}
+                      type="button"
+                      class={`btn ${i === 0 ? "primary" : ""}`}
+                      onClick={() => runAction(a.data)}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
         {waiting && <div class="msg agent muted">{t("chat.thinking")}</div>}
         <div ref={end} />
       </div>

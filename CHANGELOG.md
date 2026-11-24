@@ -12,6 +12,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   last review, as a normal send-back would (your decision does not count toward the limit), and
   "Accept, move to Done" moves the card past review as your own move. Replying in the chat
   still works.
+- Chat messages show the speaking agent as a tag at the start of the header, with a small kind
+  tag (Done, Review, Question, Command) instead of repeating the name in the text; skill
+  proposals carry a "New skill" or "Skill update" tag.
 - Commits agents make carry no `Co-Authored-By` lines: claude runs have the CLI's attribution off
   and a hook that refuses such commands, codex and gemini runs get a git hook that strips them.
 - Attention cues: a chat with a new agent reply since you last opened it shows its title a bit
