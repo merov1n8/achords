@@ -9,6 +9,7 @@ import {
   Trash2,
 } from "lucide-preact";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { attention, loadSeen } from "../alerts.ts";
 import { api } from "../api.ts";
 import { Confirm, Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
@@ -223,26 +224,41 @@ export function ChatList(props: { activeId?: string | undefined; onNew: () => vo
   );
   const projects = usePoll(() => api<Project[]>("/api/projects"), 60000);
   const all = threads.data ?? [];
+  // Read marks are kept by the reply alerts (alerts.ts); opening a chat updates them.
+  const seen = loadSeen();
 
-  const item = (th: Thread) => (
-    <div key={th.id} class={`threadrow ${th.id === props.activeId ? "active" : ""}`}>
-      <a
-        class="chatrow"
-        href={`/chat/${th.id}`}
-        aria-current={th.id === props.activeId ? "page" : undefined}
-      >
-        <span class="t">
-          {th.pinned && <Pin class="icon pin" aria-label={t("chats.pinned")} />}
-          {th.title ?? t("chat.untitled")}
-        </span>
-        <span class="m">
-          {th.lastAgent ? `${th.lastAgent} · ` : ""}
-          {ago(th.updatedAt)}
-        </span>
-      </a>
-      <ThreadMenu thread={th} onChange={threads.refresh} />
-    </div>
-  );
+  const item = (th: Thread) => {
+    const cue = attention(th, seen, props.activeId);
+    return (
+      <div key={th.id} class={`threadrow ${th.id === props.activeId ? "active" : ""}`}>
+        <a
+          class={`chatrow ${cue ? "unread" : ""}`}
+          href={`/chat/${th.id}`}
+          aria-current={th.id === props.activeId ? "page" : undefined}
+        >
+          <span class="t">
+            {cue === "waiting" && (
+              <span
+                class="attn"
+                role="img"
+                aria-label={t("common.waitingOwner")}
+                title={t("common.waitingOwner")}
+              >
+                !
+              </span>
+            )}
+            {th.pinned && <Pin class="icon pin" aria-label={t("chats.pinned")} />}
+            {th.title ?? t("chat.untitled")}
+          </span>
+          <span class="m">
+            {th.lastAgent ? `${th.lastAgent} · ` : ""}
+            {ago(th.updatedAt)}
+          </span>
+        </a>
+        <ThreadMenu thread={th} onChange={threads.refresh} />
+      </div>
+    );
+  };
   const heading = (text: string) => <div class="sub-heading">{text}</div>;
 
   let body: preact.ComponentChildren;

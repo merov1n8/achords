@@ -9,6 +9,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - Commits agents make carry no `Co-Authored-By` lines: claude runs have the CLI's attribution off
   and a hook that refuses such commands, codex and gemini runs get a git hook that strips them.
+- Attention cues: a chat with a new agent reply since you last opened it shows its title a bit
+  bolder in the chat list, with a "!" badge when it waits for your answer (a question or approval
+  buttons); opening the chat clears both until something new arrives. A Kanban card waiting for
+  your answer has a light accent tint and a stronger border, and a card that belongs to a chat
+  has a chat button in its bottom-right corner.
 - Unsent text in a chat's message box is kept per chat in the browser: switching to another chat
   or page and back brings it back (drafts older than 30 days are dropped).
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
