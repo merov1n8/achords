@@ -829,6 +829,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       env: {
         ...GIT_SHELL_ENV,
         ...(cache ? { ...hostShellEnv(cache), ...deps.gitIdentity?.() } : {}),
+        // Codex and Gemini sandboxes deny the user's home, so git would stop at ~/.gitconfig.
+        // They pass this variable through (claude's env scrub would drop it); the owner's name
+        // and email come from the gateway instead.
+        ...(/^cli-(codex|gemini)\//.test(model)
+          ? { GIT_CONFIG_GLOBAL: "/dev/null", ...deps.gitIdentity?.() }
+          : {}),
         ...pay?.env,
       },
       ...(pay ? { billing: pay.mode } : {}),

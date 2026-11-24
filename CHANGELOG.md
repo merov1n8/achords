@@ -95,6 +95,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Codex and Gemini runs give git a neutral global config (`GIT_CONFIG_GLOBAL=/dev/null`, the
+  owner's name and email from the gateway): their sandboxes deny the home, so git stopped at
+  `~/.gitconfig` and reviewers kept proposing a skill to work around it.
 - Level 4 shells on the host ran no command that writes ("requires approval"): with the login
   token scrubbed from the shell the CLI stops auto-allowing sandboxed commands, so host sandbox
   runs now get a plain Bash rule; commands still run only inside the sandbox (ADR-0067).
