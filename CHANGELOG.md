@@ -34,6 +34,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   Agents without a level keep their requests; their buttons are now Once and For this card (the
   former "This task"/Approve, still 4 hours), with Always for commands as before.
 - Force pushes and git history rewrites are refused for every agent.
+- `pnpm achords levels migrate` moves your agents to permission levels (ADR-0067). Run it
+  first as is: it only prints a report (per agent: its level, the rights it gains and loses,
+  the one-off commands collected in its shell list that are dropped, the exceptions set and
+  any warnings). Read it, then run `pnpm achords levels migrate --write`: each `agent.yaml`
+  is backed up next to your other backups (`backup-<agent>-agent-<time>.yaml` in the data
+  folder), gets its level, keeps its folders, integrations, models and documentation hosts
+  and loses `tools`, `shell`, `network: ["*"]` and `container`; the report is saved as
+  `levels-migration-<time>.txt`. Agents in the approved starting assignment get their level
+  (game-dev with its Unity editor as the one command outside the sandbox, 3d-designer with its
+  shell next to its keyed integrations); any other agent gets the highest level that gives it
+  nothing new, or is left unchanged when none does. The boss and agents that already have a
+  level are skipped, so running it again changes nothing. No gateway restart is needed. New
+  installs ship web-dev at level 4. Agents without a level keep working as before, and
+  `achords doctor` warns when an agent has a level and the old lists side by side.
 - Live sites and accounts of secured projects are read-only for every agent (ADR-0067): no
   level, approval (your Approve button included), override or full access lets an agent write
   to them. Writes go only to targets you tag `staging`; work meant for live is handed to you as

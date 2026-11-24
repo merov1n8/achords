@@ -5,10 +5,9 @@ role: web-dev
 workspace: web-clients
 models:
   default: cli-claude/sonnet
-tools: [Read, Edit, Write, Glob, Grep, Bash]
+# Builder (ADR-0067): free shell in a sandbox, local git, build, test and packages, in its folder.
+level: 4
 fs:
   write: ["{{ACHORDS_HOME}}/workspaces/web-clients"]
-shell:
-  allow: ["git status", "git diff", "git log", "ls", "npm test", "pnpm test"]
 budget:
   per_run_usd: 2

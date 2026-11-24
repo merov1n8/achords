@@ -54,6 +54,28 @@ function fakeProvider(reply: (req: RunRequest) => RunResult) {
   return { provider, calls };
 }
 
+// web-dev as shipped before ADR-0067 (lists, no level): the list flows still serve unmigrated
+// installs.
+const legacyWebDev = (home: string) =>
+  writeFileSync(
+    join(home, "agents", "web-dev", "agent.yaml"),
+    `# Web developer for client work. Works only inside its workspace folder.
+id: web-dev
+name: Web developer
+role: web-dev
+workspace: web-clients
+models:
+  default: cli-claude/sonnet
+tools: [Read, Edit, Write, Glob, Grep, Bash]
+fs:
+  write: ["${home}/workspaces/web-clients"]
+shell:
+  allow: ["git status", "git diff", "git log", "ls", "npm test", "pnpm test"]
+budget:
+  per_run_usd: 2
+`,
+  );
+
 describe("seedAgents", () => {
   let home: string;
   beforeEach(() => {
@@ -67,6 +89,9 @@ describe("seedAgents", () => {
     const yaml = readFileSync(join(agents, "web-dev", "agent.yaml"), "utf8");
     expect(yaml).toContain(`${home}/workspaces/web-clients`);
     expect(yaml).not.toContain("{{ACHORDS_HOME}}");
+    // New installs start leveled (ADR-0067).
+    expect(yaml).toMatch(/^level: 4$/m);
+    expect(yaml).not.toMatch(/^(tools|shell|network|container):/m);
 
     writeFileSync(join(agents, "web-dev", "AGENT.md"), "local edit");
     expect(seedAgents(SEED_DIR, agents, home)).toEqual([]);
@@ -225,6 +250,7 @@ describe("orchestrator", () => {
       remove: { shell: ["npm test"] },
       reason: "the owner wants web-dev to read WordPress docs",
     };
+    legacyWebDev(home);
     const { orch, calls } = make(boss({ action: "change_agent", message: "Javasoltam.", change }));
     const t = createThread(db, {});
     expect(await orch.handleMessage(t.id, "web-dev olvashassa a WP doksit", "web")).toBe(
@@ -524,6 +550,7 @@ describe("orchestrator", () => {
   });
 
   it("worker runs the sub-agent from its manifest and reports done in the thread", async () => {
+    legacyWebDev(home);
     const { orch, calls } = make(() => result({ text: "Kész: index.html a workspace-ben." }));
     const t = createThread(db, {});
     const task = enqueue(db, {

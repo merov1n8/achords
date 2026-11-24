@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { type Document, parseDocument, stringify } from "yaml";
+import { type Document, isMap, parseDocument, stringify } from "yaml";
 import { containerModelProblem } from "./check.ts";
 import { type Manifest, parseManifest } from "./manifest.ts";
 
@@ -189,6 +189,12 @@ export interface AgentPatch {
   add?: Partial<Record<AgentListField, string[] | undefined>>;
   remove?: Partial<Record<AgentListField, string[] | undefined>>;
   defaultModel?: string;
+  /** ADR-0067 migration: the level and remit exceptions, placed right after `models`. */
+  level?: number;
+  unsandboxed?: string[];
+  keys_beside_host_shell?: boolean;
+  /** ADR-0067 migration: top-level fields the level replaces. */
+  drop?: ("tools" | "shell" | "network" | "container")[];
 }
 
 /**
@@ -221,6 +227,26 @@ export function patchManifestText(text: string, patch: AgentPatch, source = "age
     doc.setIn(path, fresh);
   }
   if (patch.defaultModel) doc.setIn(["models", "default"], patch.defaultModel);
+  for (const key of patch.drop ?? []) doc.deleteIn([key]);
+  const after: [string, unknown][] = [
+    ["level", patch.level],
+    ["unsandboxed", patch.unsandboxed],
+    ["keys_beside_host_shell", patch.keys_beside_host_shell],
+  ];
+  // Inserted in order after `models` (where an owner looks for the model and the level).
+  let at = isMap(doc.contents)
+    ? doc.contents.items.findIndex((p) => String(p.key) === "models")
+    : -1;
+  for (const [key, value] of after) {
+    if (value === undefined) continue;
+    const node = doc.createNode(value, { flow: true });
+    if (!isMap(doc.contents) || doc.has(key) || at < 0) {
+      doc.set(key, node);
+      continue;
+    }
+    at += 1;
+    (doc.contents.items as unknown[]).splice(at, 0, doc.createPair(key, node));
+  }
   // The container choice only exists next to "*" (ADR-0051) or a shell (ADR-0055).
   const allow = (
     doc.getIn(["network", "allow"]) as { toJSON?: () => unknown } | undefined

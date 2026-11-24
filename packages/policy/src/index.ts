@@ -82,12 +82,25 @@ export {
 } from "./levels.ts";
 export { isSecured, LIVE_HINT, type LiveGuard, liveGuard, liveRefusal } from "./live.ts";
 export {
+  legacyBesideLevel,
   loadAgents,
   loadManifest,
   type Manifest,
   manifestSchema,
   parseManifest,
 } from "./manifest.ts";
+export {
+  type AgentPlan,
+  isLiteralCommand,
+  legacyRights,
+  levelRights,
+  planAgentMigration,
+  type Rights,
+  STARTING_LEVELS,
+  unityBinaries,
+  WITHOUT_LEVEL,
+  withinRights,
+} from "./migrate.ts";
 export { allowRules, openWeb, siteOf, webFetchSettings } from "./permissions.ts";
 export { costOf, loadPricing, type Pricing } from "./pricing.ts";
 export {
