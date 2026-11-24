@@ -241,6 +241,38 @@ describe("integration launcher (ADR-0034)", () => {
     });
   });
 
+  it("asks the owner for tools listed in review even in auto mode (ADR-0067)", async () => {
+    const echo =
+      "require('readline').createInterface({input: process.stdin}).on('line', (l) => console.log(JSON.stringify({ jsonrpc: '2.0', id: JSON.parse(l).id, result: { saw: JSON.parse(l).params?.name } })))";
+    const call = (id: number, name: string) =>
+      JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: {} } });
+    scoped = {
+      command: process.execPath,
+      args: ["-e", echo],
+      env: {},
+      files: {},
+      publish: {
+        integration: "social",
+        mode: "auto",
+        tools: ["publish_post", "boost_post"],
+        review: ["boost_post"],
+        token: "pub",
+      },
+    };
+    const r = await launch("good", [call(1, "publish_post"), call(2, "boost_post"), ""].join("\n"));
+    const lines = r.out
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines.filter((l) => l.result?.saw).map((l) => l.result.saw)).toEqual(["publish_post"]);
+    for (let i = 0; i < 50 && published.length < 2; i++)
+      await new Promise((r) => setTimeout(r, 20));
+    expect(published.map((p) => [p.path, p.body.tool]).sort()).toEqual([
+      ["/api/agent/publish", "boost_post"],
+      ["/api/agent/publish_log", "publish_post"],
+    ]);
+  });
+
   it("marks results of client accounts as third-party data (ADR-0038)", async () => {
     scoped = {
       command: process.execPath,

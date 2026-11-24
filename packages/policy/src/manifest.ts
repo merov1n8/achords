@@ -54,6 +54,10 @@ export const manifestSchema = z
     unsandboxed: z
       .array(z.string().refine(isAbsolute, "must be an absolute path to an executable"))
       .optional(),
+    // ADR-0067 owner-approved exception (until ADR-0055 stage 2): a level 4+ shell stays in the
+    // CLI's host sandbox next to keyed integrations (served on the gateway's side) instead of
+    // moving into a container, so local apps stay reachable.
+    keys_beside_host_shell: z.boolean().optional(),
     tools: z.array(z.string().min(1)).default([]),
     mcp: z.array(z.string().min(1)).default([]),
     fs: z

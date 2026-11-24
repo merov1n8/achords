@@ -69,7 +69,13 @@ export function enqueueChild(
 export function enqueueSuccessor(
   db: Db,
   caller: Task,
-  input: { title: string; description?: string; assigneeAgentId?: string; caller: string },
+  input: {
+    title: string;
+    description?: string;
+    assigneeAgentId?: string;
+    caller: string;
+    runMode?: "accounts" | "web";
+  },
   now = Date.now(),
 ): Task {
   return transaction(db, () => {
@@ -77,8 +83,8 @@ export function enqueueSuccessor(
       .prepare(
         `INSERT INTO tasks (id, thread_id, parent_id, root_id, depth, agent_chain, title,
            description, assignee_agent_id, max_attempts, sensitivity, project, continues_from,
-           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+           run_mode, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(
         randomUUID(),
@@ -94,6 +100,7 @@ export function enqueueSuccessor(
         caller.sensitivity,
         caller.project,
         caller.id,
+        input.runMode ?? null,
         now,
         now,
       );

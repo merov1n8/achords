@@ -31,6 +31,18 @@ export {
 } from "./catalog.ts";
 export * from "./check.ts";
 export {
+  type CompiledIntegration,
+  type CompiledLevel,
+  type CompileInput,
+  compileLevel,
+  hostSandboxSettings,
+  levelConflicts,
+  REGISTRY_HOSTS,
+  type RunMode,
+  type SandboxKind,
+  SHELL_DENY,
+} from "./compile.ts";
+export {
   AGENT_LIST_FIELDS,
   type AgentFields,
   type AgentListField,

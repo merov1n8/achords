@@ -30,7 +30,7 @@ import {
   startRun,
   upsertAgent,
 } from "@achords/core";
-import { loadCatalog } from "@achords/policy";
+import { createProject, loadCatalog } from "@achords/policy";
 import { openVault, type Vault } from "@achords/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMcpTickets, createRunTokens } from "../mcp/tokens.ts";
@@ -1402,6 +1402,36 @@ describe("HTTP API", () => {
       404,
     );
     expect((await call("/api/agents/nobody")).status).toBe(404);
+  });
+
+  it("an agent with a level shows its effective level per project and why (ADR-0067)", async () => {
+    const { call } = await pair();
+    mkdirSync(join(agentsDir, "maker"));
+    writeFileSync(
+      join(agentsDir, "maker", "agent.yaml"),
+      "id: maker\nname: Maker\nrole: maker\nworkspace: shared\nmodels:\n  default: cli-claude/sonnet\nlevel: 5\nmcp: [meshy, blender]\nunsandboxed: [/opt/blender/Blender]\n",
+    );
+    createProject(projectsDir, { slug: "client", name: "Client", workspace: "shared" });
+    const a = (await (await call("/api/agents/maker")).json()) as Record<string, unknown>;
+    expect(a.level).toBe(5);
+    expect(a.unsandboxed).toEqual(["/opt/blender/Blender"]);
+    expect(a.effectiveLevels).toEqual(
+      expect.arrayContaining([
+        { project: "client", name: "Client", level: 4, reason: "ceiling" },
+        { project: "own", name: "Own accounts", level: 5, reason: "base" },
+      ]),
+    );
+    // Meshy holds a key and Blender is a local app: a level 4+ shell cannot have both.
+    expect(a.conflicts).toEqual([expect.stringMatching(/Blender on this Mac cannot be reached/)]);
+    writeFileSync(
+      join(agentsDir, "maker", "agent.yaml"),
+      "id: maker\nname: Maker\nrole: maker\nworkspace: shared\nmodels:\n  default: cli-claude/sonnet\nlevel: 4\nmcp: [meshy, blender]\nkeys_beside_host_shell: true\n",
+    );
+    const b = (await (await call("/api/agents/maker")).json()) as Record<string, unknown>;
+    expect(b.keys_beside_host_shell).toBe(true);
+    expect(b.conflicts).toEqual([]);
+    // Agents without a level show none of it.
+    expect((await (await call("/api/agents/boss")).json()).effectiveLevels).toBeUndefined();
   });
 
   it("agents: rename, create (deny-by-default, validated), and form options", async () => {

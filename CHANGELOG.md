@@ -5,6 +5,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- Permission levels now decide what an agent may do (ADR-0067), for agents that have a `level`
+  (agents without one work exactly as before): what it may read, write, fetch and run, which
+  account tools it gets and which ones ask you first. Spending and changes to live targets ask
+  you below level 5. An agent that has both web access and account tools works on its accounts
+  or on the web per task, never both at once, and switches by handing the work to itself. A
+  level 4 shell runs in a sandbox: Apple's container, or on this Mac in Claude's own sandbox,
+  which cannot read your keys or achords' data; when neither is possible the agent works at
+  level 3 and the chat says why. Level 0 agents get no work. The agent page shows the
+  effective level per project.
+- Force pushes and git history rewrites are refused for every agent.
+
 ### Fixed
 
 - A review ended in silence: the reviewer's verdict was not shown anywhere, and a card it sent

@@ -55,7 +55,15 @@ export interface Task {
   /** Handoff (ADR-0055): the earlier step whose work this task continues. */
   continuesFrom: string | null;
   /** Handoff asked for during the run; the successor is created when the run ends well. */
-  handoff: { agent: string; title: string; instructions: string } | null;
+  handoff: {
+    agent: string;
+    title: string;
+    instructions: string;
+    /** ADR-0067: a handoff to the same agent switches its run mode. */
+    mode?: "accounts" | "web";
+  } | null;
+  /** ADR-0067: the half of a split run this task works in (null = accounts). */
+  runMode: "accounts" | "web" | null;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
@@ -67,6 +75,7 @@ const toTask = (r: Record<string, unknown>): Task => ({
   parked: Number(r.parked) === 1,
   continuesFrom: (r.continues_from as string | null) ?? null,
   handoff: r.handoff ? (JSON.parse(String(r.handoff)) as Task["handoff"]) : null,
+  runMode: (r.run_mode as Task["runMode"] | undefined) ?? null,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),

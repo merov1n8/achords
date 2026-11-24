@@ -77,13 +77,16 @@ import {
   createAgentFiles,
   createProject,
   deleteSkill,
+  effectiveLevel,
   type IntegrationStatus,
   isSkillName,
   isSkillScope,
   isSkillWorkspace,
+  levelConflicts,
   listSkills,
   loadAgents,
   loadManifest,
+  loadOverrides,
   loadOwnAccounts,
   loadProjects,
   OWN,
@@ -101,6 +104,7 @@ import {
   updateManifestModels,
   updateManifestName,
   updateProject,
+  visibleSkills,
   writeSkill,
 } from "@achords/policy";
 import { createGoogleSignins, parseClientJson, type Vault } from "@achords/secrets";
@@ -1488,6 +1492,7 @@ export function createApiHandler(deps: ApiDeps) {
           delegation: m.delegation,
           ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
           ...(m.effort ? { effort: m.effort } : {}),
+          ...(m.level !== undefined ? levelInfo(m) : {}),
           doc: existsSync(docPath) ? readFileSync(docPath, "utf8") : "",
           // Aliases always run the newest model of a family; local models as pulled.
           suggestions: [
@@ -1814,6 +1819,38 @@ export function createApiHandler(deps: ApiDeps) {
       ...(b.effort
         ? { effort: str(b.effort, "effort", 10) as NonNullable<AgentFields["effort"]> }
         : {}),
+    };
+  };
+  /**
+   * ADR-0067: the agent's level, its effective level per project and why (no project = the
+   * owner's own work, experimental), and remit setups that cannot work as compiled.
+   */
+  const levelInfo = (m: ReturnType<typeof loadManifest>) => {
+    const base = m.level as number;
+    const overrides = deps.home ? loadOverrides(deps.home) : [];
+    const enabledSkills = deps.home
+      ? visibleSkills(join(deps.home, "skills"), m.workspace, m.id).map((x) => x.name)
+      : [];
+    const projects = deps.projectsDir ? [...loadProjects(deps.projectsDir).values()] : [];
+    const where = [
+      ...projects.map((p) => ({ slug: p.slug, name: p.name, class: p.class })),
+      { slug: OWN, name: "Own accounts", class: "experimental" as const },
+    ];
+    return {
+      level: base,
+      ...(m.unsandboxed ? { unsandboxed: m.unsandboxed } : {}),
+      ...(m.keys_beside_host_shell ? { keys_beside_host_shell: true } : {}),
+      effectiveLevels: where.map((p) => ({
+        project: p.slug,
+        name: p.name,
+        ...effectiveLevel({
+          base,
+          override: overrides.find((o) => o.agent === m.id && o.project === p.slug),
+          projectClass: p.class,
+          enabledSkills,
+        }),
+      })),
+      conflicts: deps.catalog ? levelConflicts(m, deps.catalog()) : [],
     };
   };
   const manifestPath = (id: string) => {

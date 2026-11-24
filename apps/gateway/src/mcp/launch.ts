@@ -43,7 +43,14 @@ const launch = (await res.json()) as {
   env: Record<string, string>;
   files?: Record<string, Record<string, string>>;
   scope?: CallScope;
-  publish?: { integration: string; mode: "review" | "auto"; tools: string[]; token: string };
+  publish?: {
+    integration: string;
+    mode: "review" | "auto";
+    tools: string[];
+    // ADR-0067: tools that always ask the owner, whatever the mode (live and spend below level 5).
+    review?: string[];
+    token: string;
+  };
   untrusted?: string;
   remote?: { url: string; headers: Record<string, string> };
   cwd?: string;
@@ -173,7 +180,7 @@ if (proxied) {
         return;
       }
       if (m.method === "tools/call" && publish?.tools.includes(tool)) {
-        if (publish.mode === "review") {
+        if (publish.mode === "review" || publish.review?.includes(tool)) {
           // The server never sees it; the owner approves exactly these arguments.
           void toHub("/api/agent/publish", {
             integration: publish.integration,

@@ -78,9 +78,28 @@ const SHELL_META = /[;&|`$<>(){}\n\r\\*?[\]!~]/;
 
 const tokens = (cmd: string) => cmd.trim().split(/\s+/).filter(Boolean);
 
+const FORCE_FLAG = /^(-f|--force|--force-with-lease(=.*)?|--mirror)$/;
+
+/**
+ * ADR-0067: force push and history rewrite are refused at every level, under every approval.
+ * Returns the reason, or undefined.
+ */
+export function historyRewrite(command: string): string | undefined {
+  const argv = tokens(command);
+  const git = argv.indexOf("git");
+  if (git < 0) return undefined;
+  const sub = argv[git + 1];
+  if (sub === "filter-branch" || sub === "filter-repo") return `git ${sub} rewrites history`;
+  if (sub === "push" && argv.slice(git + 2).some((a) => FORCE_FLAG.test(a)))
+    return "force push is refused at every level";
+  return undefined;
+}
+
 /** Allow-listed commands run directly (extra arguments allowed); everything else needs approval. */
 export function checkShell(m: Manifest, command: string): ShellDecision {
   if (!m.shell) return { decision: "deny", reason: "agent has no shell access" };
+  const rewrite = historyRewrite(command);
+  if (rewrite) return { decision: "deny", reason: rewrite };
   if (SHELL_META.test(command)) {
     return { decision: "approval", reason: "shell metacharacters need approval" };
   }
