@@ -62,6 +62,7 @@ import {
   listChildren,
   listComments,
   listMessages,
+  type Message,
   markScheduleRun,
   markStallNoticed,
   moveCard,
@@ -218,6 +219,35 @@ const modelOutKey = (model: string) => `model_out:${model}`;
 const BUDGET_DEFER_MS = 30 * 60_000;
 // Reworks a reviewer may ask for before the card waits for the owner (ADR-0062).
 const MAX_SEND_BACKS = 3;
+// What other agents posted in the chat, for a resumed session: the newest few, each cut short.
+const NEW_IN_CHAT = 10;
+const NEW_IN_CHAT_CHARS = 4000;
+// Messages that ask the owner to press a button: decisions for the owner, not news for agents.
+const REQUEST_KEYS = [
+  "thread.commandRequest",
+  "thread.accessRequest",
+  "thread.permissionRequest",
+  "thread.publishRequest",
+  "thread.proposal",
+  "thread.changeProposal",
+];
+/** Matches a message made from the template `key`; `vars` pins placeholders, others match anything. */
+const templateRe = (key: string, vars: Record<string, string> = {}) =>
+  new RegExp(
+    `^${t(key)
+      .split(/(\{\w+\})/)
+      .map((p, i) => {
+        if (i % 2 === 0) return p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const v = vars[p.slice(1, -1)];
+        return v === undefined ? "[\\s\\S]*?" : v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      })
+      .join("")}`,
+  );
+/** A review verdict as reviewFinished posts it, under the reviewer's name (ADR-0062). */
+const isReview = (m: Pick<Message, "role" | "author" | "content">) =>
+  m.role === "agent" &&
+  !!m.author &&
+  templateRe("thread.reviewed", { agent: m.author }).test(m.content);
 const SUMMARY_CHARS = 1500;
 // In-memory signs of life (claims, stream events) older than this are covered by the database.
 const ACTIVITY_KEEP_MS = 24 * 60 * 60_000;
@@ -1026,6 +1056,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ? projects().get(task.project)?.workspace
         : undefined) ?? "shared";
   const pendingKey = (taskId: string) => `pending_move:${taskId}`;
+  // ADR-0062: a card at the send-back limit, waiting for the owner's decision on its last review.
+  const reviewKey = (taskId: string) => `pending_review:${taskId}`;
   const accessKey = (taskId: string) => `pending_access:${taskId}`;
   const commandKey = (id: string) => `pending_cmd:${id}`;
   const checksKey = (taskId: string) => `checks:${taskId}`;
@@ -1376,10 +1408,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (review.agentChain.at(-1) !== "workflow" || !review.parentId) return;
     const card = getTask(db, review.parentId);
     if (!card) return;
-    const say = (text: string, author = BOSS_ID) => {
-      if (card.threadId) post(card.threadId, text, author);
-    };
-    say(t("thread.reviewed", { agent: reviewer, title: card.title, result: verdict }), reviewer);
+    if (card.threadId) {
+      post(
+        card.threadId,
+        t("thread.reviewed", { agent: reviewer, title: card.title, result: verdict }),
+        reviewer,
+      );
+    }
     const wf = workflowForTask(card);
     if (card.column !== wf.start || card.status !== "done" || !card.assigneeAgentId) return;
     // Two agents that never agree would pass the card back and forth for ever.
@@ -1391,19 +1426,67 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         .get(card.id, wf.start)?.n ?? 0,
     );
     if (sentBack > MAX_SEND_BACKS) {
-      say(t("thread.reviewLimit", { title: card.title, n: sentBack }));
+      // The owner decides: continue with this review, or accept the work as it is.
+      setSetting(db, reviewKey(card.id), JSON.stringify({ reviewer, verdict }));
+      if (card.threadId) {
+        appendMessage(db, {
+          threadId: card.threadId,
+          role: "agent",
+          author: BOSS_ID,
+          channel: "system",
+          content: t("thread.reviewLimit", { title: card.title, n: sentBack }),
+          actions: [
+            { label: t("action.reviewContinue"), data: `review:continue:${card.id}` },
+            { label: t("action.reviewAccept"), data: `review:accept:${card.id}` },
+          ],
+        });
+      }
       return;
     }
+    sendBack(card, card.assigneeAgentId, reviewer, verdict);
+  };
+
+  /** The card's agent continues with what the review found, on the same card (ADR-0062). */
+  const sendBack = (card: Task, agent: string, reviewer: string, verdict: string) => {
+    const wf = workflowForTask(card);
     const next = enqueueSuccessor(db, card, {
       title: card.title,
       description: `${card.description ?? ""}\n\n${reviewer} reviewed this work and sent it back. Fix what the review found, then report what you changed.\n\nThe review:\n${verdict}`,
-      assigneeAgentId: card.assigneeAgentId,
+      assigneeAgentId: agent,
       caller: reviewer,
     });
     // The same card carries on (ADR-0059).
     takeOverCard(db, card.id, next.id, wf.start, "system");
     carryCardSessions(db, home, cardKey(card), cardKey(next));
-    say(t("thread.sentBack", { agent: card.assigneeAgentId }));
+    if (card.threadId) post(card.threadId, t("thread.sentBack", { agent }));
+  };
+
+  /** The owner moves a card (drag & drop, or a decision button). */
+  const moveByOwner = (
+    taskId: string,
+    from: string,
+    to: string,
+  ): { ok: true; override: boolean } | { ok: false; reason: string } => {
+    const target = getTask(db, taskId);
+    if (!target?.column) return { ok: false, reason: "no such card" };
+    if (target.column !== from) return { ok: false, reason: "the card was moved meanwhile" };
+    const wf = workflowForTask(target);
+    const check = checkMove(wf, { assignee: target.assigneeAgentId, column: from }, to, {
+      kind: "owner",
+    });
+    if (!check.ok) return check;
+    if (!moveCard(db, { taskId, from, to, actor: "owner", override: check.override })) {
+      return { ok: false, reason: "the card was moved meanwhile" };
+    }
+    // The owner decided; a parked agent move or review decision for this card is obsolete.
+    setSetting(db, pendingKey(taskId), "");
+    clearActions(db, "move:", taskId);
+    setSetting(db, reviewKey(taskId), "");
+    clearActions(db, "review:", taskId);
+    enterColumn(target, to, wf);
+    // ADR-0066: a working column starts the assignee; agent and system moves never do.
+    if (wf.on_enter[to]?.start === "assignee") dispatchCard(taskId, to);
+    return { ok: true, override: check.override };
   };
 
   /**
@@ -1710,26 +1793,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return { ok: true };
     },
 
-    ownerMove(taskId, from, to) {
-      const target = getTask(db, taskId);
-      if (!target?.column) return { ok: false, reason: "no such card" };
-      if (target.column !== from) return { ok: false, reason: "the card was moved meanwhile" };
-      const wf = workflowForTask(target);
-      const check = checkMove(wf, { assignee: target.assigneeAgentId, column: from }, to, {
-        kind: "owner",
-      });
-      if (!check.ok) return check;
-      if (!moveCard(db, { taskId, from, to, actor: "owner", override: check.override })) {
-        return { ok: false, reason: "the card was moved meanwhile" };
-      }
-      // The owner decided; a parked agent move for this card is obsolete.
-      setSetting(db, pendingKey(taskId), "");
-      clearActions(db, "move:", taskId);
-      enterColumn(target, to, wf);
-      // ADR-0066: a working column starts the assignee; agent and system moves never do.
-      if (wf.on_enter[to]?.start === "assignee") dispatchCard(taskId, to);
-      return { ok: true, override: check.override };
-    },
+    ownerMove: (taskId, from, to) => moveByOwner(taskId, from, to),
 
     runAction(data) {
       const skill = /^skill:(approve|reject):([\w-]{1,36})$/.exec(data);
@@ -2025,6 +2089,34 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               message: t(approve ? "action.approved" : "action.rejected", { agent: out.agentId }),
             }
           : { ok: false, message: out.reason };
+      }
+      const review = /^review:(continue|accept):([\w-]{1,36})$/.exec(data);
+      if (review) {
+        const taskId = review[2] as string;
+        const raw = getSetting(db, reviewKey(taskId));
+        const card = getTask(db, taskId);
+        setSetting(db, reviewKey(taskId), "");
+        clearActions(db, "review:", taskId);
+        const wf = card && workflowForTask(card);
+        // A typed reply may have put the card to work meanwhile: nothing is left to decide.
+        if (!raw || !card?.assigneeAgentId || !wf || card.column !== wf.start) {
+          return { ok: false, message: t("action.noPendingReview") };
+        }
+        if (review[1] === "accept") {
+          // The column after review (done in the default workflow), as the owner's own move.
+          const to = wf.columns[wf.columns.indexOf(wf.finish) + 1] ?? wf.finish;
+          const r = moveByOwner(taskId, card.column, to);
+          if (!r.ok) return { ok: false, message: r.reason };
+          return { ok: true, message: t("action.reviewAccepted", { title: card.title, to }) };
+        }
+        if (card.status !== "done") return { ok: false, message: t("action.noPendingReview") };
+        // The owner's decision: the send-back limit is for agents, not for the owner.
+        const p = JSON.parse(raw) as { reviewer: string; verdict: string };
+        sendBack(card, card.assigneeAgentId, p.reviewer, p.verdict);
+        return {
+          ok: true,
+          message: t("action.reviewContinued", { agent: card.assigneeAgentId }),
+        };
       }
       const move = /^move:(approve|reject):([\w-]{1,36})$/.exec(data);
       if (!move) return { ok: false, message: t("action.unknown") };
@@ -3644,22 +3736,33 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // Messages stay whole (a pasted document must arrive complete); past the total the
       // oldest drop out, but the latest one is always there.
       const chat: string[] = [];
+      let lastReview = "";
       if (!task.parentId && task.threadId && !task.roomId) {
         let total = 0;
-        const recent = listMessages(db, task.threadId)
-          .filter((m) => m.visibility === "normal" && m.createdAt <= task.createdAt)
-          .slice(-CHAT_CONTEXT)
-          .reverse();
-        for (const m of recent) {
-          const line = `${m.role === "user" ? "owner" : (m.author ?? m.role)}: ${m.content}`;
-          if (chat.length && total + line.length > CHAT_TOTAL) break;
-          total += line.length;
-          chat.unshift(line);
+        const shown = listMessages(db, task.threadId).filter(
+          (m) => m.visibility === "normal" && m.createdAt <= task.createdAt,
+        );
+        const line = (m: Message) =>
+          `${m.role === "user" ? "owner" : (m.author ?? m.role)}: ${m.content}`;
+        for (const m of shown.slice(-CHAT_CONTEXT).reverse()) {
+          if (chat.length && total + line(m).length > CHAT_TOTAL) break;
+          total += line(m).length;
+          chat.unshift(line(m));
         }
+        // ADR-0062: the newest review is what the owner's "continue" refers to; it stays even
+        // when the conversation is cut.
+        const review = shown.findLast(isReview);
+        if (review && !chat.includes(line(review))) lastReview = line(review);
       }
-      const chatBlock = chat.length
-        ? `Conversation in this chat so far (latest last; the task below is what to do now):\n${chat.join("\n\n")}\n\n`
-        : "";
+      const chatBlock = `${
+        lastReview
+          ? `The latest review in this chat (before the conversation below):\n${lastReview}\n\n`
+          : ""
+      }${
+        chat.length
+          ? `Conversation in this chat so far (latest last; the task below is what to do now):\n${chat.join("\n\n")}\n\n`
+          : ""
+      }`;
       const scopes = launches
         .filter((l) => l.launch.scope)
         .map((l) => `${l.id}: ${l.launch.scope?.allowed.join(", ")}`);
@@ -3762,18 +3865,36 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       whatsNew = (since) => {
         const newer = (x: { createdAt: number; updatedAt?: number }) =>
           (x.updatedAt ?? x.createdAt) > since;
-        const owner =
+        const newMessages =
           !task.parentId && task.threadId
-            ? listMessages(db, task.threadId)
-                .filter(
-                  (m) =>
-                    m.role === "user" &&
-                    m.visibility === "normal" &&
-                    m.createdAt > since &&
-                    m.createdAt <= task.createdAt,
-                )
-                .map((m) => m.content)
+            ? listMessages(db, task.threadId).filter(
+                (m) =>
+                  m.visibility === "normal" && m.createdAt > since && m.createdAt <= task.createdAt,
+              )
             : [];
+        const owner = newMessages.filter((m) => m.role === "user").map((m) => m.content);
+        // What other agents said meanwhile, a review's verdict above all. Not the boss's routing
+        // and status lines, the agent's own reports, or requests for the owner's buttons; nor
+        // what the task's description already quotes (a send-back carries its review).
+        const requests = REQUEST_KEYS.map((k) => templateRe(k));
+        const others = newMessages
+          .filter((m) => {
+            if (m.role !== "agent" || !m.author || m.author === BOSS_ID || m.author === self) {
+              return false;
+            }
+            if (m.actions?.length || requests.some((re) => re.test(m.content))) return false;
+            const cut = m.content.indexOf("\n\n");
+            const body = cut < 0 ? m.content : m.content.slice(cut + 2);
+            return !(body && task.description?.includes(body));
+          })
+          .slice(-NEW_IN_CHAT)
+          .map((m) => {
+            const text =
+              m.content.length > NEW_IN_CHAT_CHARS
+                ? `${m.content.slice(0, NEW_IN_CHAT_CHARS)}…`
+                : m.content;
+            return `${m.author}: ${text}`;
+          });
         const notes = [
           ...checklist.filter(newer).map((i) => `- [${i.done ? "x" : " "}] ${i.text}`),
           ...ownerComments.filter(newer).map((c) => `- ${c.text}`),
@@ -3783,7 +3904,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const head = again
           ? `# Continue: ${task.title}`
           : `# Next task on this card: ${task.title}\n\n${task.description ?? ""}${previous && previous.assigneeAgentId !== self ? handedOver : ""}${owner.length ? `\n\nThe owner wrote:\n${owner.join("\n\n")}` : ""}`;
-        return `${head}${notes.length ? `\n\nNew on this card's checklist and comments:\n${notes.join("\n")}` : ""}${freshOutcomes.length ? `\n\nNew room outcomes on this card (newest first):\n${freshOutcomes.map((c) => c.text).join("\n\n")}` : ""}${resultsOf(fresh)}${questions}${discussions}${answer}${parentAnswer}${resume}${runNotes}`.trim();
+        return `${head}${others.length ? `\n\nNew in this chat since your last turn:\n${others.join("\n\n")}` : ""}${notes.length ? `\n\nNew on this card's checklist and comments:\n${notes.join("\n")}` : ""}${freshOutcomes.length ? `\n\nNew room outcomes on this card (newest first):\n${freshOutcomes.map((c) => c.text).join("\n\n")}` : ""}${resultsOf(fresh)}${questions}${discussions}${answer}${parentAnswer}${resume}${runNotes}`.trim();
       };
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       const shellBox = compiled?.sandbox;

@@ -1291,6 +1291,23 @@ main.flush > .livebar {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
+/* The speaking agent and the message's kind as tags at the start of its header. */
+.msg .meta .chip {
+  height: 18px;
+  padding: 0 7px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.msg .meta .agent-tag {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.msg .meta .kind-tag.skillNew,
+.msg .meta .kind-tag.skillChange {
+  background: var(--info-soft);
+  color: var(--info);
+}
 .rundetails {
   display: grid;
   gap: 14px;

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   addChecklistItem,
   addComment,
+  appendMessage,
   createThread,
   getTask,
   getThread,
@@ -282,6 +283,108 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
     expect(listMessages(db, thread.id).at(-1)?.content).toMatch(
       /sent back 4 times[\s\S]*waits for you/,
     );
+  });
+
+  it("at the send-back limit the owner continues with the review, or accepts the card (ADR-0062)", async () => {
+    setup([
+      ["dev", "roles: [dev]"],
+      ["qa", "roles: [qa]"],
+    ]);
+    const { thread } = give();
+    let reviews = 0;
+    behave = (_req, task) => {
+      if (task.assigneeAgentId !== "qa") return result({ text: "built" });
+      reviews++;
+      orch.moveTask(
+        { from: "task", taskId: task.id },
+        { taskId: String(threadCard(db, thread.id)), to: "in_progress" },
+      );
+      return result({ text: `Verdict ${reviews}: still broken.` });
+    };
+    for (let i = 0; i < 40 && (await orch.workOnce()); i++);
+    const devRuns = () => calls.filter((c) => c.task.assigneeAgentId === "dev");
+    expect(devRuns()).toHaveLength(4);
+    const card = String(threadCard(db, thread.id));
+    const limit = listMessages(db, thread.id).at(-1);
+    expect(limit?.content).toMatch(/sent back 4 times/);
+    expect(limit?.actions?.map((a) => a.data)).toEqual([
+      `review:continue:${card}`,
+      `review:accept:${card}`,
+    ]);
+
+    // Continue: the agent gets the last review, past the limit, as a normal send-back would.
+    expect(orch.runAction(`review:continue:${card}`)).toMatchObject({ ok: true });
+    expect(listMessages(db, thread.id).find((m) => m.id === limit?.id)?.actions).toBeNull();
+    expect(orch.runAction(`review:continue:${card}`)).toEqual({
+      ok: false,
+      message: "Nothing is waiting for a decision on this card's review.",
+    });
+    for (let i = 0; i < 40 && (await orch.workOnce()); i++);
+    expect(devRuns()).toHaveLength(5);
+    expect(devRuns()[4]?.task.description).toMatch(/qa reviewed this work and sent it back/);
+    expect(devRuns()[4]?.req.prompt).toMatch(/The review:\nVerdict 4: still broken\./);
+    expect(listMessages(db, thread.id).map((m) => m.content)).toContain(
+      "→ dev continues with what the review found.",
+    );
+
+    // The next send-back stops again; accept moves the card past review as the owner.
+    const held = String(threadCard(db, thread.id));
+    expect(held).not.toBe(card);
+    expect(column(held)).toBe("in_progress");
+    expect(listMessages(db, thread.id).at(-1)?.content).toMatch(/sent back 5 times/);
+    expect(orch.runAction(`review:accept:${held}`)).toEqual({
+      ok: true,
+      message: 'Accepted: "Build page" moved to done.',
+    });
+    expect(column(held)).toBe("done");
+    expect(listMoves(db, held).at(-1)).toMatchObject({
+      from: "in_progress",
+      to: "done",
+      actor: "owner",
+    });
+    expect(orch.runAction(`review:accept:${held}`)).toMatchObject({ ok: false });
+    expect(devRuns()).toHaveLength(5);
+  });
+
+  it("a fresh task after the send-back limit gets the latest review, however long the chat (ADR-0062)", async () => {
+    setup([
+      ["dev", "roles: [dev]"],
+      ["qa", "roles: [qa]"],
+    ]);
+    const { thread } = give();
+    let reviews = 0;
+    behave = (_req, task) => {
+      if (task.assigneeAgentId !== "qa") return result({ text: "built" });
+      reviews++;
+      orch.moveTask(
+        { from: "task", taskId: task.id },
+        { taskId: String(threadCard(db, thread.id)), to: "in_progress" },
+      );
+      return result({ text: `Verdict ${reviews}: still broken.` });
+    };
+    for (let i = 0; i < 40 && (await orch.workOnce()); i++);
+    // A long talk with the owner pushes the review out of the chat's window.
+    for (let i = 0; i < 20; i++) {
+      appendMessage(db, {
+        threadId: thread.id,
+        role: "user",
+        channel: "web",
+        content: `note ${i}`,
+      });
+    }
+    behave = () => result();
+    const r = orch.delegate(
+      { from: "boss", threadId: thread.id },
+      { agent: "dev", title: "Continue", instructions: "continue the work" },
+    );
+    expect(r.ok).toBe(true);
+    await orch.workOnce();
+    const prompt = calls.at(-1)?.req.prompt ?? "";
+    expect(prompt).toMatch(
+      /^The latest review in this chat \(before the conversation below\):\nqa: Review \(qa\): Build page\n\nVerdict 4: still broken\.\n\nConversation in this chat so far/,
+    );
+    expect(prompt).toContain("owner: note 19");
+    expect(prompt).not.toContain("Verdict 3");
   });
 
   it("live progress: the run keeps its checklist (TodoWrite) state for the web", async () => {
