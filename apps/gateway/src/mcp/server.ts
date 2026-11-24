@@ -33,7 +33,7 @@ const TOOLS = [
   {
     name: "handoff",
     description:
-      "Pass the work on when your part is done and the next step belongs to another agent: it continues with your report and its result goes where yours would have gone. Your run ends; you are not resumed. Use delegate instead when you need the result back. Only agents your manifest allows, or yourself to switch between accounts and web mode when your task says so; one per run.",
+      "Pass the work on when your part is done and the next step belongs to another agent: it continues with your report and its result goes where yours would have gone. Your run ends; you are not resumed. Use delegate instead when you need the result back. Only agents your manifest allows, or yourself to switch between work and web mode when your task says so; one per run.",
     input: z.object({
       agent: text.describe("Target agent id"),
       title: text.describe("Short title of the next step"),

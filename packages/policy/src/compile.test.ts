@@ -163,7 +163,7 @@ describe("compileLevel (ADR-0067)", () => {
     expect(off.integrations.meta).toEqual({ tools: ["list_posts"] });
   });
 
-  it("splits open web and draft+ account tools: accounts mode by default, web mode without them", () => {
+  it("splits open web and draft+ account tools: work mode by default, web mode without them", () => {
     const m = agent("level: 3\nmcp: [meta, blender, ga4]");
     const acc = compile(m, 3);
     expect(acc.split).toBe(true);
@@ -177,10 +177,11 @@ describe("compileLevel (ADR-0067)", () => {
     expect(web.mode).toBe("web");
     expect(openWeb(web.manifest, false)).toBe(true);
     // Keyed integrations leave; a keyless one keeps only its read tools.
-    expect(web.manifest.mcp).toEqual([]);
+    expect(web.manifest.mcp).toEqual(["blender"]);
+    expect(web.integrations).toEqual({ blender: { tools: ["get_scene_info"] } });
     expect(web.unavailable.join(" ")).toMatch(/meta/);
-    // Blender's read tool would stay, but the open web runs in a container (ADR-0051).
-    expect(web.unavailable.join(" ")).toMatch(/Blender on this Mac/);
+    // Neither a shell nor keys: web mode runs on the host, where Blender is reachable.
+    expect(web.manifest.container).toBe(false);
     const codexWeb = compile(m, 3, { run: { mode: "web", model: "cli-codex/gpt-5" } });
     expect(codexWeb.integrations).toEqual({ blender: { tools: ["get_scene_info"] } });
   });
@@ -202,11 +203,73 @@ describe("compileLevel (ADR-0067)", () => {
     expect(c.manifest.mcp).toEqual(["blender"]);
   });
 
+  it("level 4 without accounts is split too: work mode on the host without the open web, web mode without a shell", () => {
+    // Like web-dev: a shell, no integrations, a documentation host in its remit.
+    const m = agent('level: 4\nnetwork:\n  allow: ["*", "docs.example.com"]');
+    const work = compile(m, 4);
+    expect(work.split).toBe(true);
+    expect(work.mode).toBe("accounts");
+    expect(work.sandbox).toBe("host");
+    expect(work.manifest.container).toBe(false);
+    expect(work.manifest.tools).toContain("Bash");
+    expect(work.manifest.tools).not.toContain("WebSearch");
+    // Documentation hosts of the remit stay, never "*".
+    expect(work.manifest.network.allow).toEqual(["docs.example.com"]);
+    expect(openWeb(work.manifest, false)).toBe(false);
+    const rules = allowRules({
+      tools: work.manifest.tools,
+      read: [],
+      write: [],
+      network: work.manifest.network.allow,
+      shell: [],
+    });
+    expect(rules).toContain("WebFetch(domain:docs.example.com)");
+    expect(rules).not.toContain("WebFetch");
+    // The shell's sandbox reaches the registries and the remit hosts only.
+    const box = hostSandboxSettings({
+      write: [],
+      own: [],
+      network: work.manifest.network.allow,
+      unsandboxed: [],
+      achordsHome: "/h",
+    }) as { sandbox: { network: { allowedDomains: string[] } } };
+    expect(box.sandbox.network.allowedDomains).toEqual([...REGISTRY_HOSTS, "docs.example.com"]);
+
+    const web = compile(m, 4, { run: { mode: "web" } });
+    expect(web.mode).toBe("web");
+    expect(web.sandbox).toBeUndefined();
+    expect(web.manifest.tools).not.toContain("Bash");
+    expect(web.manifest.tools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+    expect(web.manifest.network.allow).toEqual(["*"]);
+    // No shell, no keys: no container either.
+    expect(web.manifest.container).toBe(false);
+    expect(levelConflicts(m, catalog)).toEqual([]);
+  });
+
+  it("full access gives a split agent web mode: no shell, no draft+ account tools", () => {
+    const m = agent("level: 4\nmcp: [meta, blender]\nkeys_beside_host_shell: true");
+    const c = compile(m, 4, { run: { elevated: true } });
+    expect(c.mode).toBe("web");
+    expect(c.sandbox).toBeUndefined();
+    expect(c.manifest.tools).not.toContain("Bash");
+    expect(c.manifest.tools).toContain("WebSearch");
+    expect(c.manifest.container).toBe(false);
+    expect(c.integrations).toEqual({ blender: { tools: ["get_scene_info"] } });
+    // Whatever mode the task was in.
+    expect(compile(m, 4, { run: { elevated: true, mode: "accounts" } }).mode).toBe("web");
+    // An agent without a split is not affected (the run adds the web on top, as before).
+    expect(compile(agent("level: 2"), 2, { run: { elevated: true } }).mode).toBeUndefined();
+  });
+
   it("level 4 with keyed integrations runs in a container, without local apps (conflict)", () => {
     const m = agent("level: 4\nmcp: [meta, blender]");
     const c = compile(m, 4);
     expect(c.sandbox).toBe("container");
     expect(c.manifest.container).toBe(true);
+    // The container keeps the work mode's network: no open web beside the shell.
+    expect(c.mode).toBe("accounts");
+    expect(c.manifest.network.allow).toEqual([]);
+    expect(c.manifest.tools).not.toContain("WebSearch");
     expect(c.manifest.mcp).toEqual(["meta"]);
     expect(c.notes.join(" ")).toMatch(/without blender/);
     expect(levelConflicts(m, catalog)).toHaveLength(1);
@@ -222,10 +285,12 @@ describe("compileLevel (ADR-0067)", () => {
     expect(c.manifest.mcp).toEqual(["meta", "blender"]);
     expect(c.notes).toEqual([]);
     expect(levelConflicts(m, catalog)).toEqual([]);
-    // Never beside the open web: the web half still runs in a container, without keys.
+    // Never beside the open web: web mode has neither the shell nor the keys.
     const web = compile(m, 4, { run: { mode: "web" } });
-    expect(web.sandbox).toBe("container");
-    expect(web.manifest.mcp).toEqual([]);
+    expect(web.sandbox).toBeUndefined();
+    expect(web.manifest.tools).not.toContain("Bash");
+    expect(web.manifest.container).toBe(false);
+    expect(web.manifest.mcp).toEqual(["blender"]);
     // Ignored below level 4: no shell to keep beside the keys.
     expect(
       compile(agent("level: 3\nmcp: [meta]\nkeys_beside_host_shell: true"), 3).sandbox,
@@ -244,11 +309,26 @@ describe("compileLevel (ADR-0067)", () => {
     expect(c.manifest.mcp).toEqual(["meta"]);
   });
 
-  it("codex and gemini use their own sandboxes", () => {
+  it("codex and gemini use their own sandboxes, with the same modes", () => {
     const m = agent("level: 4\nmcp: [meta]");
-    expect(compile(m, 4, { run: { model: "cli-codex/gpt-5" } }).sandbox).toBe("codex");
+    const codex = compile(m, 4, { run: { model: "cli-codex/gpt-5" } });
+    expect(codex.sandbox).toBe("codex");
     expect(compile(m, 4, { run: { model: "cli-gemini/gemini-3" } }).sandbox).toBe("gemini");
-    expect(compile(m, 4, { run: { model: "cli-codex/gpt-5" } }).manifest.container).toBe(false);
+    expect(codex.manifest.container).toBe(false);
+    // Codex turns its network on only for a bare WebFetch rule: in web mode, never in work mode.
+    const rules = (c: typeof codex) =>
+      allowRules({
+        tools: c.manifest.tools,
+        read: [],
+        write: [],
+        network: c.manifest.network.allow,
+        shell: [],
+      });
+    expect(rules(codex)).not.toContain("WebFetch");
+    const codexWeb = compile(m, 4, { run: { model: "cli-codex/gpt-5", mode: "web" } });
+    expect(codexWeb.sandbox).toBeUndefined();
+    expect(codexWeb.manifest.tools).not.toContain("Bash");
+    expect(rules(codexWeb)).toContain("WebFetch");
   });
 
   it("local models are capped at level 3 and never get the open web", () => {

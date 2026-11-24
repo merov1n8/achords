@@ -16,6 +16,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   which cannot read your keys or achords' data; when neither is possible the agent works at
   level 3 and the chat says why. Level 0 agents get no work. The agent page shows the
   effective level per project.
+- A leveled agent with a shell no longer has the open web in the same run (ADR-0067): it works
+  in work mode (shell and accounts, with package registries, your project's sites and the
+  documentation hosts you gave it) or web mode (any website and web search, no shell, no
+  account tools that write), switching by handing the work to itself. Shell runs without keyed
+  accounts therefore stay on this Mac in Claude's sandbox instead of Apple's container, so an
+  agent like web-dev is no longer always containerized. Full access puts such an agent in web
+  mode for the chain rather than giving its shell the web.
 - Force pushes and git history rewrites are refused for every agent.
 - Live sites and accounts of secured projects are read-only for every agent (ADR-0067): no
   level, approval (your Approve button included), override or full access lets an agent write

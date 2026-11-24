@@ -8,7 +8,11 @@ import { isLocalModel } from "./check.ts";
 import type { Manifest } from "./manifest.ts";
 import type { ProjectClass } from "./projects.ts";
 
-/** A split run (open web and accounts never together): which half this task is. */
+/**
+ * A split agent's mode (ADR-0067: the open web never shares a run with draft+ account tools, nor
+ * a host run with a shell). "accounts" is the work mode (shell and account tools, no open web);
+ * the value keeps its stored name (tasks.run_mode, null = work).
+ */
 export type RunMode = "accounts" | "web";
 /** Where a level 4+ shell runs. */
 export type SandboxKind = "container" | "host" | "codex" | "gemini";
@@ -28,7 +32,9 @@ export interface CompiledLevel {
   level: number;
   manifest: Manifest;
   integrations: Record<string, CompiledIntegration>;
-  /** Open web and draft+ account tools would meet: the run is one half of a split. */
+  /**
+   * The agent works in two modes: the open web would meet a shell or draft+ account tools.
+   */
   split: boolean;
   mode?: RunMode;
   sandbox?: SandboxKind;
@@ -52,6 +58,8 @@ export interface CompileInput {
     /** provider/model the run uses. */
     model: string;
     mode?: RunMode | null | undefined;
+    /** Full access (ADR-0035) for this chain: a split agent works in web mode meanwhile. */
+    elevated?: boolean | undefined;
     /** The install can run Apple containers (ADR-0051). */
     containerAvailable: boolean;
   };
@@ -119,10 +127,20 @@ function compileAt(
   const { project, run } = input;
   const notes = [...given];
   const grants = level >= 3 ? entries.map((e) => ({ e, g: grant(m, e, level, project) })) : [];
-  // Open web and account tools of class draft and above never share a run (ADR-0067 guard).
-  const split = level >= 2 && !local && grants.some(({ e, g }) => writesOf(e, g));
-  const mode: RunMode | undefined = split ? (run.mode ?? "accounts") : undefined;
+  // ADR-0067 guards: the open web shares no run with account tools of class draft and above,
+  // and no host run with a shell (level 4+). Such an agent works in two modes: work (shell and
+  // account tools, no open web) and web (open web, neither of them).
+  const split = level >= 3 && !local && (level >= 4 || grants.some(({ e, g }) => writesOf(e, g)));
+  // Full access opens the web, so a split agent spends it in web mode (never web beside a shell).
+  const mode: RunMode | undefined = split
+    ? run.elevated
+      ? "web"
+      : (run.mode ?? "accounts")
+    : undefined;
   const web = level >= 2 && !local && mode !== "accounts";
+  // Work mode keeps the documentation hosts of the remit (never "*"); project sites (ADR-0057)
+  // and the package registries are added by the run.
+  const remitHosts = mode === "accounts" ? m.network.allow.filter((h) => h !== "*") : [];
   const unavailable: string[] = [];
   const integrations: Record<string, CompiledIntegration> = {};
   for (const { e, g } of grants) {
@@ -146,19 +164,20 @@ function compileAt(
   const keyedInRun = entries.some((e) => integrations[e.id] && keyed(e));
   const provider = run.model.slice(0, run.model.indexOf("/"));
   let sandbox: SandboxKind | undefined;
-  if (level >= 4) {
+  // Web mode has no shell.
+  if (level >= 4 && mode !== "web") {
     if (provider === "cli-codex") sandbox = "codex";
     else if (provider === "cli-gemini") sandbox = "gemini";
     else if (provider === "cli-claude") {
-      // ADR-0055: a shell next to keys only in a container; ADR-0051: open web in one too.
-      // Owner-approved exception: keys beside a host shell (never next to the open web).
-      if (!web && (!keyedInRun || m.keys_beside_host_shell)) sandbox = "host";
+      // ADR-0055: a shell next to keys only in a container (with the work mode's hosts).
+      // Owner-approved exception: keys beside a host shell.
+      if (!keyedInRun || m.keys_beside_host_shell) sandbox = "host";
       else if (run.containerAvailable) sandbox = "container";
     }
     if (!sandbox) {
       const why =
         provider === "cli-claude"
-          ? `its shell would need an Apple container (${web ? "open web" : "integrations with credentials"}), which this install cannot run`
+          ? "its shell would need an Apple container (integrations with credentials), which this install cannot run"
           : `${provider} has no sandbox for a shell`;
       return compileAt(
         m,
@@ -170,8 +189,9 @@ function compileAt(
       );
     }
   }
-  // ADR-0051 kept: a Claude run with the open web runs in a container.
-  const container = sandbox === "container" || (provider === "cli-claude" && web);
+  // ADR-0051 kept for agents with the web in every run; a split agent's web mode has neither a
+  // shell nor keys, so it runs on the host like any run without a shell.
+  const container = sandbox === "container" || (provider === "cli-claude" && web && !split);
   if (container) {
     // ADR-0054: apps on this Mac are not reachable from the container.
     for (const e of entries) {
@@ -190,10 +210,10 @@ function compileAt(
     tools: [
       ...READ,
       ...(level >= 2 ? WRITE : []),
-      ...(web ? WEB : []),
+      ...(web ? WEB : remitHosts.length ? ["WebFetch"] : []),
       ...(sandbox ? ["Bash"] : []),
     ],
-    network: { allow: web ? ["*"] : [] },
+    network: { allow: web ? ["*"] : remitHosts },
     container,
     mcp: entries.filter((e) => integrations[e.id]).map((e) => e.id),
   };
@@ -218,7 +238,8 @@ function writesOf(e: CatalogEntry, g: { direct: string[]; review: string[]; foll
 
 /**
  * Remit setups that cannot work as compiled, for the agent page: a level 4 shell next to keyed
- * integrations needs a container, where the agent's local apps (ADR-0054) cannot be reached.
+ * integrations needs a container in work mode, where the agent's local apps (ADR-0054) cannot be
+ * reached. A shell alone no longer does: the open web is in the other mode.
  */
 export function levelConflicts(m: Manifest, catalog: Catalog): string[] {
   if ((m.level ?? 0) < 4 || m.keys_beside_host_shell) return [];

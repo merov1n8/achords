@@ -7,6 +7,7 @@ import {
   handoffHops,
   listMessages,
   openCoreDatabase,
+  setSetting,
   type Task,
 } from "@achords/core";
 import { createProject, loadCatalog, updateProject } from "@achords/policy";
@@ -129,6 +130,8 @@ describe("permission levels in runs (ADR-0067)", () => {
     agent("keyed-builder", "level: 4\nmcp: [social, blender]");
     agent("designer", "level: 4\nmcp: [social, blender]\nkeys_beside_host_shell: true");
     agent("off", "level: 0");
+    // Like web-dev: a shell, no accounts, a documentation host in its remit.
+    agent("webdev", 'level: 4\nnetwork:\n  allow: ["*", "docs.example.com"]');
     createProject(join(home, "projects"), { slug: "acme", name: "Acme", workspace: "web-clients" });
     createProject(join(home, "projects"), {
       slug: "lab",
@@ -170,6 +173,9 @@ describe("permission levels in runs (ADR-0067)", () => {
     expect(req?.tools).toEqual(expect.arrayContaining(["Edit", "Write", "WebFetch", "WebSearch"]));
     expect(req?.allowedTools).toContain("WebFetch");
     expect(req?.tools).not.toContain("Bash");
+    // Unchanged: no split at level 2, and the open web runs in a container (ADR-0051).
+    expect(req?.container).toBeDefined();
+    expect(hubTools(seen[1]?.config)).not.toContain("handoff");
   });
 
   it("level 0 gets no work: delegation and card assignment are refused", () => {
@@ -186,7 +192,7 @@ describe("permission levels in runs (ADR-0067)", () => {
     });
   });
 
-  it("level 3 splits: accounts mode without web, live and spend always ask; self-handoff switches to web", async () => {
+  it("level 3 splits: work mode without web, live and spend always ask; self-handoff switches to web", async () => {
     let first: Task | undefined;
     onRun = (t) => {
       if (first) return;
@@ -203,7 +209,7 @@ describe("permission levels in runs (ADR-0067)", () => {
     const acc = seen[0];
     expect(acc?.req.tools).not.toContain("WebFetch");
     expect(acc?.req.tools).not.toContain("WebSearch");
-    expect(acc?.req.prompt).toMatch(/accounts mode/);
+    expect(acc?.req.prompt).toMatch(/work mode/);
     expect(hubTools(acc?.config)).toContain("handoff");
     expect(acc?.req.allowedTools).toEqual(
       expect.arrayContaining(["mcp__social__list_posts", "mcp__social__save_draft"]),
@@ -251,7 +257,76 @@ describe("permission levels in runs (ADR-0067)", () => {
     expect(launches[2]?.publish?.review).toEqual([]);
   });
 
-  it("level 4 in accounts mode without keys: a free shell in the CLI's host sandbox", async () => {
+  it("level 4 without accounts: work mode on the host sandbox without the open web; self-handoff to web mode without a shell", async () => {
+    let first = true;
+    onRun = (t) => {
+      if (!first) return;
+      first = false;
+      expect(
+        orch.handoff(
+          { from: "task", taskId: t.id },
+          { agent: "webdev", title: "Research", instructions: "look up" },
+        ),
+      ).toEqual({ ok: true });
+    };
+    await give("webdev", "acme");
+    const work = seen[0];
+    expect(work?.req.tools).toContain("Bash");
+    expect(work?.req.tools).not.toContain("WebSearch");
+    expect(work?.req.allowedTools).not.toContain("WebFetch");
+    expect(work?.req.allowedTools).toContain("WebFetch(domain:docs.example.com)");
+    expect(work?.req.container).toBeUndefined();
+    expect(work?.req.prompt).toMatch(/work mode/);
+    expect(hubTools(work?.config)).toContain("handoff");
+    const box = JSON.parse(work?.req.settings ?? "{}").sandbox;
+    expect(box.enabled).toBe(true);
+    expect(box.network.allowedDomains).toEqual(
+      expect.arrayContaining(["registry.npmjs.org", "pypi.org", "docs.example.com"]),
+    );
+    expect(box.network.allowedDomains).not.toContain("*");
+    // The switch: the same agent in web mode, counted as a hop, on the host without a shell.
+    const web = seen[1];
+    expect(web?.task.assigneeAgentId).toBe("webdev");
+    expect(web?.task.runMode).toBe("web");
+    expect(handoffHops(db, web?.task as Task)).toBe(1);
+    expect(web?.req.tools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+    expect(web?.req.tools).not.toContain("Bash");
+    expect(web?.req.container).toBeUndefined();
+    expect(JSON.parse(web?.req.settings ?? "{}").sandbox).toBeUndefined();
+    expect(web?.req.prompt).toMatch(/web mode/);
+  });
+
+  it("full access gives a split agent web mode: no shell, no account tools that write", async () => {
+    const thread = createThread(db, { project: "acme" });
+    const r = orch.delegate(
+      { from: "boss", threadId: thread.id },
+      { agent: "designer", title: "Work", instructions: "go" },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    const task = getTask(db, r.taskId) as Task;
+    setSetting(db, `elevation:${task.rootId ?? task.id}`, String(Date.now() + 60_000));
+    let switched: unknown;
+    onRun = (t) => {
+      switched = orch.handoff(
+        { from: "task", taskId: t.id },
+        { agent: "designer", title: "x", instructions: "x" },
+      );
+    };
+    for (let i = 0; i < 5 && (await orch.workOnce()); i++);
+    const req = seen[0]?.req;
+    expect(req?.tools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+    expect(req?.tools).not.toContain("Bash");
+    expect(req?.container).toBeUndefined();
+    // Keyed integrations leave; the local app keeps only its read tools.
+    expect(req?.allowedTools.some((t) => t.startsWith("mcp__social__"))).toBe(false);
+    expect(req?.allowedTools).toContain("mcp__blender__get_scene_info");
+    expect(req?.allowedTools).not.toContain("mcp__blender__import_asset");
+    expect(req?.prompt).toMatch(/web mode until/);
+    // Switching back is pointless while full access lasts.
+    expect(switched).toMatchObject({ ok: false, reason: expect.stringMatching(/web mode until/) });
+  });
+
+  it("level 4 in work mode without keys: a free shell in the CLI's host sandbox", async () => {
     await give("builder");
     const req = seen[0]?.req;
     expect(req?.tools).toContain("Bash");
@@ -286,6 +361,9 @@ describe("permission levels in runs (ADR-0067)", () => {
     expect(req?.allowedTools.some((t) => t.startsWith("mcp__blender__"))).toBe(false);
     expect(req?.allowedTools).toContain("mcp__social__save_draft");
     expect(JSON.parse(req?.settings ?? "{}").permissions.deny).toContain("Bash(git push:*)");
+    // The container keeps the work mode's network: no open web beside the shell.
+    expect(req?.tools).not.toContain("WebSearch");
+    expect(req?.tools).not.toContain("WebFetch");
     // The conflict is said in the chat.
     expect(
       listMessages(db, thread.id)
