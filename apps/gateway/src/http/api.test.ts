@@ -162,6 +162,10 @@ describe("HTTP API", () => {
             questions.push({ from, question: `answer ${request.taskId}: ${request.answer}` });
             return { ok: true };
           },
+          recordRoomOutcome: (from, request) => {
+            questions.push({ from, question: `outcome: ${JSON.stringify(request)}` });
+            return { ok: true };
+          },
           requestAccess: (from, reason) => {
             questions.push({ from, question: `access: ${reason}` });
             return { ok: true };
@@ -969,6 +973,24 @@ describe("HTTP API", () => {
     expect(questions.at(-1)).toEqual({
       from: { from: "task", taskId: "task-p" },
       question: "answer task-c: Friendly.",
+    });
+  });
+
+  it("agent endpoint record_room_outcome takes the caller from the run token (ADR-0066)", async () => {
+    const post = (token: string, body: unknown) =>
+      fetch(`${base}/api/agent/record_room_outcome`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    const body = { room: "r1", decision: "Short.", decided_by: "dev", open_points: ["subline"] };
+    expect((await post(tokens.issue("task-x", "dev", ["ask_owner"]).token, body)).status).toBe(403);
+    const opener = tokens.issue("task-o", "dev", ["record_room_outcome"]).token;
+    const res = await post(opener, { ...body, taskId: "other" });
+    expect(await res.json()).toEqual({ ok: true });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-o" },
+      question: `outcome: ${JSON.stringify({ room: "r1", decision: "Short.", decidedBy: "dev", openPoints: ["subline"] })}`,
     });
   });
 

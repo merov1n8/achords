@@ -72,6 +72,19 @@ const TOOLS = [
     done: "Answer sent. Answer any other open question, then end your turn; you resume when your delegated tasks finish.",
   },
   {
+    name: "record_room_outcome",
+    description:
+      "Record what a discussion you opened settled, once it has ended: the decision, who decided, and the points still open. The room closes and the outcome is noted on the card for later work.",
+    input: z.object({
+      room: text.describe("The room id from your prompt"),
+      decision: text.describe("The decision, in a few sentences"),
+      decided_by: text.describe("Who decided (you, an agent, or several)"),
+      open_points: list.describe("Points still open (may be empty)"),
+    }),
+    endpoint: "/api/agent/record_room_outcome",
+    done: "Outcome recorded. Finish the task.",
+  },
+  {
     name: "spawn_worker",
     description:
       "Start a short-lived helper for a self-contained subtask, with a subset of YOUR OWN tools and write paths (anything beyond them is refused). Max 3 per task; helpers cannot delegate or spawn. You resume with its result.",

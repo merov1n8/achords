@@ -142,6 +142,7 @@ export interface ApiDeps {
     | "askOwner"
     | "askParent"
     | "answerChild"
+    | "recordRoomOutcome"
     | "spawnWorker"
     | "proposeAgent"
     | "decideProposal"
@@ -1952,6 +1953,7 @@ export function createApiHandler(deps: ApiDeps) {
           "ask_owner",
           "ask_parent",
           "answer_child",
+          "record_room_outcome",
           "spawn_worker",
           "propose_agent",
           "move_task",
@@ -2017,7 +2019,14 @@ export function createApiHandler(deps: ApiDeps) {
                                   taskId: str(b.task_id, "task_id", 64),
                                   answer: str(b.answer, "answer", 5000),
                                 })
-                              : o.askOwner(from, str(b.question, "question", 2000));
+                              : tool === "record_room_outcome"
+                                ? o.recordRoomOutcome(from, {
+                                    room: str(b.room, "room", 64),
+                                    decision: str(b.decision, "decision", 5000),
+                                    decidedBy: str(b.decided_by, "decided_by", 200),
+                                    openPoints: strList(b.open_points, "open_points"),
+                                  })
+                                : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

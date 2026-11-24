@@ -118,6 +118,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- A discussion between agents (a room) now leaves its result on the card (ADR-0066): the agent
+  that opened it records the decision, who decided and the points still open, shown as a comment
+  on the card under that agent's name. Later work on the card sees the latest five. Without a
+  recorded outcome its final answer is used; a discussion that failed says "no decision: room
+  failed". Rooms still stay out of your chats and Telegram.
 - A delegated agent can ask the agent that gave it the work (ADR-0066): `ask_parent` wakes the
   delegating agent with the question even while it waits for its delegated tasks, it answers with
   `answer_child` (or asks you first), and the asking agent continues with the answer. At most

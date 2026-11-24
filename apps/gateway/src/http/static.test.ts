@@ -50,6 +50,7 @@ describe("static web UI", () => {
           askOwner: () => ({ ok: false, reason: "n/a" }),
           askParent: () => ({ ok: false, reason: "n/a" }),
           answerChild: () => ({ ok: false, reason: "n/a" }),
+          recordRoomOutcome: () => ({ ok: false, reason: "n/a" }),
           requestAccess: () => ({ ok: false, reason: "n/a" }),
           requestCommand: () => ({ ok: false, reason: "n/a" }),
           reportChecks: () => ({ ok: false, reason: "n/a" }),
