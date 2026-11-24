@@ -16,6 +16,7 @@ import { api, uploadImage } from "../api.ts";
 import { formatUsd, imageParts, mention, type ThreadSummary, withImages } from "../chat.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { Confirm } from "../components/Modal.tsx";
+import { loadDraft, pruneDrafts, saveDraft } from "../drafts.ts";
 import { t } from "../i18n.ts";
 import { ago } from "../kanban.ts";
 import { usePoll } from "../poll.ts";
@@ -75,6 +76,7 @@ export function Chat(props: {
 
   const thread = threads.data?.find((x) => x.id === props.threadId);
   const [details, setDetails] = useState(loadDetailsOpen());
+  useEffect(() => pruneDrafts(), []);
   const toggleDetails = () => {
     saveDetailsOpen(!details);
     setDetails(!details);
@@ -180,7 +182,8 @@ function Conversation(props: {
   const messages = usePoll(() => api<Message[]>(`/api/threads/${threadId}/messages`), 2000, [
     threadId,
   ]);
-  const [text, setText] = useState("");
+  // Unsent text survives switching chats or pages (kept per chat in this browser).
+  const [text, setText] = useState(() => loadDraft(threadId));
   const [speaking, setSpeaking] = useState<string>();
   // Leaving the chat stops reading.
   useEffect(() => stopSpeaking, []);
@@ -210,6 +213,11 @@ function Conversation(props: {
   );
   const end = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => saveDraft(threadId, text), [threadId, text]);
+  // A restored draft gets its height back.
+  useEffect(() => {
+    if (input.current?.value) grow(input.current);
+  }, []);
 
   const list = messages.data ?? [];
   const lastSeq = list.at(-1)?.seq ?? 0;

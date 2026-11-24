@@ -211,7 +211,7 @@ const TOOLS = [
   {
     name: "skill_propose",
     description:
-      "Propose a new skill or a patch to an existing one: short, reusable instructions for future tasks. Never include secrets, passwords, tokens, client data or one-off details. A change is shown to the owner as before/after and needs approval; a new skill may be saved at once where the owner allows it.",
+      "Propose a new skill or a patch to an existing one: short, reusable instructions for future tasks. Never include secrets, passwords, tokens, client data or one-off details. Not for working around an error, a missing permission or a problem of this machine or its setup (a tool that fails, a file you may not read): say that in your report so the owner can fix the cause. A change is shown to the owner as before/after and needs approval; a new skill may be saved at once where the owner allows it.",
     input: z.object({
       name: text.describe("Slug: lowercase letters, digits and dashes, e.g. owner-report"),
       description: text.describe("One line: what the skill is for and when to use it"),
