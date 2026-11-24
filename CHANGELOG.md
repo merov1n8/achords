@@ -120,6 +120,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- An agent's final report no longer disappears from the chat when it asked for your approval
+  during the run and you already decided it: you get the full report instead of "ready, waiting
+  for your approval above". The short line stays only while a request is still open.
+- The boss now sees the chat's unfinished work when you write: which task runs, on which agent,
+  for how long, its last sign of work and any open approval. Asked "is it stuck?" during a long
+  silent run, it tells you what is running instead of giving the same work out again.
 - An agent that continues its session on a card now sees what other agents posted in the chat
   since its last turn, above all the reviewer's verdict, so you no longer have to paste the
   review after the send-back limit; the boss's status lines and button requests are left out.

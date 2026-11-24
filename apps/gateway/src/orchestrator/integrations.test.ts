@@ -751,6 +751,21 @@ describe("integrations in runs (ADR-0034)", () => {
       const last = listMessages(db, task.threadId as string).at(-1)?.content;
       expect(last).toBe("Check the blog: ready, waiting for your approval above.");
     });
+
+    it("a request the owner decided during the run does not hide the report", async () => {
+      onRun = (task) => {
+        orch.requestPublish(
+          { from: "task", taskId: task.id },
+          { integration: "wp", tool: "create_post", args: { title: "T" } },
+        );
+        const msg = listMessages(db, task.threadId as string).at(-1);
+        orch.runAction(msg?.actions?.[0]?.data ?? "");
+      };
+      const task = await give("marketer", "acme");
+      const texts = listMessages(db, task.threadId as string).map((m) => m.content);
+      expect(texts).toContain("Done (marketer): Check the blog\n\ndone");
+      expect(texts).not.toContain("Check the blog: ready, waiting for your approval above.");
+    });
   });
 
   describe("the secured-live rule (ADR-0067)", () => {
