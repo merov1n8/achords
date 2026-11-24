@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   answerParentQuestion,
+  askOwner,
   askParent,
   createPairingCode,
   createThread,
@@ -25,6 +26,7 @@ import {
   getThread,
   listMessages,
   openCoreDatabase,
+  placeCard,
   recordUsageWindows,
   saveCardSession,
   sessionDir,
@@ -1388,6 +1390,24 @@ describe("HTTP API", () => {
     expect(await json(cleared)).toMatchObject({ cardTitle: "Hotel page", ownCardTitle: null });
   });
 
+  it("lists which chats and cards wait for the owner's answer", async () => {
+    const { call } = await pair();
+    const th = createThread(db, { title: "Hotel page" });
+    const card = enqueue(db, { title: "build", threadId: th.id });
+    placeCard(db, card.id, "todo", "system");
+    const state = async () => ({
+      chat: ((await (await call("/api/threads")).json()) as Record<string, unknown>[]).find(
+        (x) => x.id === th.id,
+      )?.waitingOwner,
+      card: ((await (await call("/api/tasks")).json()) as Record<string, unknown>[]).find(
+        (x) => x.id === card.id,
+      )?.waitsForOwner,
+    });
+    expect(await state()).toEqual({ chat: false, card: false });
+    askOwner(db, card.id, "which colour?");
+    expect(await state()).toEqual({ chat: true, card: true });
+  });
+
   it("kanban: the owner creates a card by hand and starts it later", async () => {
     const { call, cookie } = await pair();
     cards.length = 0;
@@ -1563,10 +1583,12 @@ describe("HTTP API", () => {
     expect(
       (await call("/api/actions", { method: "POST", body: '{"data":"rm:-rf:/"}' })).status,
     ).toBe(400);
-    // Command requests (ADR-0056) with "once" added, full access (ADR-0035) and permission
-    // requests (ADR-0067 step 4): every button reaches the orchestrator.
+    // Command requests (ADR-0056) with "once" added, full access (ADR-0035), permission
+    // requests (ADR-0067 step 4) and the send-back limit (ADR-0062): every button reaches the
+    // orchestrator.
     for (const data of [
       ...["once", "task", "always", "reject"].map((v) => `cmd:${v}:b8746623`),
+      ...["continue", "accept"].map((v) => `review:${v}:b8746623`),
       ...["once", "approve", "reject"].map((v) => `access:${v}:b8746623`),
       ...["once", "card", "always", "reject"].map((v) => `perm:${v}:b8746623`),
     ]) {
@@ -1574,7 +1596,12 @@ describe("HTTP API", () => {
       expect(res.status).toBe(200);
       expect(decisions.at(-1)?.id).toBe("b8746623");
     }
-    for (const data of ["perm:approve:b8746623", "cmd:card:b8746623", "access:always:b8746623"]) {
+    for (const data of [
+      "perm:approve:b8746623",
+      "cmd:card:b8746623",
+      "access:always:b8746623",
+      "review:approve:b8746623",
+    ]) {
       const res = await call("/api/actions", { method: "POST", body: JSON.stringify({ data }) });
       expect(res.status).toBe(400);
     }

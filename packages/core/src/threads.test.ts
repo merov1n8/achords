@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { openCoreDatabase } from "./db/database.ts";
+import { answerOwnerQuestion, askOwner } from "./delegation.ts";
+import { enqueue } from "./queue.ts";
 import {
   appendMessage,
   clearActions,
@@ -53,6 +55,29 @@ describe("threads", () => {
     expect(listThreads(db)[0]?.lastAgent).toBe("Coder");
     // The web's reply alert watches this: the last visible agent message, traces left out.
     expect(listThreads(db)[0]?.lastAgentSeq).toBe(coder.seq);
+  });
+
+  it("a chat waits for the owner while a queued task asks or a message shows approval buttons", () => {
+    const db = openCoreDatabase(":memory:");
+    const th = createThread(db, { title: "a" });
+    const waiting = () => listThreads(db)[0]?.waitingOwner;
+    expect(waiting()).toBe(false);
+    const task = enqueue(db, { title: "x", threadId: th.id });
+    askOwner(db, task.id, "which one?");
+    expect(waiting()).toBe(true);
+    expect(getThread(db, th.id)?.waitingOwner).toBe(true);
+    answerOwnerQuestion(db, th.id, "this one");
+    expect(waiting()).toBe(false);
+    appendMessage(db, {
+      threadId: th.id,
+      role: "agent",
+      channel: "system",
+      content: "run `ls`?",
+      actions: [{ label: "Allow", data: "cmd:once:abc" }],
+    });
+    expect(waiting()).toBe(true);
+    clearActions(db, "cmd:", "abc");
+    expect(waiting()).toBe(false);
   });
 
   it("hides trace messages unless asked", () => {

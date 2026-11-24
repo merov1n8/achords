@@ -1,6 +1,16 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { allowRules, openWeb, siteOf, webFetchSettings } from "./permissions.ts";
+import {
+  allowRules,
+  claudeRunSettings,
+  NO_COAUTHOR,
+  openWeb,
+  siteOf,
+  webFetchSettings,
+} from "./permissions.ts";
 
 describe("CLI allow rules scoped to the manifest (ADR-0010)", () => {
   it("scopes file tools to the agent's own folders instead of the whole disk", () => {
@@ -97,6 +107,53 @@ describe("CLI allow rules scoped to the manifest (ADR-0010)", () => {
     expect(allowed("https://acme.example/any/page")).toBe(true);
     expect(allowed("https://acme.example")).toBe(true);
     expect(allowed("https://acme.example.evil.com/")).toBe(false);
+  });
+});
+
+describe("no Co-Authored-By in commits of claude runs", () => {
+  it("turns the CLI's attribution off and keeps the WebFetch hook beside the Bash hook", () => {
+    const s = JSON.parse(
+      claudeRunSettings(webFetchSettings(["www.beds24.com/api/"]), { sandbox: { enabled: true } }),
+    );
+    expect(s.attribution).toEqual({ commit: "", pr: "", sessionUrl: false });
+    expect(s.sandbox).toEqual({ enabled: true });
+    expect(s.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)).toEqual([
+      "WebFetch",
+      "Bash",
+    ]);
+    expect(JSON.parse(claudeRunSettings(undefined, undefined)).hooks.PreToolUse).toHaveLength(1);
+  });
+
+  it("refuses a shell command or a commit message file with the trailer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "coauthor-"));
+    writeFileSync(join(dir, "msg.txt"), "Fix\n\nco-authored-by: Bot <b@x>\n");
+    writeFileSync(join(dir, "ok.txt"), "Fix\n");
+    const hook = JSON.parse(claudeRunSettings(undefined, undefined)).hooks.PreToolUse[0];
+    const run = (command: string) => {
+      try {
+        execFileSync("sh", ["-c", hook.hooks[0].command], {
+          input: JSON.stringify({ cwd: dir, tool_input: { command } }),
+          stdio: "pipe",
+        });
+        return "ok";
+      } catch (e) {
+        const err = e as { status: number; stderr: Buffer };
+        return `${err.status} ${err.stderr.toString().trim()}`;
+      }
+    };
+    try {
+      expect(hook.matcher).toBe("Bash");
+      expect(run('git commit -m "Fix" -m "Co-Authored-By: Claude <noreply@anthropic.com>"')).toBe(
+        `2 ${NO_COAUTHOR}`,
+      );
+      expect(run('git commit -m "Fix the login"')).toBe("ok");
+      expect(run("git add . && git commit -F msg.txt")).toBe(`2 ${NO_COAUTHOR}`);
+      expect(run('git commit --file="msg.txt"')).toBe(`2 ${NO_COAUTHOR}`);
+      expect(run("git commit -F ok.txt")).toBe("ok");
+      expect(run("ls -F")).toBe("ok");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

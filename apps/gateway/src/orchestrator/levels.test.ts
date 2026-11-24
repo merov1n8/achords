@@ -624,7 +624,10 @@ describe("permission levels in runs (ADR-0067)", () => {
       const settings = JSON.parse(req?.settings ?? "{}");
       expect(settings.permissions.deny).toContain("Bash(git push:*)");
       expect(settings.permissions.allow).not.toContain("Bash(git push:*)");
-      expect(settings.hooks?.PreToolUse ?? []).toEqual([]);
+      // Only the co-author hook every claude run has.
+      expect(settings.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)).toEqual([
+        "Bash",
+      ]);
       // After the run, no more pushes.
       expect(
         await orch.pushBranch({ from: "task", taskId: task.id }, { folder: "/x", branch: "main" }),

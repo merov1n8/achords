@@ -12,6 +12,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   without checks or review. The boss decides this from your message; start a message with `?:`
   or `Q:` (also after `@agent`) to force it. A question in a chat whose card is still being
   worked on leaves that card where it is and only answers in the chat.
+- When a card has been sent back from review too often and waits for you, its message has two
+  buttons (web and Telegram): "Continue with the review's findings" restarts its agent with the
+  last review, as a normal send-back would (your decision does not count toward the limit), and
+  "Accept, move to Done" moves the card past review as your own move. Replying in the chat
+  still works.
+- Chat messages show the speaking agent as a tag at the start of the header, with a small kind
+  tag (Done, Review, Question, Command) instead of repeating the name in the text; skill
+  proposals carry a "New skill" or "Skill update" tag.
+- Commits agents make carry no `Co-Authored-By` lines: claude runs have the CLI's attribution off
+  and a hook that refuses such commands, codex and gemini runs get a git hook that strips them.
+- Attention cues: a chat with a new agent reply since you last opened it shows its title a bit
+  bolder in the chat list, with a "!" badge when it waits for your answer (a question or approval
+  buttons); opening the chat clears both until something new arrives. A Kanban card waiting for
+  your answer has a light accent tint and a stronger border, and a card that belongs to a chat
+  has a chat button in its bottom-right corner.
 - Unsent text in a chat's message box is kept per chat in the browser: switching to another chat
   or page and back brings it back (drafts older than 30 days are dropped).
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
@@ -105,6 +120,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- An agent that continues its session on a card now sees what other agents posted in the chat
+  since its last turn, above all the reviewer's verdict, so you no longer have to paste the
+  review after the send-back limit; the boss's status lines and button requests are left out.
+  A new task on the card always gets the latest review, even when the chat is long.
 - Agents no longer propose skills for working around a failing tool, a missing permission or a
   problem of the machine; they report it so the owner can fix the cause (ADR-0049).
 - Codex and Gemini runs give git a neutral global config (`GIT_CONFIG_GLOBAL=/dev/null`, the

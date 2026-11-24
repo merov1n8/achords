@@ -1,0 +1,16 @@
+#!/bin/sh
+# Every git hook of codex and gemini agent runs (core.hooksPath via GIT_CONFIG_*): commit-msg
+# drops Co-Authored-By trailers, then each hook runs the repository's own hook, if any, with the
+# same arguments and stdin, and returns its exit code.
+name=$(basename "$0")
+if [ "$name" = commit-msg ] && [ -f "$1" ]; then
+  kept=$(awk 'tolower($0) !~ /^[[:space:]]*co-authored-by:/' "$1") || exit 1
+  printf '%s\n' "$kept" > "$1" || exit 1
+fi
+here=$(cd "$(dirname "$0")" && pwd -P)
+common=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+own=$(git config --file "$common/config" --type=path --get core.hooksPath 2>/dev/null)
+dir=${own:-$common/hooks}
+[ -d "$dir" ] && [ "$(cd "$dir" && pwd -P)" = "$here" ] && exit 0
+[ -f "$dir/$name" ] && [ -x "$dir/$name" ] && exec "$dir/$name" "$@"
+exit 0
