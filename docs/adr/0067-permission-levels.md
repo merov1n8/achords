@@ -34,41 +34,39 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
     - `git push` from a host shell uses whatever git login the machine has. On the maintainer's development machine that is the owner's own login. Real installs, including the Mac mini, have no git login on the host, so push needs its own path.
   - **Fields the levels replace or keep:**
 
-    | Manifest field | Under levels |
-    |---|---|
-    | `tools`, `shell`, `network`, `container` | **Replaced.** Compiled from the level and removed from manifests. |
-    | `fs.read`, `fs.write` | **Kept** as remit: folders. |
-    | `mcp` | **Kept** as remit: accounts and integrations. The level decides which tool classes. |
-    | `models` | **Kept** as remit: model. |
-    | `publish_mode` | **Kept**: ADR-0037 is unchanged. |
-    | `delegation`, `sensitivity`, `effort`, `budget`, `roles`, `workspace` | **Kept**, unrelated to levels. |
+    | Manifest field                                                        | Under levels                                                                        |
+    | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+    | `tools`, `shell`, `network`, `container`                              | **Replaced.** Compiled from the level and removed from manifests.                   |
+    | `fs.read`, `fs.write`                                                 | **Kept** as remit: folders.                                                         |
+    | `mcp`                                                                 | **Kept** as remit: accounts and integrations. The level decides which tool classes. |
+    | `models`                                                              | **Kept** as remit: model.                                                           |
+    | `publish_mode`                                                        | **Kept**: ADR-0037 is unchanged.                                                    |
+    | `delegation`, `sensitivity`, `effort`, `budget`, `roles`, `workspace` | **Kept**, unrelated to levels.                                                      |
 
 - Decision, core 1: levels. Each level includes everything below it. A level says what the agent may do without asking, inside its own remit.
 
-  | Level | Name | Adds | Compiles to |
-  |---|---|---|---|
-  | 0 | Off | Receives no work | Not dispatchable. Delegation and card assignment refused. |
-  | 1 | Reader | Reads its folders, writes comments and reports | `Read, Glob, Grep` on its folders; hub report and comment tools; project sites (ADR-0057, not the open web) |
-  | 2 | Author | Writes files in its folders, reads the web | `Edit, Write` on `fs.write`; `WebFetch, WebSearch`, network `"*"`, under the open-web rule |
-  | 3 | Operator | Uses its assigned accounts: read tools, drafts, reversible writes | Remit `mcp` with tools of class `read`, `draft`, `reversible` |
-  | 4 | Builder | Free shell in a sandbox, local git, build, test, packages from known registries, local apps | `Bash` with no command list, only inside a sandbox; registry hosts for the shell; local apps (ADR-0054) |
-  | 5 | Full | `git push` (never force), writes and deploys to live targets, spending inside the account's own limit | Tools of class `live` and `spend`; push through the gateway's credential helper |
-
+  | Level | Name     | Adds                                                                                                  | Compiles to                                                                                                 |
+  | ----- | -------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+  | 0     | Off      | Receives no work                                                                                      | Not dispatchable. Delegation and card assignment refused.                                                   |
+  | 1     | Reader   | Reads its folders, writes comments and reports                                                        | `Read, Glob, Grep` on its folders; hub report and comment tools; project sites (ADR-0057, not the open web) |
+  | 2     | Author   | Writes files in its folders, reads the web                                                            | `Edit, Write` on `fs.write`; `WebFetch, WebSearch`, network `"*"`, under the open-web rule                  |
+  | 3     | Operator | Uses its assigned accounts: read tools, drafts, reversible writes                                     | Remit `mcp` with tools of class `read`, `draft`, `reversible`                                               |
+  | 4     | Builder  | Free shell in a sandbox, local git, build, test, packages from known registries, local apps           | `Bash` with no command list, only inside a sandbox; registry hosts for the shell; local apps (ADR-0054)     |
+  | 5     | Full     | `git push` (never force), writes and deploys to live targets, spending inside the account's own limit | Tools of class `live` and `spend`; push through the gateway's credential helper                             |
   - The boss has no level. It has no tools, and `change_agent` and `update_project` stay owner-approved (ADR-0041).
   - **Tool classes.** Every catalog tool gets one class: `read`, `draft`, `reversible`, `live` or `spend`. All entries in the catalog are classified when this ships. A tool without a class counts as `live`.
   - **Spending limit.** Achords keeps no spending cap of its own. "Inside the account's limit" means the limit set at the third-party service, such as a Google Ads monthly budget or a fal.ai credit balance. ADR-0046 meters stay as they are.
 
 - Decision, core 2: project class
 
-  | | `secured` | `experimental` |
-  |---|---|---|
-  | Meant for | Work where a mistake costs someone else: clients, production systems | The owner's own trials, where speed matters more than safety |
-  | Ceiling (default) | 4 | 5 |
-  | Targets tagged `live` | Read-only at every level. No level, override or approval in a run can lift it. | Writes follow the level. |
-  | Writes go to | `staging` targets only | Per level |
-  | Work meant for live | A prepared package (diff or export, plus a checklist) for the owner to deploy | Done by a level 5 agent |
-  | Spending | Always asks | Asks, unless the project's "spend without asking" switch is on |
-
+  |                       | `secured`                                                                      | `experimental`                                                 |
+  | --------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+  | Meant for             | Work where a mistake costs someone else: clients, production systems           | The owner's own trials, where speed matters more than safety   |
+  | Ceiling (default)     | 4                                                                              | 5                                                              |
+  | Targets tagged `live` | Read-only at every level. No level, override or approval in a run can lift it. | Writes follow the level.                                       |
+  | Writes go to          | `staging` targets only                                                         | Per level                                                      |
+  | Work meant for live   | A prepared package (diff or export, plus a checklist) for the owner to deploy  | Done by a level 5 agent                                        |
+  | Spending              | Always asks                                                                    | Asks, unless the project's "spend without asking" switch is on |
   - **Choosing a class.** The owner sets the class per project. There is no automatic migration of existing projects. Until a class is chosen, a project counts as `secured`. The project form shows it as "not chosen yet". New projects must choose.
   - **Work without a project** (the `own` pseudo-project of ADR-0042) is `experimental`.
   - **Environment tags.** Every account and site carries `env: live | staging`. Existing and new entries start as `live`, and the owner switches a row to `staging` in the project form.
@@ -99,7 +97,11 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
     - in the Apple container (ADR-0051);
     - or, on the host, in the Claude CLI's own sandbox: writes are limited to the run's folders and network to the registry hosts and the run's allowed hosts.
     - Without either, level 4 compiles to 3, and the chat says why.
-    - Host tools that do not work inside the CLI sandbox (Unity batch mode, Xcode) are found during implementation and reported. They are not exempted silently.
+    - Host tools that do not work inside the CLI sandbox are found during implementation and reported. They are not exempted silently. A tool's own support folders, such as a compiler cache, are added to the agent's folders (remit).
+    - **Owner-approved exception (2026-11-24, the owner takes responsibility).** Checked on 2026-11-24: Unity batch mode cannot run inside the CLI sandbox, because it cannot reach its Burst compiler server or issue sandbox extensions to its own bundle. Xcode and Swift builds work once their cache folders are writable.
+      - An agent's remit may therefore list `unsandboxed` commands: exact executables that run outside the sandbox (the CLI's `sandbox.excludedCommands`). Only game-dev's Unity editor binary is listed. Every other command of that agent stays sandboxed.
+      - The agent page shows the exception.
+      - The exception is removed when ADR-0055 stage 2 (host runs under a dedicated macOS user) exists. game-dev's Unity work then moves there.
   - **Keys stay behind the gateway** (ADR-0055).
     - `git push` at level 5 goes through a git credential helper answered by the gateway, the use-without-read mechanism ADR-0055 left open. Its credentials are per project, in the vault.
     - No push credential is ever placed in the run. A host git login on a development machine is not a supported path.
@@ -118,11 +120,11 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
     - the always-ask list: force push or history rewrite, deleting outside its folders, spending on a `secured` project, a new paid service, reading keys, changing permissions.
   - **Scopes.** These replace ADR-0056's task/always and ADR-0035's 4 h chain grant.
 
-    | Scope | Lasts | Stored as |
-    |---|---|---|
-    | once | One action | Nothing kept |
-    | for this card | The card's tasks, until the card is done | `approval:<card>` |
-    | always | Permanently | Extends the remit (a folder or account) or sets an override, through an ADR-0041 patch. The same question is not asked twice. |
+    | Scope         | Lasts                                    | Stored as                                                                                                                     |
+    | ------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+    | once          | One action                               | Nothing kept                                                                                                                  |
+    | for this card | The card's tasks, until the card is done | `approval:<card>`                                                                                                             |
+    | always        | Permanently                              | Extends the remit (a folder or account) or sets an override, through an ADR-0041 patch. The same question is not asked twice. |
 
   - **Limits on approvals:**
     - No approval lifts the `secured` live rule.
@@ -131,18 +133,17 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
 
 - Decision, starting assignment (approved by the owner on 2026-11-24, including where it widens rights)
 
-  | Agent(s) | Level | Change against today |
-  |---|---|---|
-  | code-reviewer, game-reviewer | 1 | None. |
-  | marketing | 2 | Loses its shell and its keyed account. Account work goes to a level 3 agent by handoff. |
-  | seo, social, advertiser | 3 | Lose their utility shells. seo no longer mixes the open web with accounts. Spending asks. |
-  | web-dev | 4 | Gains build and packages. Its host shell moves into the CLI sandbox. |
-  | wp-maintainer | 4 | Gains a free shell, commit, build and packages. |
-  | game-dev | 4 | Its host shell moves into the CLI sandbox. Local apps stay. |
-  | 3d-designer | 4 | Gains a shell. |
-  | video-producer | 4 | None. Spending asks. |
-  | boss | — | No level. |
-
+  | Agent(s)                     | Level | Change against today                                                                                                               |
+  | ---------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------- |
+  | code-reviewer, game-reviewer | 1     | None.                                                                                                                              |
+  | marketing                    | 2     | Loses its shell and its keyed account. Account work goes to a level 3 agent by handoff.                                            |
+  | seo, social, advertiser      | 3     | Lose their utility shells. seo no longer mixes the open web with accounts. Spending asks.                                          |
+  | web-dev                      | 4     | Gains build and packages. Its host shell moves into the CLI sandbox.                                                               |
+  | wp-maintainer                | 4     | Gains a free shell, commit, build and packages.                                                                                    |
+  | game-dev                     | 4     | Its host shell moves into the CLI sandbox, except the Unity editor binary (owner-approved exception, see guards). Local apps stay. |
+  | 3d-designer                  | 4     | Gains a shell.                                                                                                                     |
+  | video-producer               | 4     | None. Spending asks.                                                                                                               |
+  | boss                         | —     | No level.                                                                                                                          |
   - Agents named in the original assignment that are no longer installed (audio, image) are left out.
   - New agents start at level 1.
 
@@ -161,6 +162,7 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
     - adds `spend_without_asking: bool`, for `experimental` only;
     - account and site entries become `{url|id, env: live|staging}`; a plain string is read as `env: live`.
   - **accounts.yaml:** the same entry shape.
+  - **Manifest remit:** `unsandboxed: [exact executable paths]`, the owner-approved exception (only game-dev's Unity binary).
   - **`~/.achords/overrides.yaml`:** `{agent, project, level, requires_skills[]}`.
   - **Catalog:** every tool gets `class`.
   - **Approvals:** `approval:<card>` settings keys.
@@ -191,6 +193,7 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
   - **Sandbox:**
     - Level 4 without a container or CLI sandbox compiles to 3, with a message.
     - With either, the run gets a free shell.
+    - A remit `unsandboxed` executable is passed as an excluded command, and nothing else is.
     - Host-sandbox writes outside the run's folders are refused.
   - **Push:** level 5 push goes through the credential helper. Force push is refused at every level. Level 4 has no push.
   - **Local models:** capped at 3, with no web.

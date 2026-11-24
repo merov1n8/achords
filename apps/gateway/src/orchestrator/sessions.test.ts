@@ -10,6 +10,7 @@ import {
   saveCardSession,
   sessionDir,
   type Task,
+  threadCard,
 } from "@achords/core";
 import { loadCatalog } from "@achords/policy";
 import { cliClaude, type RunRequest, type RunResult } from "@achords/providers";
@@ -141,10 +142,47 @@ describe("one CLI session per agent and card (ADR-0066)", () => {
       { resumed: 0 },
       { resumed: 1 },
     ]);
-    // Done: the card reaches its finish column, and its transcripts go.
+    // In review the card is not done yet: rework sent back from review resumes the same session.
     expect(getTask(db, taskId)?.column).toBe("review");
+    expect(getCardSession(db, { card: taskId, agent: "coder", project: "" })?.sessionId).toBe(
+      "s-1",
+    );
+    // Done: the card passes its finish column, and its transcripts go.
+    expect(orch.ownerMove(taskId, "review", "done")).toMatchObject({ ok: true });
     expect(getCardSession(db, { card: taskId, agent: "coder", project: "" })).toBeUndefined();
     expect(existsSync(sessionDir(home, taskId))).toBe(false);
+  });
+
+  it("rework sent back from review resumes the agent's session; done ends it (ADR-0062)", async () => {
+    agent("coder", ["roles: [dev]"]);
+    agent("qa", ["roles: [qa]"]);
+    start();
+    const { threadId, taskId } = card();
+    let reviews = 0;
+    behave = (_req, task) => {
+      if (task.assigneeAgentId !== "qa") return undefined;
+      reviews++;
+      orch.moveTask(
+        { from: "task", taskId: task.id },
+        { taskId: String(threadCard(db, threadId)), to: reviews === 1 ? "in_progress" : "done" },
+      );
+      return result({
+        text: reviews === 1 ? "The button is dead." : "Approved.",
+        sessionId: `q-${n}`,
+      });
+    };
+    await drain();
+    const dev = calls.filter((c) => c.agent === "coder");
+    expect(dev).toHaveLength(2);
+    expect(dev[1]?.req.session).toEqual({ resume: dev[0]?.req.session?.resume ?? "s-1" });
+    expect(dev[1]?.req.prompt).toMatch(/^# Next task on this card/);
+    expect(dev[1]?.req.prompt).toMatch(/the button is dead/i);
+    // Approved into done: the card's transcripts go, under whichever task now holds the card.
+    const held = String(threadCard(db, threadId));
+    expect(getTask(db, held)?.column).toBe("done");
+    expect(getCardSession(db, { card: held, agent: "coder", project: "" })).toBeUndefined();
+    expect(existsSync(sessionDir(home, held))).toBe(false);
+    expect(taskId).not.toBe(held);
   });
 
   it("another card, agent or project, or a new chat, starts afresh", async () => {

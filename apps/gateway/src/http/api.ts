@@ -7,6 +7,7 @@ import {
   addChecklistItem,
   addComment,
   attachmentsDir,
+  cardKey,
   chatCards,
   createMonitor,
   createPairingCode,
@@ -879,6 +880,8 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/tasks\/([\w-]{1,64})$/,
       ({ params }) => {
         const id = params[0] as string;
+        // The session key is the card's root (ADR-0066); read it before the row goes.
+        const held = getTask(db, id);
         const out = deleteCard(db, id);
         if (!out.ok) {
           if (out.reason === "no such task") throw new HttpError(404, "no such task");
@@ -889,7 +892,7 @@ export function createApiHandler(deps: ApiDeps) {
               : "This is a step inside a card; delete the whole card instead.",
           );
         }
-        if (deps.home) endCardSessions(db, deps.home, [id]);
+        if (deps.home && held) endCardSessions(db, deps.home, [cardKey(held)]);
         log(`kanban: owner deleted task ${id} (${out.deleted} task(s) with its steps)`);
         return out;
       },

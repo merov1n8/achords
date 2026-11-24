@@ -68,6 +68,7 @@ export function dropCardSession(db: Db, k: CardSessionKey): void {
 
 /** The next task of the chat took the card over: its sessions go with it (ADR-0059). */
 export function carryCardSessions(db: Db, home: string, from: string, to: string): void {
+  if (from === to) return;
   db.prepare("UPDATE card_sessions SET card = ? WHERE card = ?").run(to, from);
   if (existsSync(sessionDir(home, from))) {
     mkdirSync(join(home, "sessions"), { recursive: true, mode: 0o700 });
@@ -83,10 +84,30 @@ export function endCardSessions(db: Db, home: string, cards: string[]): void {
   }
 }
 
-/** The cards of a chat (archived or deleted with it). */
+/**
+ * The session key of a task's card: its root. A successor (review rework, handoff) shares its
+ * root with the task it continues, so it keeps the same sessions.
+ */
+export function cardKey(task: { id: string; rootId?: string | null }): string {
+  return task.rootId ?? task.id;
+}
+
+/** The task that holds the card for a session key (the newest one with a column). */
+export function cardHolder(db: Db, key: string): { id: string; column: string } | undefined {
+  const row = db
+    .prepare(
+      "SELECT id, board_column AS col FROM tasks WHERE (id = ? OR root_id = ?) AND board_column IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1",
+    )
+    .get(key, key);
+  return row ? { id: row.id as string, column: row.col as string } : undefined;
+}
+
+/** The session keys of a chat's cards (archived or deleted with it). */
 export function chatCards(db: Db, threadId: string): string[] {
   return db
-    .prepare("SELECT id FROM tasks WHERE thread_id = ? AND parent_id IS NULL")
+    .prepare(
+      "SELECT DISTINCT COALESCE(root_id, id) AS k FROM tasks WHERE thread_id = ? AND parent_id IS NULL",
+    )
     .all(threadId)
-    .map((r) => r.id as string);
+    .map((r) => r.k as string);
 }

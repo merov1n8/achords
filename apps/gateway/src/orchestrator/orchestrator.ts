@@ -18,6 +18,8 @@ import {
   askOwner as askOwnerQuestion,
   attachmentsDir,
   type Channel,
+  cardHolder,
+  cardKey,
   carryCardSessions,
   childFinished,
   claim,
@@ -916,10 +918,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return until > Date.now() ? until : undefined;
   };
 
+  /**
+   * ADR-0066: a card is done once it passes its finish column (review in the default workflow),
+   * or reaches finish when nothing follows it. Rework sent back from review keeps its sessions.
+   */
+  const cardDone = (column: string, wf: Workflow) => {
+    const at = wf.columns.indexOf(column);
+    const finish = wf.columns.indexOf(wf.finish);
+    return at > finish || (at === finish && finish === wf.columns.length - 1);
+  };
+
   /** on_enter automation; `byOwner` skips nothing here (approval is checked before moving). */
   const enterColumn = (task: Task, column: string, wf: Workflow) => {
     // ADR-0066: a done card's agents start afresh; its transcripts go with it.
-    if (column === wf.finish) endCardSessions(db, home, [task.id]);
+    if (cardDone(column, wf)) endCardSessions(db, home, [cardKey(task)]);
     // A card that has not started has no work to review yet.
     if (task.parked) return;
     const assign = wf.on_enter[column]?.assign;
@@ -1049,7 +1061,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     });
     // The same card carries on (ADR-0059).
     takeOverCard(db, card.id, next.id, wf.start, "system");
-    carryCardSessions(db, home, card.id, next.id);
+    carryCardSessions(db, home, cardKey(card), cardKey(next));
     say(t("thread.sentBack", { agent: card.assigneeAgentId }));
   };
 
@@ -2030,7 +2042,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         const card = opts.newCard ? undefined : threadCard(db, from.threadId);
         if (card) {
           takeOverCard(db, card, t.id, workflowForTask(t).start, "system");
-          carryCardSessions(db, home, card, t.id);
+          const held = getTask(db, card);
+          if (held) carryCardSessions(db, home, cardKey(held), cardKey(t));
         } else placeCard(db, t.id, workflowForTask(t).start, "system");
         return { ok: true, taskId: t.id };
       }
@@ -3034,8 +3047,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       addSpend(db, rootId, spendInfo(built.provider.id, built.req.model, res).costUsd ?? 0);
       if (session && res.ok && res.sessionId) {
         // An agent may have moved its own card to done during the run: nothing to keep then.
-        const card = getTask(db, sessionKey.card);
-        if (card?.column && card.column === workflowForTask(card).finish) {
+        const holder = cardHolder(db, sessionKey.card);
+        const card = holder && getTask(db, holder.id);
+        if (card?.column && cardDone(card.column, workflowForTask(card))) {
           endCardSessions(db, home, [sessionKey.card]);
         } else {
           saveCardSession(db, {
@@ -3104,7 +3118,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         else {
           // The successor carries the same card on (ADR-0059).
           takeOverCard(db, task.id, next.id, workflowForTask(next).start, "system");
-          carryCardSessions(db, home, task.id, next.id);
+          carryCardSessions(db, home, cardKey(task), cardKey(next));
           if (task.threadId) {
             post(
               task.threadId,

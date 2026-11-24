@@ -48,7 +48,7 @@ Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, AD
       - a run sends a stream event;
       - a message or move is posted;
       - a child finishes.
-      Lease renewal and `updated_at` do not count.
+        Lease renewal and `updated_at` do not count.
     - **Spend:** 80 % of the root's budget is spent (a setting). This is checked only when the root has a budget.
   - **Not a stall:**
     - A chain whose next task waits for the single worker. Its clock restarts when one of its tasks is claimed.
@@ -142,7 +142,7 @@ Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, AD
 
 - Decision, part 5: one CLI session per agent and card (amends ADR-0024 and ADR-0051)
   - **Where sessions live.** Claude card runs use `CLAUDE_CONFIG_DIR=$ACHORDS_HOME/sessions/<card>/<agent>/` and keep session persistence on. Agent transcripts therefore never mix with the owner's own Claude sessions, and each card's sessions can be removed as one folder.
-    - The run still authenticates with the owner's subscription. Implementation verifies that login works with a separate config directory (a `claude setup-token` token on servers, the keychain login on a desktop). If it does not, the runs stay on today's fresh prompts and the problem is reported. Sessions never move back into the owner's `~/.claude`.
+    - Login was checked on 2026-11-24: with its own config directory, a host run does not see the Mac's Keychain login. Session runs therefore sign in with the `claude setup-token` token that container runs already use (ADR-0051). Without that token, card runs stay on today's fresh prompts, and the chat says once why. Sessions never move into the owner's `~/.claude`.
   - **Key.** `card_sessions(card, agent, project, session_id, model, trust, created_at, last_used_at)`. A session never crosses a card, an agent or a project.
   - **Resume.** A later run of the same agent on the same card starts with `--resume <id>`. There is no time window: the owner chose continuity over cost. Its prompt holds only what is new since the session's last turn:
     - the children's results for a re-queued parent;
