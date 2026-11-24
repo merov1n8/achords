@@ -368,8 +368,17 @@ describe("permission levels in runs (ADR-0067)", () => {
     await give("builder");
     const req = seen[0]?.req;
     expect(req?.tools).toContain("Bash");
-    // No command list, and no bare Bash rule: only the sandbox auto-allows commands.
-    expect(req?.allowedTools).not.toContain("Bash");
+    // No command list but a bare Bash rule: the env scrub turns the CLI's sandbox auto-allow
+    // off, and the sandbox itself (failIfUnavailable, no unsandboxed fallback) still applies.
+    expect(req?.allowedTools).toContain("Bash");
+    expect(req?.allowedTools?.some((r) => r.startsWith("Bash(") && !r.startsWith("Bash(/"))).toBe(
+      false,
+    );
+    expect(JSON.parse(req?.settings ?? "{}").sandbox).toMatchObject({
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+    });
     expect(req?.container).toBeUndefined();
     // The local app stays reachable from the host.
     expect(req?.allowedTools).toContain("mcp__blender__import_asset");
@@ -448,7 +457,7 @@ describe("permission levels in runs (ADR-0067)", () => {
     const req = seen[0]?.req;
     expect(req?.tools).toContain("Bash");
     expect(req?.container).toBeUndefined();
-    expect(req?.allowedTools).not.toContain("Bash");
+    expect(req?.allowedTools).toContain("Bash");
     expect(req?.allowedTools).toEqual(
       expect.arrayContaining(["mcp__blender__import_asset", "mcp__social__save_draft"]),
     );

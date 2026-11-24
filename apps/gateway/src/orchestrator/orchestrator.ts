@@ -783,7 +783,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     });
     const free = shellBox && m.tools.includes("Bash") ? shellBox : undefined;
     // Inside the VM the container is the sandbox: any command, never push or history rewrite.
-    if (free === "container") allowedTools.push("Bash");
+    // On the host the CLI's sandbox is: with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set (the login
+    // token stays out of the shell) the CLI no longer auto-allows sandboxed commands, so a bare
+    // Bash rule is needed. Commands still run only sandboxed (failIfUnavailable, no unsandboxed
+    // fallback) and the deny rules (git push, history rewrite) still win.
+    if (free) allowedTools.push("Bash");
     // A host shell reads nothing of the user's home: package caches go to a folder of this run.
     const cache = free === "host" ? join(real(home), "run", `cache-${randomUUID()}`) : undefined;
     if (cache) mkdirSync(cache, { recursive: true, mode: 0o700 });

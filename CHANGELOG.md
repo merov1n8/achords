@@ -95,6 +95,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Level 4 shells on the host ran no command that writes ("requires approval"): with the login
+  token scrubbed from the shell the CLI stops auto-allowing sandboxed commands, so host sandbox
+  runs now get a plain Bash rule; commands still run only inside the sandbox (ADR-0067).
+
 - A review ended in silence: the reviewer's verdict was not shown anywhere, and a card it sent
   back to "in progress" just sat there. The verdict now appears in the chat under the
   reviewer's name, and the card's agent continues at once with what the review found (after
