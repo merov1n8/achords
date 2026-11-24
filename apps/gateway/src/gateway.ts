@@ -63,6 +63,9 @@ const SEED_SKILLS = new URL("../../../seed/skills/", import.meta.url).pathname;
 const HUB_MCP_SERVER = new URL("./mcp/server.ts", import.meta.url).pathname;
 const MCP_LAUNCHER = new URL("./mcp/launch.ts", import.meta.url).pathname;
 const MCP_RELAY = new URL("./mcp/relay.ts", import.meta.url).pathname;
+// ADR-0067 level 5 push: git's credential helper and the Bash push guard of a run.
+const GIT_HELPER = new URL("./mcp/git-credential.ts", import.meta.url).pathname;
+const PUSH_GUARD = new URL("./mcp/push-guard.ts", import.meta.url).pathname;
 const BUILTIN_MCP = { wordpress: new URL("./mcp/wordpress.ts", import.meta.url).pathname };
 const SEED_CATALOG = new URL("../../../seed/catalog/", import.meta.url).pathname;
 const SEED_CONTAINER = new URL("../../../seed/container/", import.meta.url).pathname;
@@ -312,6 +315,7 @@ export function runGateway(home: string): Promise<number> {
           }
         : undefined,
     budget,
+    git: { helperEntry: GIT_HELPER, guardEntry: PUSH_GUARD },
     // Price list for CLIs that report tokens only; read per run, so edits apply at once.
     price: (model, usage) => costOf(loadPricing(home), model, usage),
     db,

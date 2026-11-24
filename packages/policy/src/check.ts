@@ -79,6 +79,33 @@ const SHELL_META = /[;&|`$<>(){}\n\r\\*?[\]!~]/;
 const tokens = (cmd: string) => cmd.trim().split(/\s+/).filter(Boolean);
 
 const FORCE_FLAG = /^(-f|--force|--force-with-lease(=.*)?|--mirror)$/;
+// A cluster of short options (`-uf`) and a `+` refspec force as well.
+const FORCE_SHORT = /^-[a-zA-Z]*f[a-zA-Z]*$/;
+const DELETE_FLAG = /^(--delete|--prune|-[a-zA-Z]*d[a-zA-Z]*)$/;
+
+/**
+ * The arguments after `push` of every `git … push` in a command line (split at shell operators;
+ * git's own `-C <dir>` and `-c <key=value>` before the subcommand are skipped).
+ */
+export function gitPushArgs(command: string): string[][] {
+  return command.split(/&&|\|\||[;|\n]/).flatMap((segment) => {
+    const argv = tokens(segment);
+    let i = argv.findIndex((a) => a === "git" || a.endsWith("/git"));
+    if (i < 0) return [];
+    for (i++; i < argv.length; i++) {
+      const a = argv[i] as string;
+      if (a === "-C" || a === "-c") i++;
+      else if (!a.startsWith("-")) break;
+    }
+    return argv[i] === "push" ? [argv.slice(i + 1)] : [];
+  });
+}
+
+/** Whether a command deletes on the remote: `--delete`/`-d`, `--prune` or a `:<ref>` refspec. */
+export const pushDeletes = (command: string): boolean =>
+  gitPushArgs(command).some((args) =>
+    args.some((a) => DELETE_FLAG.test(a) || (a.startsWith(":") && a.length > 1)),
+  );
 
 /**
  * ADR-0067: force push and history rewrite are refused at every level, under every approval.
@@ -87,11 +114,12 @@ const FORCE_FLAG = /^(-f|--force|--force-with-lease(=.*)?|--mirror)$/;
 export function historyRewrite(command: string): string | undefined {
   const argv = tokens(command);
   const git = argv.indexOf("git");
-  if (git < 0) return undefined;
-  const sub = argv[git + 1];
+  const sub = git < 0 ? undefined : argv[git + 1];
   if (sub === "filter-branch" || sub === "filter-repo") return `git ${sub} rewrites history`;
-  if (sub === "push" && argv.slice(git + 2).some((a) => FORCE_FLAG.test(a)))
+  const force = (a: string) => FORCE_FLAG.test(a) || FORCE_SHORT.test(a) || a.startsWith("+");
+  if (gitPushArgs(command).some((args) => args.some(force))) {
     return "force push is refused at every level";
+  }
   return undefined;
 }
 

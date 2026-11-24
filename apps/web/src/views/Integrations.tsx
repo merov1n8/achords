@@ -3,6 +3,7 @@ import { useEffect, useState } from "preact/hooks";
 import { type Entry, type Row, siteLists, toLists, toRows } from "../accounts.ts";
 import { api } from "../api.ts";
 import { EnvToggle } from "../components/EnvToggle.tsx";
+import { GitToken } from "../components/GitToken.tsx";
 import { Confirm, Modal } from "../components/Modal.tsx";
 import { SiteLogin, Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
@@ -244,6 +245,14 @@ function OwnAccounts(props: { onSaved: () => void }) {
           </table>
         )}
         <Sites slug="own" />
+        {/* Remounted when the repositories change, so the token row follows at once. */}
+        <GitToken
+          slug="own"
+          key={rows
+            .filter((r) => r.channel === "repository")
+            .map((r) => r.value)
+            .join(" ")}
+        />
       </div>
       {error && <p class="error">{error}</p>}
       {adding && (

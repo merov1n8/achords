@@ -84,6 +84,8 @@ import {
   type Env,
   effectiveLevel,
   entryValues,
+  GIT_REPO,
+  gitTokenId,
   type IntegrationStatus,
   isLocalModel,
   isSkillName,
@@ -131,8 +133,6 @@ import { serveStatic } from "./static.ts";
 // listens on: another gateway on 127.0.0.1 (a test, a second instance) cannot overwrite it.
 const cookieName = (req: IncomingMessage) => `achords_session_${req.socket.localPort}`;
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
-const GIT_REPO =
-  /^(https:\/\/[a-z0-9.-]+(:\d+)?(\/[\w.-]+){2,}\/?|git@[a-z0-9.-]+:[\w.-]+(\/[\w.-]+)+)$/i;
 /** The owner's remote address for the web UI (e.g. this Mac's Tailscale name). */
 const REMOTE_HOST_KEY = "web.remote_host";
 const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/;
@@ -181,6 +181,7 @@ export interface ApiDeps {
     | "skillPropose"
     | "createCard"
     | "startCard"
+    | "gitCredential"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -1463,6 +1464,17 @@ export function createApiHandler(deps: ApiDeps) {
         send(res, 201, sitesView(slug, entry));
       },
     ],
+    // ADR-0067: the project's push token for its repositories (level 5), set through /api/vault.
+    [
+      "GET",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})\/git-token$/,
+      ({ params }) => {
+        const slug = params[0] as string;
+        const repositories = (entriesOf(slug).repository ?? []).map((e) => e.value);
+        const id = gitTokenId(slug);
+        return { id, set: vault().status(id).set, repositories };
+      },
+    ],
     // ADR-0067: a site's live/staging tag.
     [
       "PUT",
@@ -2109,6 +2121,21 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
         const tool = path.slice("/api/agent/".length);
+        // ADR-0067: the credential helper of a level 5 work-mode run (its own push token). A
+        // refusal answers nothing git can use; the token is never logged.
+        if (method === "POST" && tool === "git-credential") {
+          if (!caller.tools.includes("git_credential")) {
+            throw new HttpError(403, "push not granted to this run");
+          }
+          const b = await readJson(req, 4096);
+          const field = (v: unknown) => (typeof v === "string" ? v.slice(0, 500) : undefined);
+          const out = deps.orchestrator.gitCredential(
+            { from: "task", taskId: caller.taskId },
+            { protocol: field(b.protocol), host: field(b.host), path: field(b.path) },
+          );
+          send(res, out.ok ? 200 : 403, out);
+          return;
+        }
         // Publishing (ADR-0037): from the launcher, with a token granting publish:<integration>.
         if (method === "POST" && (tool === "publish" || tool === "publish_log")) {
           // A page or post can be long; the owner sees it before it runs.

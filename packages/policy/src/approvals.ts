@@ -2,7 +2,7 @@
 // into one grant when it is made; the owner then picks its scope (once, for this card, always).
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize, sep } from "node:path";
-import { historyRewrite } from "./check.ts";
+import { gitPushArgs, historyRewrite, pushDeletes } from "./check.ts";
 import type { Manifest } from "./manifest.ts";
 
 export const PERMISSION_KINDS = [
@@ -19,7 +19,9 @@ export type PermissionKind = (typeof PERMISSION_KINDS)[number];
 export type Grant =
   | { kind: "folder"; folders: string[] }
   | { kind: "integration"; id: string }
-  | { kind: "level"; level: number };
+  | { kind: "level"; level: number }
+  /** A level 5 push that deletes on the remote, exactly as approved (always-ask, no "always"). */
+  | { kind: "push"; command: string };
 
 const within = (p: string, root: string) =>
   p === root || p.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
@@ -41,13 +43,15 @@ export function keyFolder(path: string, ctx: { achordsHome: string; userHome?: s
 export const inFolders = (path: string, folders: string[], userHome = homedir()) =>
   folders.some((f) => within(expandPath(path, userHome), expandPath(f, userHome)));
 
-/** A command no approval can allow: force push and history rewrite, and push for now. */
-export function refusedCommand(command: string): string | undefined {
+/**
+ * A command no approval can allow: force push and history rewrite, and push itself unless the
+ * run may push (level 5 in work mode, through the gateway's credential helper).
+ */
+export function refusedCommand(command: string, opts: { push?: boolean } = {}): string | undefined {
   const rewrite = historyRewrite(command);
   if (rewrite) return rewrite;
-  // The gateway's credential helper for push is a later step (ADR-0067, keys behind the gateway).
-  if (/(^|\s)git\s+push(\s|$)/.test(command)) {
-    return "git push is not available to agents yet: it will go through the gateway's credential helper";
+  if (!opts.push && gitPushArgs(command).length) {
+    return "git push needs level 5 in work mode: it goes through the gateway's credential helper";
   }
   return undefined;
 }
@@ -77,6 +81,7 @@ export function alwaysAskCommand(
     return "deleting outside its folders";
   }
   if (CHANGE_PERMISSIONS.has(argv[0] ?? "")) return "changing permissions";
+  if (pushDeletes(command)) return "deleting on the remote";
   if (
     argv[0] === "security" ||
     argv.some((a) => (isAbsolute(a) || a.startsWith("~")) && keyFolder(a, ctx))
@@ -90,6 +95,7 @@ export function alwaysAskCommand(
  * A leveled agent's manifest with its grants applied before compiling: folders join the write
  * remit (the level decides whether they are written or only read), integrations the `mcp` remit;
  * `level` is the highest level granted, if any (the caller caps it at the project's ceiling).
+ * Approved pushes change no field: the run's push guard reads them.
  */
 export function applyGrants(m: Manifest, grants: Grant[]): { manifest: Manifest; level?: number } {
   let manifest = m;
@@ -102,7 +108,7 @@ export function applyGrants(m: Manifest, grants: Grant[]): { manifest: Manifest;
       };
     } else if (g.kind === "integration") {
       if (!manifest.mcp.includes(g.id)) manifest = { ...manifest, mcp: [...manifest.mcp, g.id] };
-    } else {
+    } else if (g.kind === "level") {
       level = Math.max(level ?? 0, g.level);
     }
   }

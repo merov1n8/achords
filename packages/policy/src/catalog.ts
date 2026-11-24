@@ -450,7 +450,7 @@ export function siteSlug(url: string): string {
 }
 
 // Vault ids are at most 64 characters; a longer one is cut and keeps a hash of the whole id.
-const fitId = (id: string) =>
+export const fitId = (id: string) =>
   id.length <= 64
     ? id
     : `${id.slice(0, 55).replace(/-+$/, "")}-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;

@@ -11,6 +11,7 @@ import {
 } from "../accounts.ts";
 import { api } from "../api.ts";
 import { EnvToggle } from "../components/EnvToggle.tsx";
+import { GitToken } from "../components/GitToken.tsx";
 import { Confirm, Modal } from "../components/Modal.tsx";
 import { Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
@@ -486,6 +487,7 @@ function EditProject(props: {
       )}
       {/* Outside the form: sites save on their own, not with the Save button. */}
       {f && <Sites slug={props.slug} />}
+      {f && <GitToken slug={props.slug} />}
     </Modal>
   );
 }

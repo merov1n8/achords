@@ -49,10 +49,12 @@ export {
   compileLevel,
   hostSandboxSettings,
   levelConflicts,
+  PUSH_ALLOW,
   REGISTRY_HOSTS,
   type RunMode,
   type SandboxKind,
   SHELL_DENY,
+  shellPermissions,
 } from "./compile.ts";
 export {
   AGENT_LIST_FIELDS,
@@ -68,6 +70,15 @@ export {
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";
+export {
+  GIT_REPO,
+  type GitCredentialRequest,
+  gitCredentialTarget,
+  gitPushEnv,
+  gitTokenId,
+  pushGuardHook,
+  pushRefusal,
+} from "./git.ts";
 export {
   ceilingOf,
   type EffectiveLevel,

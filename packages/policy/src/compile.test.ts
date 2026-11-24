@@ -330,6 +330,18 @@ describe("compileLevel (ADR-0067)", () => {
     );
   });
 
+  it("push only at level 5 in work mode with a Claude shell", () => {
+    const m = agent("level: 5\nmcp: [meta]");
+    const exp = { project: { class: "experimental" as const } };
+    expect(compile(m, 5, exp).push).toBe(true);
+    expect(compile(m, 5, { ...exp, run: { mode: "web" } }).push).toBeUndefined();
+    expect(compile(m, 4, exp).push).toBeUndefined();
+    expect(compile(agent("level: 5"), 5, exp).push).toBe(true);
+    expect(compile(m, 5, { ...exp, run: { model: "cli-codex/gpt-5" } }).push).toBeUndefined();
+    // No container for keys beside a shell: level 3, no push.
+    expect(compile(m, 5, { ...exp, run: { containerAvailable: false } }).push).toBeUndefined();
+  });
+
   it("refuses an integration that is not in the catalog", () => {
     expect(compile(agent("level: 3\nmcp: [nope]"), 3).refusal).toMatch(/not in the catalog/);
   });
@@ -412,6 +424,22 @@ describe("host sandbox settings (ADR-0067 level 4)", () => {
     }) as { sandbox: { excludedCommands: string[] } };
     expect(none.sandbox.excludedCommands).toEqual([]);
   });
+
+  it("a push run reaches the gateway and keeps every deny but push", () => {
+    const base = { write: [], own: [], network: [], unsandboxed: [], achordsHome: "/h" };
+    type S = {
+      sandbox: { network: { allowedDomains: string[] } };
+      permissions: { deny: string[]; allow: string[] };
+    };
+    const push = hostSandboxSettings({ ...base, push: { gatewayHost: "127.0.0.1" } }) as S;
+    expect(push.sandbox.network.allowedDomains).toContain("127.0.0.1");
+    expect(push.permissions.deny).toEqual(["Bash(git filter-branch:*)", "Bash(git filter-repo:*)"]);
+    expect(push.permissions.allow).toEqual(["Bash(git push:*)"]);
+    const level4 = hostSandboxSettings(base) as S;
+    expect(level4.sandbox.network.allowedDomains).not.toContain("127.0.0.1");
+    expect(level4.permissions.deny).toContain("Bash(git push:*)");
+    expect(level4.permissions.allow).toEqual([]);
+  });
 });
 
 describe("force push and history rewrite (ADR-0067)", () => {
@@ -422,6 +450,10 @@ describe("force push and history rewrite (ADR-0067)", () => {
       "git push origin main --force-with-lease",
       "git push --force-with-lease=main:abc",
       "git push --mirror backup",
+      "git push -uf origin main",
+      "git push origin +main",
+      "git -C /srv/repo push --force",
+      "cd /srv/repo && git push origin main -f",
       "git filter-branch --tree-filter x",
       "git filter-repo --path a",
     ]) {

@@ -218,6 +218,12 @@ describe("HTTP API", () => {
             const task = enqueue(db, { title: input.title, parked: !input.start });
             return { ok: true, taskId: task.id };
           },
+          gitCredential: (from, request) => {
+            questions.push({ from, question: `git: ${JSON.stringify(request)}` });
+            return request.host === "github.com"
+              ? { ok: true, username: "x-access-token", password: "push-token-value" }
+              : { ok: false, reason: "not a repository of this project" };
+          },
           startCard: (taskId, agent) => {
             cards.push({ start: taskId, agent });
             return taskId === "started"
@@ -1191,6 +1197,59 @@ describe("HTTP API", () => {
     expect((await post(tokens.issue("task-4", "dev", ["request_access"]).token, ask)).status).toBe(
       403,
     );
+  });
+
+  it("git credential endpoint: only a run's push token, the request passed on (ADR-0067)", async () => {
+    const post = (token: string, body: object) =>
+      fetch(`${base}/api/agent/git-credential`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    const push = tokens.issue("task-g", "web-dev", ["git_credential"]).token;
+    const ask = { protocol: "https", host: "github.com", path: "acme/site.git", extra: "x" };
+    expect(await (await post(push, ask)).json()).toEqual({
+      ok: true,
+      username: "x-access-token",
+      password: "push-token-value",
+    });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-g" },
+      question: `git: ${JSON.stringify({ protocol: "https", host: "github.com", path: "acme/site.git" })}`,
+    });
+    expect((await post(push, { ...ask, host: "gitlab.com" })).status).toBe(403);
+    // The hub server's run token does not carry push.
+    expect((await post(tokens.issue("task-g", "web-dev", ["ask_owner"]).token, ask)).status).toBe(
+      403,
+    );
+    expect((await post("nope", ask)).status).toBe(401);
+  });
+
+  it("a project's push token: status only, never the value (ADR-0067)", async () => {
+    const { call } = await pair();
+    await call("/api/projects", {
+      method: "POST",
+      body: '{"slug":"acme","name":"Acme","workspace":"web-clients"}',
+    });
+    const path = "/api/projects/acme/git-token";
+    expect(await (await call(path)).json()).toEqual({
+      id: "git-token-acme",
+      set: false,
+      repositories: [],
+    });
+    await call("/api/projects/acme", {
+      method: "PUT",
+      body: JSON.stringify({ integrations: { repository: ["https://github.com/acme/site"] } }),
+    });
+    vault.set("git-token-acme", "ghp_secret-push-token", "test");
+    const text = await (await call(path)).text();
+    expect(text).not.toContain("ghp_secret");
+    expect(JSON.parse(text)).toEqual({
+      id: "git-token-acme",
+      set: true,
+      repositories: ["https://github.com/acme/site"],
+    });
+    expect((await call("/api/projects/own/git-token")).status).toBe(200);
   });
 
   it("publish endpoints need a token granting that integration (ADR-0037)", async () => {

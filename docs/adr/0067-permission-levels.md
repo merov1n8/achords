@@ -116,6 +116,7 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
     - `git push` at level 5 goes through a git credential helper answered by the gateway, the use-without-read mechanism ADR-0055 left open. Its credentials are per project, in the vault.
     - No push credential is ever placed in the run. A host git login on a development machine is not a supported path.
     - Force push and history rewrite are refused at every level.
+    - As built: L5 work-mode runs get git's `credential.helper` through `GIT_CONFIG_*` environment variables only; the helper asks `POST /api/agent/git-credential` with a push-only run token, and the gateway answers from the vault id `git-token-<project>` for the project's own HTTPS `repository` entries (audited), which settles the git credential helper ADR-0055 left "not covered"; SSH remotes are not supported.
   - **Local models** are capped at level 3, with no open web. Today the local provider takes no tools, so the cap takes effect once local tool use exists.
   - **Unchanged:**
     - publishing review or auto per channel (ADR-0037);
