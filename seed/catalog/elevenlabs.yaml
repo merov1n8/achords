@@ -38,6 +38,19 @@ tools:
     - compose_music
     - video_to_music
     - upload_music_for_inpainting
+  # ADR-0067: every write tool uses account credits.
+  class:
+    text_to_speech: spend
+    speech_to_text: spend
+    text_to_sound_effects: spend
+    speech_to_speech: spend
+    isolate_audio: spend
+    text_to_voice: spend
+    create_voice_from_preview: spend
+    voice_clone: spend
+    compose_music: spend
+    video_to_music: spend
+    upload_music_for_inpainting: spend
 # Connection test (web Integrations page).
 test:
   tool: check_subscription

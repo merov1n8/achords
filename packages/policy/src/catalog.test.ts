@@ -16,6 +16,7 @@ import {
   siteCredentials,
   siteSlug,
   siteStatus,
+  toolClass,
 } from "./catalog.ts";
 import { parseManifest } from "./manifest.ts";
 import { WEB_DEV } from "./test-fixtures.ts";
@@ -69,6 +70,34 @@ describe("integration catalog (ADR-0034)", () => {
     expect(() => loadCatalog(seed, owner)).toThrow();
     writeFileSync(join(owner, "x.yaml"), WORDPRESS.replace("vault:wordpress", "vault:Bad Id"));
     expect(() => loadCatalog(seed, owner)).toThrow(/invalid vault reference/);
+  });
+
+  it("classifies tools: read tools read, write tools as listed, unclassified ones live (ADR-0067)", () => {
+    const { seed, owner } = dirs();
+    writeFileSync(
+      join(owner, "wordpress.yaml"),
+      WORDPRESS.replace(
+        "write: [create_post]",
+        "write: [create_post, create_draft]\n  class: { create_draft: draft }",
+      ),
+    );
+    const entry = loadCatalog(seed, owner).get("wordpress") as CatalogEntry;
+    expect(toolClass(entry, "list_posts")).toBe("read");
+    expect(toolClass(entry, "create_draft")).toBe("draft");
+    expect(toolClass(entry, "create_post")).toBe("live");
+    writeFileSync(
+      join(owner, "wordpress.yaml"),
+      WORDPRESS.replace("write: [create_post]", "write: [create_post]\n  class: { delete: live }"),
+    );
+    expect(() => loadCatalog(seed, owner)).toThrow(/not a listed read or write tool/);
+    writeFileSync(
+      join(owner, "wordpress.yaml"),
+      WORDPRESS.replace(
+        "write: [create_post]",
+        "write: [create_post]\n  class: { create_post: x }",
+      ),
+    );
+    expect(() => loadCatalog(seed, owner)).toThrow();
   });
 
   it("fills the project into secret references", () => {

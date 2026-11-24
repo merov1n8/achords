@@ -123,6 +123,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Groundwork for permission levels (ADR-0067), no change to runs yet: an agent may carry a
+  `level` (0 off to 5 full), a project a `class` (secured or experimental, unset counts as
+  secured) and `spend_without_asking` (experimental only), and every account and site in a
+  project or in your own accounts may be tagged `env: live | staging` (plain entries stay live).
+  Per-project overrides live in `~/.achords/overrides.yaml`, and every shipped integration tool
+  has a class (read, draft, reversible, live, spend).
 - Stuck work reaches you within minutes (ADR-0066): when a chat's work makes no progress for 15
   minutes, or has spent 80 % of its budget, the boss looks at it once and asks you, stops it, or
   lets it run. Queued work waiting for its turn and work waiting for your answer are left alone.

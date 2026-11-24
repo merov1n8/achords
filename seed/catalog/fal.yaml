@@ -26,6 +26,12 @@ tools:
     - submit_job
     - cancel_job
     - upload_file
+  # ADR-0067: upload_file makes the file reachable by URL.
+  class:
+    run_model: spend
+    submit_job: spend
+    cancel_job: reversible
+    upload_file: live
 # Connection test (web Integrations page).
 test:
   tool: search_models

@@ -25,6 +25,9 @@ export {
   siteCredentials,
   siteSlug,
   siteStatus,
+  TOOL_CLASSES,
+  type ToolClass,
+  toolClass,
 } from "./catalog.ts";
 export * from "./check.ts";
 export {
@@ -42,6 +45,18 @@ export {
   updateManifestName,
 } from "./edit.ts";
 export {
+  ceilingOf,
+  type EffectiveLevel,
+  effectiveLevel,
+  type LevelOverride,
+  type LevelReason,
+  levelSchema,
+  loadOverrides,
+  MAX_LEVEL,
+  overrideRefusal,
+  saveOverrides,
+} from "./levels.ts";
+export {
   loadAgents,
   loadManifest,
   type Manifest,
@@ -51,12 +66,18 @@ export {
 export { allowRules, openWeb, siteOf, webFetchSettings } from "./permissions.ts";
 export { costOf, loadPricing, type Pricing } from "./pricing.ts";
 export {
+  type AccountEntry,
+  type AccountListsInput,
   createProject,
+  type Env,
+  entryValues,
+  loadOwnAccountEntries,
   loadOwnAccounts,
   loadProjects,
   OWN,
   ownProject,
   type Project,
+  type ProjectClass,
   removeProject,
   saveOwnAccounts,
   updateProject,

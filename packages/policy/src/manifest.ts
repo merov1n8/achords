@@ -47,6 +47,13 @@ export const manifestSchema = z
         allowed: z.array(modelId).optional(),
       })
       .strict(),
+    // ADR-0067: what the agent may do without asking (0 off … 5 full). While absent, the
+    // tools, shell, network and container lists below apply as written.
+    level: z.number().int().min(0).max(5).optional(),
+    // ADR-0067 owner-approved exception: exact executables that run outside the sandbox.
+    unsandboxed: z
+      .array(z.string().refine(isAbsolute, "must be an absolute path to an executable"))
+      .optional(),
     tools: z.array(z.string().min(1)).default([]),
     mcp: z.array(z.string().min(1)).default([]),
     fs: z

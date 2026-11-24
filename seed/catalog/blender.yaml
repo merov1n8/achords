@@ -13,6 +13,11 @@ hosts: [127.0.0.1]
 tools:
   read: [get_addon_status, get_scene_info, look, search_assets]
   write: [execute_blender_code, generate_3d, import_asset]
+  # ADR-0067: execute_blender_code runs any code on this Mac; generate_3d may use a paid model.
+  class:
+    execute_blender_code: live
+    generate_3d: spend
+    import_asset: reversible
 # Connection test (web Integrations page).
 test:
   tool: get_scene_info

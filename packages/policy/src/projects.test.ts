@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createProject,
+  loadOwnAccountEntries,
   loadOwnAccounts,
   loadProjects,
   ownProject,
@@ -124,13 +125,111 @@ describe("projects", () => {
     expect(() => updateProject(dir, "acme", { integrations: { "Bad Key": ["x"] } })).toThrow();
   });
 
+  it("reads plain account entries as live and keeps staging entries through saves (ADR-0067)", () => {
+    createProject(dir, { slug: "acme", name: "Acme", workspace: "w" });
+    appendFileSync(
+      join(dir, "acme", "project.yaml"),
+      [
+        "integrations:",
+        "  website:",
+        "    - https://acme.com",
+        "    - { url: https://staging.acme.com, env: staging }",
+        "  ga4:",
+        "    - { id: '324490876', env: live }",
+        "",
+      ].join("\n"),
+    );
+    const p = loadProjects(dir).get("acme");
+    // Consumers that only need the values see plain strings, as before.
+    expect(p?.integrations).toEqual({
+      website: ["https://acme.com", "https://staging.acme.com"],
+      ga4: ["324490876"],
+    });
+    expect(p?.integrationEntries).toEqual({
+      website: [
+        { value: "https://acme.com", env: "live" },
+        { value: "https://staging.acme.com", env: "staging" },
+      ],
+      ga4: [{ value: "324490876", env: "live" }],
+    });
+    // A rename keeps the lists; the web form's plain strings keep each value's env.
+    updateProject(dir, "acme", { name: "Acme shop" });
+    const again = updateProject(dir, "acme", {
+      integrations: { website: ["https://staging.acme.com", "https://new.acme.com"] },
+    });
+    expect(again.integrationEntries.website).toEqual([
+      { value: "https://staging.acme.com", env: "staging" },
+      { value: "https://new.acme.com", env: "live" },
+    ]);
+    const yaml = readFileSync(join(dir, "acme", "project.yaml"), "utf8");
+    expect(yaml).toMatch(/- url: https:\/\/staging\.acme\.com\n\s+env: staging\n/);
+    expect(yaml).toContain("- https://new.acme.com");
+    // An editor that sends entries can switch one to staging.
+    const switched = updateProject(dir, "acme", {
+      integrations: { ga4: [{ value: "324490876", env: "staging" }] },
+    });
+    expect(switched.integrationEntries.ga4).toEqual([{ value: "324490876", env: "staging" }]);
+    expect(loadProjects(dir).get("acme")?.integrationEntries.ga4?.[0]?.env).toBe("staging");
+    writeFileSync(
+      join(dir, "acme", "project.yaml"),
+      "name: A\nworkspace: w\nintegrations:\n  ga4: [{ id: '1', env: prod }]\n",
+    );
+    expect(() => loadProjects(dir)).toThrow(/integrations/);
+  });
+
+  it("stores the class only once chosen; spending without asking is for experimental only", () => {
+    createProject(dir, { slug: "acme", name: "Acme", workspace: "w" });
+    expect(loadProjects(dir).get("acme")?.class).toBeUndefined();
+    expect(
+      createProject(dir, { slug: "b", name: "B", workspace: "w", class: "secured" }).class,
+    ).toBe("secured");
+    expect(() => updateProject(dir, "acme", { spend_without_asking: true })).toThrow(
+      /spend_without_asking.*experimental/s,
+    );
+    const p = updateProject(dir, "acme", { class: "experimental", spend_without_asking: true });
+    expect(p).toMatchObject({ class: "experimental", spend_without_asking: true });
+    expect(updateProject(dir, "acme", { name: "Acme 2" })).toMatchObject({
+      class: "experimental",
+      spend_without_asking: true,
+    });
+    expect(() => updateProject(dir, "acme", { class: "secured" })).toThrow(/experimental/);
+    expect(
+      updateProject(dir, "acme", { class: "secured", spend_without_asking: false }).class,
+    ).toBe("secured");
+    writeFileSync(
+      join(dir, "acme", "project.yaml"),
+      "name: A\nworkspace: w\nclass: secured\nspend_without_asking: true\n",
+    );
+    expect(() => loadProjects(dir)).toThrow(/spend_without_asking/);
+    writeFileSync(join(dir, "acme", "project.yaml"), "name: A\nworkspace: w\nclass: open\n");
+    expect(() => loadProjects(dir)).toThrow(/class/);
+  });
+
   it("keeps the owner's own accounts outside projects; 'own' is not a project name (ADR-0042)", () => {
     expect(loadOwnAccounts(dir)).toEqual({});
     expect(saveOwnAccounts(dir, { facebook: ["1365", " "], ga4: [] })).toEqual({
       facebook: ["1365"],
     });
     expect(loadOwnAccounts(dir)).toEqual({ facebook: ["1365"] });
-    expect(ownProject(dir)).toMatchObject({ slug: "own", integrations: { facebook: ["1365"] } });
+    expect(ownProject(dir)).toMatchObject({
+      slug: "own",
+      class: "experimental",
+      integrations: { facebook: ["1365"] },
+    });
+    // Same entry shape as projects: staging survives a save of plain strings.
+    writeFileSync(
+      join(dir, "accounts.yaml"),
+      "integrations:\n  facebook: [{ id: '1365', env: staging }, '77']\n",
+    );
+    expect(loadOwnAccounts(dir)).toEqual({ facebook: ["1365", "77"] });
+    saveOwnAccounts(dir, { facebook: ["1365", "77", "88"] });
+    expect(loadOwnAccountEntries(dir)).toEqual({
+      facebook: [
+        { value: "1365", env: "staging" },
+        { value: "77", env: "live" },
+        { value: "88", env: "live" },
+      ],
+    });
     expect(() => createProject(dir, { slug: "own", name: "x", workspace: "w" })).toThrow(
       /reserved/,
     );

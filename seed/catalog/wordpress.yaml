@@ -24,6 +24,9 @@ sites:
 tools:
   read: [site_info, list_posts, get_post]
   write: [create_draft]
+  # ADR-0067: a draft is not public until someone publishes it.
+  class:
+    create_draft: draft
 # Every call names its site (one of the project's); with one site it may be left out.
 scope:
   args: [site]

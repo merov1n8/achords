@@ -796,5 +796,22 @@
   "chat.waitingYou": "waiting for your answer",
   "chat.nWorking": "{n} working",
   "chat.nothingRunning": "nothing running",
-  "chat.statusWaiting": "Waiting for your answer · {usd}"
+  "chat.statusWaiting": "Waiting for your answer · {usd}",
+  "level.0": "Off",
+  "level.0.meaning": "Gets no work: no cards, tasks or delegations.",
+  "level.1": "Reader",
+  "level.1.meaning": "Reads its folders and writes comments and reports; changes nothing.",
+  "level.2": "Author",
+  "level.2.meaning": "Also writes files in its folders and reads the web.",
+  "level.3": "Operator",
+  "level.3.meaning": "Also uses its accounts: reads, saves drafts and makes changes that can be undone.",
+  "level.4": "Builder",
+  "level.4.meaning": "Also runs any command inside a sandbox: build, test, local git, packages and local apps.",
+  "level.5": "Full",
+  "level.5.meaning": "Also pushes code, publishes and deploys to live targets, and spends within each account's own limit.",
+  "projectClass.secured": "Secured",
+  "projectClass.secured.help": "For client work and production systems, where a mistake costs someone else. Agents never change live sites or accounts: they prepare the change and you deploy it.",
+  "projectClass.experimental": "Experimental",
+  "projectClass.experimental.help": "For your own trials, where speed matters more than safety. Agents at the highest level may publish and deploy to live targets themselves.",
+  "projectClass.unset": "Not chosen yet (counts as secured)"
 }

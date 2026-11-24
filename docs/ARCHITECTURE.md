@@ -114,6 +114,7 @@ Per agent (declared in `agents/<id>/agent.yaml`):
 - `budget`: token / cost caps per run and per day.
 - `delegation`: `can_delegate_to` / `accepts_from` agent ids, deny by default (ADR-0029).
 - `sensitivity`: data tagged `local-only` is always routed to local models; if none is available the task waits (fail-closed). Implemented for threads and tasks: a local-only thread runs the boss on a local model allowed by its manifest (or refuses), delegated tasks inherit local-only, a task whose local server is down is deferred (not counted as an attempt), memories from local-only work are tagged and never put into a frontier prompt. Threads become local-only one way only (Telegram `/local`, web API on creation).
+- `level` (ADR-0067, data model only so far): 0 off to 5 full; effective per project as `min(override ?? level, ceiling)` (secured 4, experimental 5; overrides in `overrides.yaml` raise only on experimental projects). Projects carry `class` and `env: live | staging` per account and site; catalog tools carry a class (`read`, `draft`, `reversible`, `live`, `spend`).
 
 Manifests are validated strictly (`yaml` + `zod`, ADR-0023): unknown keys are errors and every omitted section means "nothing allowed". Filesystem checks resolve symlinks so a link inside an allowed root cannot escape it; shell commands with metacharacters (chaining, substitution, redirects) always need approval.
 

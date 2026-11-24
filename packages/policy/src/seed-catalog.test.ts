@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { accountRefs, integrationStatus, loadCatalog, secretRefs } from "./catalog.ts";
+import {
+  accountRefs,
+  type CatalogEntry,
+  integrationStatus,
+  loadCatalog,
+  secretRefs,
+  toolClass,
+} from "./catalog.ts";
 
 const SEED = new URL("../../../seed/catalog/", import.meta.url).pathname;
 
@@ -64,6 +71,20 @@ describe("shipped integration catalog", () => {
       "blender",
       "unity",
     ]);
+  });
+
+  it("classifies every shipped write tool (ADR-0067)", () => {
+    for (const e of catalog.values()) {
+      expect(
+        e.tools.write.filter((t) => !(t in e.tools.class)),
+        e.id,
+      ).toEqual([]);
+    }
+    const wp = catalog.get("wordpress") as CatalogEntry;
+    expect(toolClass(wp, "create_draft")).toBe("draft");
+    expect(toolClass(wp, "get_post")).toBe("read");
+    expect(toolClass(catalog.get("meta") as CatalogEntry, "meta_create_post")).toBe("live");
+    expect(toolClass(catalog.get("fal") as CatalogEntry, "run_model")).toBe("spend");
   });
 
   it("limits the shared Google accounts to the project's own targets (ADR-0036)", () => {

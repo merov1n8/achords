@@ -98,6 +98,30 @@ describe("parseManifest", () => {
     ).toThrow(/models\.default.*allowed/s);
   });
 
+  it("takes an optional level and unsandboxed executables next to the legacy lists (ADR-0067)", () => {
+    const legacy = parseManifest(WEB_DEV, "agent.yaml");
+    expect(legacy.level).toBeUndefined();
+    expect(legacy.unsandboxed).toBeUndefined();
+    const m = parseManifest(
+      `${WEB_DEV}level: 4\nunsandboxed: [/Applications/Unity/Unity.app/Contents/MacOS/Unity]\n`,
+      "agent.yaml",
+    );
+    expect(m.level).toBe(4);
+    expect(m.unsandboxed).toEqual(["/Applications/Unity/Unity.app/Contents/MacOS/Unity"]);
+    // The legacy lists still apply unchanged until the migration removes them.
+    expect(m.tools).toEqual(legacy.tools);
+    expect(m.shell).toEqual(legacy.shell);
+    expect(m.network).toEqual(legacy.network);
+    for (const bad of ["level: 6", "level: -1", "level: 2.5", 'level: "3"']) {
+      expect(() => parseManifest(`${WEB_DEV}${bad}\n`, "agent.yaml"), bad).toThrow(/level/);
+    }
+    for (const bad of ["unity", "~/bin/unity", "bin/unity"]) {
+      expect(() => parseManifest(`${WEB_DEV}unsandboxed: [${bad}]\n`, "agent.yaml"), bad).toThrow(
+        /unsandboxed.*absolute/s,
+      );
+    }
+  });
+
   it("reports YAML syntax errors with the file name", () => {
     expect(() => parseManifest("id: [unclosed", "broken.yaml")).toThrow(/broken\.yaml/);
   });
