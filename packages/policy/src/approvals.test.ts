@@ -30,22 +30,13 @@ describe("approvals (ADR-0067 step 4)", () => {
     expect(applyGrants(m, []).level).toBeUndefined();
   });
 
-  it("refuses force push and history rewrite, and push below a push run", () => {
+  it("refuses force push, history rewrite and every shell push (push_branch pushes)", () => {
     expect(refusedCommand("git push --force origin main")).toMatch(/force push/);
-    expect(refusedCommand("git push --force origin main", { push: true })).toMatch(/force push/);
     expect(refusedCommand("git filter-repo --path x")).toMatch(/rewrites history/);
-    expect(refusedCommand("git push origin main")).toMatch(/level 5 in work mode/);
-    expect(refusedCommand("git push origin --delete old", { push: true })).toBeUndefined();
+    expect(refusedCommand("git push origin main")).toMatch(/push_branch/);
+    expect(refusedCommand("git push origin --delete old")).toMatch(/push_branch/);
+    expect(refusedCommand("sh -c 'git push origin main'")).toMatch(/push_branch/);
     expect(refusedCommand("git status")).toBeUndefined();
-  });
-
-  it("approved pushes change no field", () => {
-    const m = parseManifest(
-      "id: a\nname: a\nrole: a\nworkspace: shared\nmodels:\n  default: cli-claude/sonnet\nlevel: 5\n",
-      "agent.yaml",
-    );
-    const out = applyGrants(m, [{ kind: "push", command: "git push origin :old" }]);
-    expect(out).toEqual({ manifest: m });
   });
 
   it("knows the always-ask items among commands and folders", () => {
@@ -60,10 +51,6 @@ describe("approvals (ADR-0067 step 4)", () => {
     expect(alwaysAskCommand("cat ~/.ssh/id_ed25519", { folders, ...ctx })).toMatch(/keys/);
     expect(alwaysAskCommand("security find-generic-password", { folders, ...ctx })).toMatch(/keys/);
     expect(alwaysAskCommand("make test", { folders, ...ctx })).toBeUndefined();
-    expect(alwaysAskCommand("git push origin --delete old", { folders, ...ctx })).toMatch(
-      /deleting on the remote/,
-    );
-    expect(alwaysAskCommand("git push origin :old", { folders, ...ctx })).toMatch(/remote/);
     expect(keyFolder("/Users/o/.achords/vault", ctx)).toBe(true);
     // A folder that contains key folders counts as well.
     expect(keyFolder("/Users/o", ctx)).toBe(true);

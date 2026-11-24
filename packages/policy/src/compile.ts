@@ -39,8 +39,8 @@ export interface CompiledLevel {
   mode?: RunMode;
   sandbox?: SandboxKind;
   /**
-   * `git push` through the gateway's credential helper: level 5 in work mode, with a Claude shell
-   * (host sandbox or container), never force (ADR-0067).
+   * The hub tool push_branch: level 5 in work mode; the gateway pushes, never the shell, never
+   * force (ADR-0067).
    */
   push?: true;
   /** Why the run got less than its effective level (one chat line each). */
@@ -216,7 +216,7 @@ function compileAt(
     container,
     mcp: entries.filter((e) => integrations[e.id]).map((e) => e.id),
   };
-  const push = level >= 5 && mode === "accounts" && (sandbox === "host" || sandbox === "container");
+  const push = level >= 5 && mode === "accounts";
   return {
     level,
     manifest,
@@ -268,20 +268,14 @@ export const REGISTRY_HOSTS = [
   "objects.githubusercontent.com",
 ];
 
-// Push only at level 5 in work mode (through the gateway's credential helper), and history
-// rewrite is refused at every level.
+// No shell pushes (level 5 pushes through push_branch, run by the gateway) and history rewrite
+// is refused at every level. Prefix rules are best effort (`sh -c '…'` passes them): the git
+// environment of every run (GIT_SHELL_ENV) is what keeps a shell push without credentials.
 export const SHELL_DENY = [
   "Bash(git push:*)",
   "Bash(git filter-branch:*)",
   "Bash(git filter-repo:*)",
 ];
-export const PUSH_ALLOW = "Bash(git push:*)";
-
-/** A Claude shell's permission rules: a push run loses the push deny (its guard hook refuses force). */
-export const shellPermissions = (push: boolean) => ({
-  deny: push ? SHELL_DENY.filter((r) => r !== PUSH_ALLOW) : SHELL_DENY,
-  ...(push ? { allow: [PUSH_ALLOW] } : {}),
-});
 
 /**
  * The claude CLI's own sandbox for a level 4 shell on the host (`--settings`): commands write only
@@ -299,13 +293,9 @@ export function hostSandboxSettings(input: {
   unsandboxed: string[];
   achordsHome: string;
   userHome?: string;
-  /** A push run (ADR-0067 level 5): the credential helper reaches the gateway on this host. */
-  push?: { gatewayHost: string };
 }): Record<string, unknown> {
   const user = input.userHome ?? homedir();
   const hosts = input.network.filter((h) => h !== "*").map((h) => h.split("/")[0] as string);
-  if (input.push) hosts.push(input.push.gatewayHost);
-  const rules = shellPermissions(!!input.push);
   const under = (p: string) => p === input.achordsHome || p.startsWith(`${input.achordsHome}/`);
   return {
     sandbox: {
@@ -331,9 +321,9 @@ export function hostSandboxSettings(input: {
       },
     },
     permissions: {
-      deny: rules.deny,
+      deny: SHELL_DENY,
       // The excluded executables still need an allow rule: they run outside the sandbox.
-      allow: [...input.unsandboxed.map((p) => `Bash(${p}:*)`), ...(rules.allow ?? [])],
+      allow: input.unsandboxed.map((p) => `Bash(${p}:*)`),
     },
   };
 }

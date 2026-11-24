@@ -81,7 +81,6 @@ const tokens = (cmd: string) => cmd.trim().split(/\s+/).filter(Boolean);
 const FORCE_FLAG = /^(-f|--force|--force-with-lease(=.*)?|--mirror)$/;
 // A cluster of short options (`-uf`) and a `+` refspec force as well.
 const FORCE_SHORT = /^-[a-zA-Z]*f[a-zA-Z]*$/;
-const DELETE_FLAG = /^(--delete|--prune|-[a-zA-Z]*d[a-zA-Z]*)$/;
 
 /**
  * The arguments after `push` of every `git … push` in a command line (split at shell operators;
@@ -100,12 +99,6 @@ export function gitPushArgs(command: string): string[][] {
     return argv[i] === "push" ? [argv.slice(i + 1)] : [];
   });
 }
-
-/** Whether a command deletes on the remote: `--delete`/`-d`, `--prune` or a `:<ref>` refspec. */
-export const pushDeletes = (command: string): boolean =>
-  gitPushArgs(command).some((args) =>
-    args.some((a) => DELETE_FLAG.test(a) || (a.startsWith(":") && a.length > 1)),
-  );
 
 /**
  * ADR-0067: force push and history rewrite are refused at every level, under every approval.

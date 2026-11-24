@@ -20,7 +20,7 @@ import {
   setPaused,
 } from "@achords/core";
 import { openMemory } from "@achords/memory";
-import { createProject } from "@achords/policy";
+import { createProject, GIT_SHELL_ENV } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readGuide, writeGuide } from "../guide.ts";
@@ -169,7 +169,7 @@ describe("orchestrator", () => {
     const t = createThread(db, {});
     await orch.handleMessage(t.id, "hi", "web");
     expect(fake.calls[0]?.billing).toBe("subscription");
-    expect(fake.calls[0]?.env).toBeUndefined();
+    expect(fake.calls[0]?.env).toEqual(GIT_SHELL_ENV);
     mode = "api";
     await orch.handleMessage(t.id, "hi", "web");
     expect(fake.calls[1]).toMatchObject({ billing: "api", env: { ANTHROPIC_API_KEY: "sk-test" } });

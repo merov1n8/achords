@@ -173,6 +173,24 @@ const TOOLS = [
     endpoint: "/api/agent/report_checks",
     done: "Recorded.",
   },
+  // ADR-0067 level 5: the gateway pushes; the run's shell holds no push credential.
+  {
+    name: "push_branch",
+    description:
+      "Push a branch you committed in one of your work folders to this project's repository (HTTPS, with the project's token, which you never see). Fast-forward only: if the remote has changes you don't have, fetch and rebase first. No force push and no deleting a remote branch.",
+    input: z.object({
+      folder: text.describe("Absolute path of the git repository (one of your work folders)"),
+      branch: text.describe("Branch name, e.g. fix/login (pushed to the same name)"),
+      remote_url: z
+        .string()
+        .optional()
+        .describe("Only when the project has several repositories: the one to push to"),
+    }),
+    endpoint: "/api/agent/push_branch",
+    done: "",
+    // A push over the network can take a while.
+    timeoutMs: 120_000,
+  },
   // Skills (ADR-0049): the system prompt lists them; these read, import and propose.
   {
     name: "skill_read",
@@ -219,13 +237,13 @@ const reply = (t: string, isError = false) => ({
   ...(isError ? { isError } : {}),
 });
 
-async function forward(endpoint: string, done: string, body: unknown) {
+async function forward(endpoint: string, done: string, body: unknown, timeoutMs = 30_000) {
   try {
     const res = await fetch(`${HUB}${endpoint}`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const out = (await res.json()) as {
       ok?: boolean;
@@ -260,7 +278,8 @@ serveStdio(() => {
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: tool.input },
-      (args: unknown) => forward(tool.endpoint, tool.done, args),
+      (args: unknown) =>
+        forward(tool.endpoint, tool.done, args, "timeoutMs" in tool ? tool.timeoutMs : undefined),
     );
   }
   return server;

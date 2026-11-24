@@ -10,7 +10,7 @@ import {
   sessionDir,
 } from "@achords/core";
 import { runContainerPrefix } from "@achords/platform";
-import { loadCatalog } from "@achords/policy";
+import { GIT_SHELL_ENV, loadCatalog } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Prepared } from "../container.ts";
@@ -160,6 +160,7 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     expect(call?.sharedExists).toBe(true);
     expect(existsSync(shared)).toBe(false); // removed after the run
     expect(call?.req.env).toEqual({
+      ...GIT_SHELL_ENV,
       CLAUDE_CODE_OAUTH_TOKEN: "oauth-token-value",
       CLAUDE_CONFIG_DIR: sessionDir(home, taskId, "web"),
     });
@@ -267,7 +268,7 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     await orch.workOnce();
     expect(calls[0]?.req.container).toBeUndefined();
     expect(calls[0]?.mcp?.achords?.command).toBe(process.execPath);
-    expect(calls[0]?.req.env).toBeUndefined();
+    expect(calls[0]?.req.env).toEqual(GIT_SHELL_ENV);
     agent("network: {allow: [example.com]}");
     const second = start();
     await second.orch.workOnce();
@@ -300,6 +301,7 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     });
     await api.orch.workOnce();
     expect(calls[0]?.req.env).toEqual({
+      ...GIT_SHELL_ENV,
       ANTHROPIC_API_KEY: "sk-ant",
       CLAUDE_CONFIG_DIR: sessionDir(home, api.taskId, "web"),
     });

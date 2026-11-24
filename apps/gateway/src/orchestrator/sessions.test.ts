@@ -12,7 +12,7 @@ import {
   type Task,
   threadCard,
 } from "@achords/core";
-import { loadCatalog } from "@achords/policy";
+import { GIT_SHELL_ENV, loadCatalog } from "@achords/policy";
 import { cliClaude, type RunRequest, type RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMcpTickets, createRunTokens } from "../mcp/tokens.ts";
@@ -121,7 +121,11 @@ describe("one CLI session per agent and card (ADR-0066)", () => {
     await drain();
     const dir = sessionDir(home, taskId, "coder");
     const first = calls[0]?.req;
-    expect(first?.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "tok", CLAUDE_CONFIG_DIR: dir });
+    expect(first?.env).toEqual({
+      ...GIT_SHELL_ENV,
+      CLAUDE_CODE_OAUTH_TOKEN: "tok",
+      CLAUDE_CONFIG_DIR: dir,
+    });
     expect(first?.session).toEqual({});
     expect(existsSync(dir)).toBe(true);
     expect(getCardSession(db, { card: taskId, agent: "coder", project: "" })).toMatchObject({
@@ -340,8 +344,8 @@ describe("one CLI session per agent and card (ADR-0066)", () => {
     await orch.handleMessage(threadId, "green", "web");
     await drain();
     expect(calls.map((c) => [c.req.session, c.req.env])).toEqual([
-      [undefined, undefined],
-      [undefined, undefined],
+      [undefined, GIT_SHELL_ENV],
+      [undefined, GIT_SHELL_ENV],
     ]);
     const notes = listMessages(db, threadId).filter((m) => /from scratch/.test(m.content));
     expect(notes).toHaveLength(1);

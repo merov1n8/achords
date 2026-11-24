@@ -34,13 +34,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   Agents without a level keep their requests; their buttons are now Once and For this card (the
   former "This task"/Approve, still 4 hours), with Always for commands as before.
 - Force pushes and git history rewrites are refused for every agent.
-- Level 5 agents can `git push` in work mode (ADR-0067), to the HTTPS repositories listed in
-  their project, never force. Set a push token for the project's repositories in the project
-  form (or under your own accounts); it stays in the vault and git gets it from achords for each
-  push, so this Mac's own git login is never used and nothing is written to a git config file.
-  Deleting a branch or tag on the remote asks you first (once or for this card). Level 4 and
-  below, web mode and SSH remotes have no push. Use a token limited to the project's
-  repositories: the agent's shell could ask git for it.
+- Level 5 agents can push a branch in work mode (ADR-0067) with the tool `push_branch`: achords
+  itself pushes it to an HTTPS repository listed in the project, fast-forward only, with the
+  push token you set in the project form (or under your own accounts). The token stays in the
+  vault and never reaches the agent or its shell; each push is in the audit log. Force push and
+  deleting a remote branch are not offered; level 4 and below, web mode and SSH remotes have no
+  push. An agent's own `git push` is refused, and git in every agent shell no longer uses this
+  Mac's git logins (keychain helper, stored credentials, ssh-agent) or prompts for one.
 - `pnpm achords levels migrate` moves your agents to permission levels (ADR-0067). Run it
   first as is: it only prints a report (per agent: its level, the rights it gains and loses,
   the one-off commands collected in its shell list that are dropped, those covered otherwise

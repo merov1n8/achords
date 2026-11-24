@@ -181,7 +181,7 @@ export interface ApiDeps {
     | "skillPropose"
     | "createCard"
     | "startCard"
-    | "gitCredential"
+    | "pushBranch"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -2121,19 +2121,25 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
         const tool = path.slice("/api/agent/".length);
-        // ADR-0067: the credential helper of a level 5 work-mode run (its own push token). A
-        // refusal answers nothing git can use; the token is never logged.
-        if (method === "POST" && tool === "git-credential") {
-          if (!caller.tools.includes("git_credential")) {
-            throw new HttpError(403, "push not granted to this run");
+        // ADR-0067 level 5: the gateway pushes the branch itself (the run holds no credential).
+        if (method === "POST" && tool === "push_branch") {
+          if (!caller.tools.includes(tool)) {
+            throw new HttpError(403, `tool ${tool} not granted to this run`);
           }
-          const b = await readJson(req, 4096);
-          const field = (v: unknown) => (typeof v === "string" ? v.slice(0, 500) : undefined);
-          const out = deps.orchestrator.gitCredential(
+          const b = await readJson(req, 8192);
+          const remoteUrl =
+            b.remote_url === undefined || b.remote_url === ""
+              ? undefined
+              : str(b.remote_url, "remote_url", 500);
+          const out = await deps.orchestrator.pushBranch(
             { from: "task", taskId: caller.taskId },
-            { protocol: field(b.protocol), host: field(b.host), path: field(b.path) },
+            {
+              folder: str(b.folder, "folder", 1000),
+              branch: str(b.branch, "branch", 200),
+              ...(remoteUrl ? { remoteUrl } : {}),
+            },
           );
-          send(res, out.ok ? 200 : 403, out);
+          send(res, 200, out);
           return;
         }
         // Publishing (ADR-0037): from the launcher, with a token granting publish:<integration>.

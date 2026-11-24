@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -55,6 +47,8 @@ describe("permission levels in runs (ADR-0067)", () => {
   // Vault reads (ref, actor) and the ids that are set, for the push token.
   let reads: { ref: string; actor: string }[];
   let gitTokens: Set<string>;
+  // What the gateway was asked to push (the real plumbing is tested in git-push.test.ts).
+  let pushes: { folder: string; branch: string; url: string; token: string }[];
 
   const agent = (id: string, extra: string, model = "cli-claude/sonnet") => {
     mkdirSync(join(home, "agents", id), { recursive: true });
@@ -128,7 +122,10 @@ describe("permission levels in runs (ADR-0067)", () => {
         },
         call: async () => ({ ok: true, text: "ok" }),
       },
-      git: { helperEntry: "/x/git-credential.ts", guardEntry: "/x/push-guard.ts" },
+      gitPush: async (input) => {
+        pushes.push(input);
+        return { ok: true, text: `pushed ${input.branch}` };
+      },
     });
     orch.syncAgents();
   };
@@ -173,6 +170,7 @@ describe("permission levels in runs (ADR-0067)", () => {
     launches = [];
     reads = [];
     gitTokens = new Set();
+    pushes = [];
     onRun = undefined;
     build(true);
   });
@@ -470,108 +468,140 @@ describe("permission levels in runs (ADR-0067)", () => {
     });
     expect(legacy).toMatchObject({ ok: false, reason: expect.stringMatching(/force push/) });
   });
-  describe("git push at level 5 through the gateway's credential helper", () => {
-    const github = { protocol: "https", host: "github.com", path: "acme/site.git" };
+  describe("push_branch at level 5: the gateway pushes, the shell has no credential", () => {
     const repos = () =>
       updateProject(join(home, "projects"), "lab", {
         integrations: {
           repository: ["https://github.com/acme/site", "https://github.com/acme/other"],
         },
       });
-    const hooksOf = (req: RunRequest | undefined) =>
-      JSON.parse(req?.settings ?? "{}").hooks?.PreToolUse as
-        | { matcher: string; hooks: { command: string }[] }[]
-        | undefined;
-    const filesUnder = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-        e.isDirectory() ? filesUnder(join(dir, e.name)) : [join(dir, e.name)],
-      );
+    const site = "https://github.com/acme/site";
+    // A plain repository in the run's work folder (the real git plumbing: git-push.test.ts).
+    const repoIn = (dir: string) => {
+      mkdirSync(join(dir, "app", ".git", "objects"), { recursive: true });
+      return join(dir, "app");
+    };
+    const expectHardened = (req: RunRequest | undefined) =>
+      expect(req?.env).toMatchObject({
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "credential.helper",
+        GIT_CONFIG_VALUE_0: "",
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_ASKPASS: "/usr/bin/false",
+        SSH_ASKPASS: "/usr/bin/false",
+        GCM_INTERACTIVE: "never",
+      });
 
-    it("a level 5 work-mode run on the host: push rule, gateway host, guard hook, git config from the environment only", async () => {
+    it("a level 5 work-mode run gets the tool; the gateway pushes with the vault's token, audited", async () => {
       agent("pusher", "level: 5");
       orch.syncAgents();
       repos();
       gitTokens.add("git-token-lab");
-      const answers: unknown[] = [];
+      const answers: Promise<unknown>[] = [];
       onRun = (t) => {
-        const ask = (req: object) => orch.gitCredential({ from: "task", taskId: t.id }, req);
+        const from = { from: "task" as const, taskId: t.id };
+        const cwd = seen.at(-1)?.req.cwd as string;
+        const repo = repoIn(cwd);
+        mkdirSync(join(cwd, "plain"), { recursive: true });
+        const push = (folder: string, branch: string, remoteUrl?: string) =>
+          orch.pushBranch(from, { folder, branch, ...(remoteUrl ? { remoteUrl } : {}) });
         answers.push(
-          ask(github),
-          ask({ ...github, host: "gitlab.com" }),
-          ask({ ...github, path: "x/y" }),
+          push(repo, "fix/login", site),
+          // Several repositories: one must be named.
+          push(repo, "fix/login"),
+          push(repo, "+main", site),
+          push(repo, "main:main", site),
+          push(repo, "-f", site),
+          push(repo, "main", "https://github.com/someone/else"),
+          push(join(cwd, "plain"), "main", site),
+          push("/tmp", "main", site),
+          push(join(cwd, "..", "..", "pusher"), "main", site),
         );
       };
       const { task } = await give("pusher", "lab");
-      const req = seen[0]?.req;
-      const settings = JSON.parse(req?.settings ?? "{}");
-      expect(settings.permissions.allow).toContain("Bash(git push:*)");
-      expect(settings.permissions.deny).not.toContain("Bash(git push:*)");
-      expect(settings.permissions.deny).toContain("Bash(git filter-branch:*)");
-      expect(settings.sandbox.network.allowedDomains).toContain("127.0.0.1");
-      const guard = hooksOf(req)?.find((h) => h.matcher === "Bash");
-      expect(guard?.hooks[0]?.command).toContain("'/x/push-guard.ts'");
-      expect(req?.env).toMatchObject({
-        GIT_CONFIG_COUNT: "3",
-        GIT_CONFIG_KEY_0: "credential.helper",
-        GIT_CONFIG_VALUE_0: "",
-        GIT_CONFIG_VALUE_1: expect.stringContaining("'/x/git-credential.ts'"),
-        GIT_CONFIG_KEY_2: "credential.useHttpPath",
-        ACHORDS_HUB_URL: "http://127.0.0.1:7420",
-      });
-      expect(req?.env?.ACHORDS_GIT_TOKEN).toBeTruthy();
-      expect(req?.prompt).toMatch(/You may push with `git push`/);
-      // The helper's answer: only the project's repository, audited, the value only in the answer.
-      expect(answers[0]).toEqual({
-        ok: true,
-        username: "x-access-token",
-        password: "ghp_push-token-value",
-      });
-      expect(answers[1]).toMatchObject({ ok: false });
-      expect(answers[2]).toMatchObject({ ok: false });
-      expect(reads.filter((r) => r.ref.startsWith("vault:git-token"))).toEqual([
-        { ref: "vault:git-token-lab", actor: "agent:pusher/git:lab:github.com/acme/site" },
+      const out = await Promise.all(answers);
+      expect(out[0]).toEqual({ ok: true, text: "pushed fix/login" });
+      expect(pushes).toEqual([
+        {
+          folder: expect.stringMatching(/\/app$/),
+          branch: "fix/login",
+          url: site,
+          token: "ghp_push-token-value",
+        },
       ]);
-      expect(JSON.stringify(reads)).not.toContain("ghp_");
-      // No git configuration file anywhere: no [credential] section written.
-      for (const f of filesUnder(home)) {
-        if (f.endsWith(".db") || f.includes("-wal") || f.includes("-shm")) continue;
-        expect(readFileSync(f, "utf8"), f).not.toMatch(/\[credential\]|credential\.helper/);
+      expect(out[1]).toMatchObject({ ok: false, reason: expect.stringMatching(/remote_url/) });
+      for (const r of out.slice(2, 5)) {
+        expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/branch name/) });
       }
-      // After the run its push token is gone.
-      expect(orch.gitCredential({ from: "task", taskId: task.id }, github)).toMatchObject({
-        ok: false,
-        reason: expect.stringMatching(/no push/),
-      });
+      expect(out[5]).toMatchObject({ ok: false, reason: expect.stringMatching(/not an https/) });
+      expect(out[6]).toMatchObject({ ok: false, reason: expect.stringMatching(/plain git/) });
+      expect(out[7]).toMatchObject({ ok: false, reason: expect.stringMatching(/work folders/) });
+      expect(out[8]).toMatchObject({ ok: false, reason: expect.stringMatching(/work folders/) });
+      // One audited vault read, for the one push that went out.
+      expect(reads.filter((r) => r.ref.startsWith("vault:git-token"))).toEqual([
+        {
+          ref: "vault:git-token-lab",
+          actor: "agent:pusher/git-push:lab:github.com/acme/site:fix/login",
+        },
+      ]);
+      const req = seen[0]?.req;
+      expect(hubTools(seen[0]?.config)).toContain("push_branch");
+      expect(req?.prompt).toMatch(/call push_branch/);
+      // The run itself never holds the token or a way to ask for it.
+      const run = JSON.stringify({ req, config: seen[0]?.config });
+      expect(run).not.toContain("ghp_");
+      expect(run).not.toMatch(/ACHORDS_GIT_TOKEN|git-credential|git_credential/);
+      expect(JSON.stringify(out)).not.toContain("ghp_");
+      expectHardened(req);
+      const settings = JSON.parse(req?.settings ?? "{}");
+      expect(settings.permissions.deny).toContain("Bash(git push:*)");
+      expect(settings.permissions.allow).not.toContain("Bash(git push:*)");
+      expect(settings.hooks?.PreToolUse ?? []).toEqual([]);
+      // After the run, no more pushes.
+      expect(
+        await orch.pushBranch({ from: "task", taskId: task.id }, { folder: "/x", branch: "main" }),
+      ).toMatchObject({ ok: false, reason: expect.stringMatching(/cannot push/) });
     });
 
-    it("no token for the project: nothing to answer", async () => {
+    it("no token for the project: refused, nothing pushed", async () => {
       agent("pusher", "level: 5");
       orch.syncAgents();
-      repos();
-      let answer: unknown;
+      updateProject(join(home, "projects"), "lab", { integrations: { repository: [site] } });
+      let answer: Promise<unknown> | undefined;
       onRun = (t) => {
-        answer = orch.gitCredential({ from: "task", taskId: t.id }, github);
+        const repo = repoIn(seen.at(-1)?.req.cwd as string);
+        answer = orch.pushBranch({ from: "task", taskId: t.id }, { folder: repo, branch: "main" });
       };
       await give("pusher", "lab");
-      expect(answer).toMatchObject({ ok: false, reason: expect.stringMatching(/git-token-lab/) });
+      expect(await answer).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/git-token-lab/),
+      });
+      expect(pushes).toEqual([]);
     });
 
-    it("level 4, a secured project and web mode: no push, the blanket deny stays", async () => {
+    it("level 4, a secured project and web mode: no tool, every shell hardened", async () => {
       agent("pusher", "level: 5");
       agent("builder4", "level: 4");
+      agent("legacy", 'tools: [Read, Bash]\nshell:\n  allow: ["git status"]');
       orch.syncAgents();
       repos();
-      updateProject(join(home, "projects"), "acme", {
-        integrations: { repository: ["https://github.com/acme/site"] },
-      });
+      updateProject(join(home, "projects"), "acme", { integrations: { repository: [site] } });
       gitTokens.add("git-token-lab").add("git-token-acme");
-      const answers: unknown[] = [];
+      const answers: Promise<unknown>[] = [];
       onRun = (t) => {
-        answers.push(orch.gitCredential({ from: "task", taskId: t.id }, github));
+        const repo = repoIn(seen.at(-1)?.req.cwd as string);
+        answers.push(
+          orch.pushBranch(
+            { from: "task", taskId: t.id },
+            { folder: repo, branch: "main", remoteUrl: site },
+          ),
+        );
       };
       await give("builder4", "lab");
       // Capped at 4 on the secured project.
       await give("pusher", "acme");
+      await give("legacy");
       const thread = createThread(db, { project: "lab" });
       const r = orch.delegate(
         { from: "boss", threadId: thread.id },
@@ -580,79 +610,54 @@ describe("permission levels in runs (ADR-0067)", () => {
       if (!r.ok) throw new Error(r.reason);
       db.prepare("UPDATE tasks SET run_mode = 'web' WHERE id = ?").run(r.taskId);
       for (let i = 0; i < 5 && (await orch.workOnce()); i++);
-      expect(seen).toHaveLength(3);
+      expect(seen).toHaveLength(4);
       for (const [i, s] of seen.entries()) {
-        expect(s.req.env?.GIT_CONFIG_COUNT, `run ${i}`).toBeUndefined();
-        expect(s.req.env?.ACHORDS_GIT_TOKEN, `run ${i}`).toBeUndefined();
-        expect(s.req.prompt).not.toMatch(/You may push/);
-        expect(answers[i]).toMatchObject({ ok: false });
-      }
-      for (const s of seen.slice(0, 2)) {
-        const settings = JSON.parse(s.req.settings ?? "{}");
-        expect(settings.permissions.deny).toContain("Bash(git push:*)");
-        expect(settings.permissions.allow ?? []).not.toContain("Bash(git push:*)");
-        expect(settings.sandbox?.network.allowedDomains ?? []).not.toContain("127.0.0.1");
+        expect(hubTools(s.config), `run ${i}`).not.toContain("push_branch");
+        expect(s.req.prompt).not.toMatch(/push_branch/);
+        expectHardened(s.req);
+        expect(await answers[i]).toMatchObject({ ok: false });
       }
       // Web mode: no shell at all.
-      expect(seen[2]?.req.tools).not.toContain("Bash");
+      expect(seen[3]?.req.tools).not.toContain("Bash");
+      expect(pushes).toEqual([]);
       expect(reads.filter((x) => x.ref.startsWith("vault:git-token"))).toEqual([]);
     });
 
-    it("in the container: the image's Node, the container's gateway address, push without the deny", async () => {
+    it("in the container: the tool too, the git hardening passed into the VM", async () => {
       repos();
       await give("full", "lab");
       const req = seen[0]?.req;
       expect(req?.container).toBeDefined();
-      const settings = JSON.parse(req?.settings ?? "{}");
-      expect(settings.sandbox).toBeUndefined();
-      expect(settings.permissions).toEqual({
-        deny: ["Bash(git filter-branch:*)", "Bash(git filter-repo:*)"],
-        allow: ["Bash(git push:*)"],
+      expect(hubTools(seen[0]?.config)).toContain("push_branch");
+      expect(JSON.parse(req?.settings ?? "{}").permissions).toEqual({
+        deny: ["Bash(git push:*)", "Bash(git filter-branch:*)", "Bash(git filter-repo:*)"],
       });
-      expect(hooksOf(req)?.[0]?.hooks[0]?.command).toMatch(/^'node' /);
-      expect(req?.env).toMatchObject({
-        ACHORDS_HUB_URL: "http://192.168.64.1:7420",
-        GIT_CONFIG_VALUE_1: expect.stringMatching(/^!'node' /),
-      });
+      expectHardened(req);
     });
 
-    it("force push stays refused; a remote deletion asks (no always) and then runs as approved", async () => {
+    it("a shell push or a remote deletion cannot be requested; force push stays refused", async () => {
       agent("pusher", "level: 5");
       orch.syncAgents();
       repos();
       const outs: unknown[] = [];
-      let run = 0;
       onRun = (t) => {
-        run++;
-        if (run > 1) return;
         const ask = (target: string) =>
           orch.requestPermission(
             { from: "task", taskId: t.id },
             { kind: "command", target, reason: "x" },
           );
-        outs.push(ask("git push --force origin main"), ask("git push origin main"));
-        outs.push(ask("git push origin --delete old"));
+        outs.push(
+          ask("git push --force origin main"),
+          ask("git push origin main"),
+          ask("git push origin --delete old"),
+          ask("sh -c 'git push origin :old'"),
+        );
       };
-      const { thread } = await give("pusher", "lab");
+      await give("pusher", "lab");
       expect(outs[0]).toMatchObject({ ok: false, reason: expect.stringMatching(/force push/) });
-      expect(outs[1]).toMatchObject({ ok: false, reason: expect.stringMatching(/directly/) });
-      expect(outs[2]).toEqual({ ok: true });
-      const last = listMessages(db, thread.id).at(-1);
-      expect(last?.actions?.map((a) => a.data.split(":")[1])).toEqual(["once", "card", "reject"]);
-      expect(last?.content).toMatch(/deleting on the remote/);
-      const id = last?.actions?.[0]?.data.split(":")[2] as string;
-      expect(orch.runAction(`perm:always:${id}`)).toMatchObject({ ok: false });
-      expect(orch.runAction(`perm:once:${id}`).ok).toBe(true);
-      for (let i = 0; i < 5 && (await orch.workOnce()); i++);
-      const guard = hooksOf(seen.at(-1)?.req)?.find((h) => h.matcher === "Bash");
-      const arg = guard?.hooks[0]?.command.split(" ").at(-1) as string;
-      expect(JSON.parse(Buffer.from(arg, "base64url").toString())).toEqual([
-        "git push origin --delete old",
-      ]);
-      // The first run's guard approved nothing.
-      const first = hooksOf(seen[0]?.req)?.find((h) => h.matcher === "Bash");
-      const none = first?.hooks[0]?.command.split(" ").at(-1) as string;
-      expect(JSON.parse(Buffer.from(none, "base64url").toString())).toEqual([]);
+      for (const o of outs.slice(1)) {
+        expect(o).toMatchObject({ ok: false, reason: expect.stringMatching(/push_branch/) });
+      }
     });
   });
 
@@ -843,7 +848,7 @@ describe("permission levels in runs (ADR-0067)", () => {
       expect(push.out()).toMatchObject({ ok: false, reason: expect.stringMatching(/force push/) });
       expect(ask(push.task.id, "command", "git push origin main")).toMatchObject({
         ok: false,
-        reason: expect.stringMatching(/credential helper/),
+        reason: expect.stringMatching(/push_branch/),
       });
       expect(buttons(push.thread.id) ?? []).not.toContain("perm:once");
       // Reading keys.

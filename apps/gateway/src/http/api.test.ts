@@ -218,11 +218,11 @@ describe("HTTP API", () => {
             const task = enqueue(db, { title: input.title, parked: !input.start });
             return { ok: true, taskId: task.id };
           },
-          gitCredential: (from, request) => {
-            questions.push({ from, question: `git: ${JSON.stringify(request)}` });
-            return request.host === "github.com"
-              ? { ok: true, username: "x-access-token", password: "push-token-value" }
-              : { ok: false, reason: "not a repository of this project" };
+          pushBranch: async (from, request) => {
+            questions.push({ from, question: `push: ${JSON.stringify(request)}` });
+            return request.branch === "main"
+              ? { ok: true, text: "Pushed main to the project's repository." }
+              : { ok: false, reason: "rejected: the remote has changes you don't have" };
           },
           startCard: (taskId, agent) => {
             cards.push({ start: taskId, agent });
@@ -1199,29 +1199,41 @@ describe("HTTP API", () => {
     );
   });
 
-  it("git credential endpoint: only a run's push token, the request passed on (ADR-0067)", async () => {
+  it("push_branch: only a run granted it, the request passed on (ADR-0067)", async () => {
     const post = (token: string, body: object) =>
-      fetch(`${base}/api/agent/git-credential`, {
+      fetch(`${base}/api/agent/push_branch`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-    const push = tokens.issue("task-g", "web-dev", ["git_credential"]).token;
-    const ask = { protocol: "https", host: "github.com", path: "acme/site.git", extra: "x" };
+    const push = tokens.issue("task-g", "web-dev", ["push_branch"]).token;
+    const ask = { folder: "/w/site", branch: "main", extra: "x" };
     expect(await (await post(push, ask)).json()).toEqual({
       ok: true,
-      username: "x-access-token",
-      password: "push-token-value",
+      text: "Pushed main to the project's repository.",
     });
     expect(questions.at(-1)).toEqual({
       from: { from: "task", taskId: "task-g" },
-      question: `git: ${JSON.stringify({ protocol: "https", host: "github.com", path: "acme/site.git" })}`,
+      question: `push: ${JSON.stringify({ folder: "/w/site", branch: "main" })}`,
     });
-    expect((await post(push, { ...ask, host: "gitlab.com" })).status).toBe(403);
-    // The hub server's run token does not carry push.
+    await post(push, { ...ask, branch: "dev", remote_url: "https://github.com/acme/site" });
+    expect(questions.at(-1)?.question).toBe(
+      `push: ${JSON.stringify({ folder: "/w/site", branch: "dev", remoteUrl: "https://github.com/acme/site" })}`,
+    );
+    expect(await (await post(push, { ...ask, branch: "dev" })).json()).toMatchObject({
+      ok: false,
+    });
+    expect((await post(push, { folder: "/w/site" })).status).toBe(400);
+    // A run without the tool, and the old credential route, get nothing.
     expect((await post(tokens.issue("task-g", "web-dev", ["ask_owner"]).token, ask)).status).toBe(
       403,
     );
+    const old = await fetch(`${base}/api/agent/git-credential`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${push}` },
+      body: JSON.stringify({ protocol: "https", host: "github.com", path: "acme/site" }),
+    });
+    expect(old.status).toBe(404);
     expect((await post("nope", ask)).status).toBe(401);
   });
 
