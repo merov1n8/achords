@@ -257,7 +257,7 @@ describe("permission levels in runs (ADR-0067)", () => {
     expect(launches[2]?.publish?.review).toEqual([]);
   });
 
-  it("level 4 without accounts: work mode on the host sandbox without the open web; self-handoff to web mode without a shell", async () => {
+  it("level 4 without accounts: work mode on the host sandbox without the open web; self-handoff to web mode in the container without a shell", async () => {
     let first = true;
     onRun = (t) => {
       if (!first) return;
@@ -284,16 +284,31 @@ describe("permission levels in runs (ADR-0067)", () => {
       expect.arrayContaining(["registry.npmjs.org", "pypi.org", "docs.example.com"]),
     );
     expect(box.network.allowedDomains).not.toContain("*");
-    // The switch: the same agent in web mode, counted as a hop, on the host without a shell.
+    // The switch: the same agent in web mode, counted as a hop, in the container (ADR-0051, as
+    // every open-web run) without a shell.
     const web = seen[1];
     expect(web?.task.assigneeAgentId).toBe("webdev");
     expect(web?.task.runMode).toBe("web");
     expect(handoffHops(db, web?.task as Task)).toBe(1);
     expect(web?.req.tools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
     expect(web?.req.tools).not.toContain("Bash");
-    expect(web?.req.container).toBeUndefined();
+    expect(web?.req.container).toBeDefined();
     expect(JSON.parse(web?.req.settings ?? "{}").sandbox).toBeUndefined();
     expect(web?.req.prompt).toMatch(/web mode/);
+  });
+
+  it("web mode without a container install fails as any open-web run does (ADR-0051)", async () => {
+    build(false);
+    const thread = createThread(db, { project: "acme" });
+    const r = orch.delegate(
+      { from: "boss", threadId: thread.id },
+      { agent: "webdev", title: "Work", instructions: "go" },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    db.prepare("UPDATE tasks SET run_mode = 'web' WHERE id = ?").run(r.taskId);
+    for (let i = 0; i < 5 && (await orch.workOnce()); i++);
+    expect(seen).toEqual([]);
+    expect(getTask(db, r.taskId)?.error).toMatch(/cannot run agents in a container/);
   });
 
   it("full access gives a split agent web mode: no shell, no account tools that write", async () => {
@@ -316,11 +331,10 @@ describe("permission levels in runs (ADR-0067)", () => {
     const req = seen[0]?.req;
     expect(req?.tools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
     expect(req?.tools).not.toContain("Bash");
-    expect(req?.container).toBeUndefined();
-    // Keyed integrations leave; the local app keeps only its read tools.
+    expect(req?.container).toBeDefined();
+    // Keyed integrations leave, and the local app is not reachable from the container.
     expect(req?.allowedTools.some((t) => t.startsWith("mcp__social__"))).toBe(false);
-    expect(req?.allowedTools).toContain("mcp__blender__get_scene_info");
-    expect(req?.allowedTools).not.toContain("mcp__blender__import_asset");
+    expect(req?.allowedTools.some((t) => t.startsWith("mcp__blender__"))).toBe(false);
     expect(req?.prompt).toMatch(/web mode until/);
     // Switching back is pointless while full access lasts.
     expect(switched).toMatchObject({ ok: false, reason: expect.stringMatching(/web mode until/) });

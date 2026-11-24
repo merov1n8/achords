@@ -21,8 +21,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   documentation hosts you gave it) or web mode (any website and web search, no shell, no
   account tools that write), switching by handing the work to itself. Shell runs without keyed
   accounts therefore stay on this Mac in Claude's sandbox instead of Apple's container, so an
-  agent like web-dev is no longer always containerized. Full access puts such an agent in web
-  mode for the chain rather than giving its shell the web.
+  agent like web-dev is no longer always containerized. Web mode runs in Apple's container like
+  every run with the open web, so apps on this Mac are not reachable from it. Full access puts
+  such an agent in web mode for the chain rather than giving its shell the web.
 - Force pushes and git history rewrites are refused for every agent.
 - Live sites and accounts of secured projects are read-only for every agent (ADR-0067): no
   level, approval (your Approve button included), override or full access lets an agent write

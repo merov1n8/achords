@@ -176,12 +176,14 @@ describe("compileLevel (ADR-0067)", () => {
     const web = compile(m, 3, { run: { mode: "web" } });
     expect(web.mode).toBe("web");
     expect(openWeb(web.manifest, false)).toBe(true);
-    // Keyed integrations leave; a keyless one keeps only its read tools.
-    expect(web.manifest.mcp).toEqual(["blender"]);
-    expect(web.integrations).toEqual({ blender: { tools: ["get_scene_info"] } });
+    // Keyed integrations leave; like every open-web Claude run, web mode runs in the container
+    // (ADR-0051), where the local app is not reachable either.
+    expect(web.manifest.container).toBe(true);
+    expect(web.manifest.mcp).toEqual([]);
+    expect(web.integrations).toEqual({});
     expect(web.unavailable.join(" ")).toMatch(/meta/);
-    // Neither a shell nor keys: web mode runs on the host, where Blender is reachable.
-    expect(web.manifest.container).toBe(false);
+    expect(web.unavailable.join(" ")).toMatch(/Blender on this Mac .*the open web/);
+    // Outside a container (codex), a keyless integration keeps only its read tools.
     const codexWeb = compile(m, 3, { run: { mode: "web", model: "cli-codex/gpt-5" } });
     expect(codexWeb.integrations).toEqual({ blender: { tools: ["get_scene_info"] } });
   });
@@ -241,8 +243,8 @@ describe("compileLevel (ADR-0067)", () => {
     expect(web.manifest.tools).not.toContain("Bash");
     expect(web.manifest.tools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
     expect(web.manifest.network.allow).toEqual(["*"]);
-    // No shell, no keys: no container either.
-    expect(web.manifest.container).toBe(false);
+    // The open web runs in the container, as for every Claude run with it (ADR-0051).
+    expect(web.manifest.container).toBe(true);
     expect(levelConflicts(m, catalog)).toEqual([]);
   });
 
@@ -253,8 +255,9 @@ describe("compileLevel (ADR-0067)", () => {
     expect(c.sandbox).toBeUndefined();
     expect(c.manifest.tools).not.toContain("Bash");
     expect(c.manifest.tools).toContain("WebSearch");
-    expect(c.manifest.container).toBe(false);
-    expect(c.integrations).toEqual({ blender: { tools: ["get_scene_info"] } });
+    expect(c.manifest.container).toBe(true);
+    // Keyed integrations leave, and the local app is not reachable from the container.
+    expect(c.integrations).toEqual({});
     // Whatever mode the task was in.
     expect(compile(m, 4, { run: { elevated: true, mode: "accounts" } }).mode).toBe("web");
     // An agent without a split is not affected (the run adds the web on top, as before).
@@ -289,8 +292,8 @@ describe("compileLevel (ADR-0067)", () => {
     const web = compile(m, 4, { run: { mode: "web" } });
     expect(web.sandbox).toBeUndefined();
     expect(web.manifest.tools).not.toContain("Bash");
-    expect(web.manifest.container).toBe(false);
-    expect(web.manifest.mcp).toEqual(["blender"]);
+    expect(web.manifest.container).toBe(true);
+    expect(web.manifest.mcp).toEqual([]);
     // Ignored below level 4: no shell to keep beside the keys.
     expect(
       compile(agent("level: 3\nmcp: [meta]\nkeys_beside_host_shell: true"), 3).sandbox,

@@ -145,7 +145,8 @@ function compileAt(
   const integrations: Record<string, CompiledIntegration> = {};
   for (const { e, g } of grants) {
     if (mode === "web") {
-      // Web half: keyed integrations leave the run, local ones keep their read tools.
+      // Web half: keyed integrations leave the run, keyless ones keep their read tools (local
+      // apps then leave with the container below).
       if (keyed(e)) {
         unavailable.push(`${e.id} (account tools are not available while you read the web)`);
         continue;
@@ -189,9 +190,9 @@ function compileAt(
       );
     }
   }
-  // ADR-0051 kept for agents with the web in every run; a split agent's web mode has neither a
-  // shell nor keys, so it runs on the host like any run without a shell.
-  const container = sandbox === "container" || (provider === "cli-claude" && web && !split);
+  // ADR-0051: every Claude run with the open web runs in a container, a split agent's web mode
+  // included (one rule for every open-web run).
+  const container = sandbox === "container" || (provider === "cli-claude" && web);
   if (container) {
     // ADR-0054: apps on this Mac are not reachable from the container.
     for (const e of entries) {
