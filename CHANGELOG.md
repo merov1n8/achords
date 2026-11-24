@@ -9,6 +9,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - Commits agents make carry no `Co-Authored-By` lines: claude runs have the CLI's attribution off
   and a hook that refuses such commands, codex and gemini runs get a git hook that strips them.
+- Unsent text in a chat's message box is kept per chat in the browser: switching to another chat
+  or page and back brings it back (drafts older than 30 days are dropped).
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
   task's title; renaming the card in its detail view sticks across follow-up tasks, and an empty
   name goes back to the chat's name. The current task's title is shown below the field.
@@ -100,6 +102,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- Agents no longer propose skills for working around a failing tool, a missing permission or a
+  problem of the machine; they report it so the owner can fix the cause (ADR-0049).
 - Codex and Gemini runs give git a neutral global config (`GIT_CONFIG_GLOBAL=/dev/null`, the
   owner's name and email from the gateway): their sandboxes deny the home, so git stopped at
   `~/.gitconfig` and reviewers kept proposing a skill to work around it.

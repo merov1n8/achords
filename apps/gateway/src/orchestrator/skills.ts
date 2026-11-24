@@ -140,7 +140,7 @@ export function createSkillFlow(deps: {
       const index = skills.length
         ? `Skills (owner-approved how-tos). Before you use one, read its file in full with the Read tool or skill_read. Files next to a SKILL.md (scripts, references, assets) are part of that skill; open them when it says so and run its scripts only with commands you are allowed.\n${skills.map(indexLine).join("\n")}\n\n`
         : "";
-      return `${index}After a task that needed several attempts, a workaround or the owner's correction, propose one short reusable skill (or a patch to an existing one) with skill_propose. Never put secrets, client data or one-off details in a skill.`;
+      return `${index}After a task that needed several attempts or the owner's correction, propose one short reusable skill (or a patch to an existing one) with skill_propose when the lesson is a technique worth repeating. A failing tool, a missing permission or a problem of this machine is not a skill: say it in your report so the owner can fix the cause. Never put secrets, client data or one-off details in a skill.`;
     },
 
     read(workspace: string, name: string, agentId?: string): Out {
