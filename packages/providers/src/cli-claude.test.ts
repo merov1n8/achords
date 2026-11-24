@@ -188,6 +188,14 @@ describe("cli-claude adapter", () => {
     expect(process.env.ACHORDS_TEST_SECRET).toBeUndefined();
   });
 
+  it("keeps the CLI's token and API key out of its Bash, hooks and MCP servers", async () => {
+    await provider().run(req({ env: { CLAUDE_CODE_OAUTH_TOKEN: "tok" } }));
+    expect(JSON.parse(readFileSync(record, "utf8")).scrub).toBe("1");
+    // Not even a run's own setting turns it off.
+    await provider().run(req({ env: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0" } }));
+    expect(JSON.parse(readFileSync(record, "utf8")).scrub).toBe("1");
+  });
+
   it("uses an API key only in API mode, never a stray one on a subscription (Phase 4)", async () => {
     const key = { ANTHROPIC_API_KEY: "sk-ant-test" };
     await cliClaude({
@@ -299,6 +307,8 @@ describe("cli-claude adapter", () => {
         "type=bind,source=/srv/docs,target=/srv/docs,readonly",
         "-e",
         "ANTHROPIC_API_KEY",
+        "-e",
+        "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
         "-w",
         dir,
       ]);
@@ -319,8 +329,14 @@ describe("cli-claude adapter", () => {
         delete process.env.ACHORDS_TEST_HOST_ONLY;
       }
       const [argv] = recorded();
-      expect(argv?.filter((_, i) => argv[i - 1] === "-e")).toEqual(["ACHORDS_TEST_SECRET"]);
-      expect(JSON.parse(readFileSync(record, "utf8")).injected).toBe("tok");
+      expect(argv?.filter((_, i) => argv[i - 1] === "-e")).toEqual([
+        "ACHORDS_TEST_SECRET",
+        "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
+      ]);
+      expect(JSON.parse(readFileSync(record, "utf8"))).toMatchObject({
+        injected: "tok",
+        scrub: "1",
+      });
     });
 
     it("stops the container by name on cancel", async () => {

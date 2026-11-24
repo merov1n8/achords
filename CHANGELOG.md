@@ -236,7 +236,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   Claude session and gets only what is new. Sessions live in `sessions/<card>/<agent>/` under the
   achords home, never in your own `~/.claude`, sign in with the token for container runs, and
   are deleted when the card reaches its finish column, is deleted, or its chat is archived or deleted.
-  Without that token runs start from scratch as before, and the chat says so once. The run
+  Without that token runs start from scratch as before, and the chat says so once. The token
+  stays with Claude Code: agent shell commands never see it (nor an API key). The run
   details show what resumed sessions read (and how much came from the cache); a run's input now
   counts prompt-cache writes too.
 - A project can work in a folder outside Achords: add `workdir: ~/path/to/repo` to its

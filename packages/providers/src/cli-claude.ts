@@ -20,6 +20,7 @@ export interface CliClaudeOptions {
 }
 
 const KILL_GRACE_MS = 3000;
+const SCRUB = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB";
 const STDERR_LIMIT = 4000;
 
 /**
@@ -131,12 +132,17 @@ function runOnce(
     const env: NodeJS.ProcessEnv = { ...process.env, ...opts.env, ...req.env };
     // Subscription runs never pick up an API key that happens to be in the environment.
     if (req.billing !== "api") delete env.ANTHROPIC_API_KEY;
+    // The CLI's own login token (CLAUDE_CODE_OAUTH_TOKEN of a per-card session or a container
+    // run) and an API key stay with the CLI: its Bash commands, hooks and MCP servers get the
+    // environment without them. Checked with claude 2.1.331: other variables still reach Bash.
+    env[SCRUB] = "1";
     // ADR-0051: the same command inside a VM; only the run's own variables go in, by name.
     const box = req.container;
     let command: [string, string[]];
     try {
+      const names = [...Object.keys(req.env ?? {}).filter((n) => n !== SCRUB), SCRUB];
       command = box
-        ? [box.bin, containerRunArgs(box, req.cwd, Object.keys(req.env ?? {}), [bin, ...args])]
+        ? [box.bin, containerRunArgs(box, req.cwd, names, [bin, ...args])]
         : [bin, args];
     } catch (err) {
       resolve({

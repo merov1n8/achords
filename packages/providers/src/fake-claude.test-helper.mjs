@@ -25,6 +25,7 @@ process.stdin.on("end", () => {
         injected: process.env.ACHORDS_TEST_SECRET ?? null,
         anthropicKey: process.env.ANTHROPIC_API_KEY ?? null,
         configDir: process.env.CLAUDE_CONFIG_DIR ?? null,
+        scrub: process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null,
       }),
     );
   }
