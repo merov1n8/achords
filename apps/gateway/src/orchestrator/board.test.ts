@@ -427,6 +427,143 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
       message: expect.stringMatching(/no pending/i),
     });
   });
+  describe("an owner's card move starts work (ADR-0066)", () => {
+    const tasksOf = (agent: string) =>
+      db
+        .prepare("SELECT id, status FROM tasks WHERE assignee_agent_id = ? ORDER BY rowid")
+        .all(agent) as { id: string; status: string }[];
+
+    it("an owner move of a done card queues the assignee once, as a successor on the same card", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const { id, thread } = give();
+      await drain();
+      expect(getTask(db, id)).toMatchObject({ status: "done", column: "review" });
+      expect(orch.ownerMove(id, "review", "in_progress")).toMatchObject({ ok: true });
+      const queued = tasksOf("dev").filter((x) => x.status === "queued");
+      expect(queued).toHaveLength(1);
+      const next = getTask(db, queued[0]?.id as string) as Task;
+      // The same card (ADR-0059) and the same session key, so the agent's session carries on.
+      expect(next).toMatchObject({ rootId: id, continuesFrom: id, column: "in_progress" });
+      expect(threadCard(db, thread.id)).toBe(next.id);
+      expect(column(id)).toBeNull();
+      expect(listMessages(db, thread.id).at(-1)?.content).toBe("→ dev is on it.");
+      await drain();
+      expect(calls.map((c) => c.task.id)).toEqual([id, next.id]);
+      expect(calls[1]?.req.prompt).toMatch(/owner moved this card to "in_progress"/);
+      // Owner moves are not review send-backs (ADR-0062 counts only agent moves).
+      expect(listMoves(db, next.id).filter((m) => m.actor.startsWith("agent:"))).toEqual([]);
+    });
+
+    it("a done card moved back from done also gets a successor", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const { id } = give();
+      await drain();
+      orch.ownerMove(id, "review", "done");
+      expect(tasksOf("dev").filter((x) => x.status === "queued")).toHaveLength(0);
+      orch.ownerMove(id, "done", "in_progress");
+      expect(tasksOf("dev").filter((x) => x.status === "queued")).toHaveLength(1);
+    });
+
+    it("the same move by an agent queues nothing", async () => {
+      setup([
+        ["dev", "roles: [dev]"],
+        ["qa", "roles: [qa]"],
+      ]);
+      const { id } = give();
+      let queuedAfterMove: number | undefined;
+      behave = (_req, task) => {
+        if (task.assigneeAgentId === "qa" && queuedAfterMove === undefined) {
+          expect(
+            orch.moveTask({ from: "task", taskId: task.id }, { taskId: id, to: "in_progress" }),
+          ).toEqual({ ok: true });
+          queuedAfterMove = tasksOf("dev").filter((x) => x.status === "queued").length;
+        }
+        return result();
+      };
+      await orch.workOnce(); // dev
+      await orch.workOnce(); // qa moves the card back
+      // Only the review's own end restarts the card (ADR-0062), never the move itself.
+      expect(queuedAfterMove).toBe(0);
+    });
+
+    it("a card assigned to the owner queues nothing", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const r = orch.createCard({ title: "Mine" });
+      if (!r.ok) throw new Error(r.reason);
+      expect(orch.ownerMove(r.taskId, "backlog", "in_progress")).toMatchObject({ ok: true });
+      expect(getTask(db, r.taskId)).toMatchObject({ parked: true, column: "in_progress" });
+      await drain();
+      expect(calls).toEqual([]);
+    });
+
+    it("a card already queued or claimed gets no second task", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const { id } = give();
+      orch.ownerMove(id, "in_progress", "todo");
+      orch.ownerMove(id, "todo", "in_progress");
+      expect(tasksOf("dev")).toHaveLength(1);
+      let during: number | undefined;
+      behave = () => {
+        orch.ownerMove(id, "in_progress", "todo");
+        orch.ownerMove(id, "todo", "in_progress");
+        during = tasksOf("dev").length;
+        return result();
+      };
+      await drain();
+      expect(during).toBe(1);
+      expect(calls).toHaveLength(1);
+    });
+
+    it("a parked card starts with its budget and stays in the column it was dropped in", async () => {
+      setup([["dev", "roles: [dev]\nbudget:\n  per_run_usd: 2"]]);
+      const r = orch.createCard({ title: "Write the FAQ", agent: "dev" });
+      if (!r.ok) throw new Error(r.reason);
+      expect(orch.ownerMove(r.taskId, "backlog", "in_progress")).toMatchObject({ ok: true });
+      expect(getTask(db, r.taskId)).toMatchObject({
+        parked: false,
+        budgetUsd: 2,
+        column: "in_progress",
+      });
+      await drain();
+      expect(calls.map((c) => c.task.id)).toEqual([r.taskId]);
+    });
+
+    it("a spent budget refuses the dispatch with a chat message", async () => {
+      setup([["dev", "roles: [dev]\nbudget:\n  per_run_usd: 1"]]);
+      const { id, thread } = give();
+      await drain();
+      db.prepare("UPDATE tasks SET spent_usd = 1 WHERE id = ?").run(id);
+      expect(orch.ownerMove(id, "review", "in_progress")).toMatchObject({ ok: true });
+      expect(tasksOf("dev")).toHaveLength(1);
+      expect(column(id)).toBe("in_progress");
+      expect(listMessages(db, thread.id).at(-1)?.content).toMatch(
+        /"Build page" was moved but not started: .*budget/,
+      );
+    });
+
+    it("a custom column with the key starts work; a column without it behaves as today", async () => {
+      setup([["dev", "roles: [dev]"]]);
+      const path = join(home, "workflows", "shared.yaml");
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace(
+          "in_progress: { start: assignee }",
+          "todo: { start: assignee }",
+        ),
+      );
+      const { id } = give();
+      await drain();
+      orch.ownerMove(id, "review", "in_progress");
+      expect(tasksOf("dev").filter((x) => x.status === "queued")).toHaveLength(0);
+      orch.ownerMove(id, "in_progress", "todo");
+      const queued = tasksOf("dev").filter((x) => x.status === "queued");
+      expect(queued).toHaveLength(1);
+      expect(column(queued[0]?.id as string)).toBe("todo");
+      await drain();
+      expect(calls).toHaveLength(2);
+    });
+  });
+
   describe("cards made by hand", () => {
     it("a card that is not started gets its own chat and is never worked on", async () => {
       setup([["dev", "roles: [dev]"]]);

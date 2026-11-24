@@ -97,6 +97,7 @@
   "thread.sessionsOff": "Agents start each run on this chat's card from scratch: keeping their session needs the token for container runs (Settings → Model access).",
   "thread.reviewLimit": "\"{title}\" was sent back {n} times and now waits for you: read the last review and decide.",
   "thread.direct": "→ {agent} is on it.",
+  "thread.moveNotStarted": "\"{title}\" was moved but not started: {reason}.",
   "thread.cardCreated": "Card \"{title}\" is on the board, not started yet. Results and questions will appear here once an agent works on it.",
   "thread.unknownAgent": "There is no agent called {agent}. Agents: {agents}.",
   "thread.question": "Question from {agent} ({title}): {question}",

@@ -118,6 +118,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Dragging a card into "in progress" now starts its agent (ADR-0066): a card that was not
+  started starts as with its Start button, a finished or failed card continues as a new run on
+  the same card (same chat, same budget, same agent session), and a card already queued or running
+  is left alone. Only your own moves start work, never an agent's, and a card without an agent
+  stays yours. A spent budget or the task limit is explained in the card's chat instead. Any
+  column can do this with `on_enter: { <column>: { start: assignee } }` in its workflow. New
+  installs get it on `in_progress`; an existing install keeps its own `workflows/<workspace>.yaml`
+  (never overwritten), so add `in_progress: { start: assignee }` under `on_enter:` there to turn it on.
 - A discussion between agents (a room) now leaves its result on the card (ADR-0066): the agent
   that opened it records the decision, who decided and the points still open, shown as a comment
   on the card under that agent's name. Later work on the card sees the latest five. Without a

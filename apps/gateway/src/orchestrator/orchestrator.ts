@@ -1102,6 +1102,102 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     say(t("thread.sentBack", { agent: card.assigneeAgentId }));
   };
 
+  /**
+   * Starts a parked card: its agent and budget, the same checks as work the boss hands out.
+   * `toStart`: the Start button also moves it to the start column; a card the owner dropped
+   * into a working column stays where it was dropped (ADR-0066).
+   */
+  const startParkedCard = (
+    taskId: string,
+    agent: string | undefined,
+    toStart: boolean,
+  ): { ok: true } | { ok: false; reason: string } => {
+    const task = getTask(db, taskId);
+    if (!task?.column || task.parentId) return { ok: false, reason: "There is no such card." };
+    if (!task.parked) return { ok: false, reason: "This card has already started." };
+    const id = agent ?? task.assigneeAgentId;
+    if (!id) return { ok: false, reason: "Pick an agent to start this card." };
+    const all = agents();
+    const boss = all.get(BOSS_ID);
+    if (!boss) return { ok: false, reason: "boss agent is not configured" };
+    const target = all.get(id);
+    const reason = refuse(boss, target, undefined, id);
+    if (reason || !target)
+      return { ok: false, reason: reason ?? `There is no agent called ${id}.` };
+    const budget = target.budget.per_run_usd;
+    if (
+      !startParked(db, taskId, {
+        assigneeAgentId: id,
+        ...(budget !== undefined ? { budgetUsd: budget } : {}),
+      })
+    ) {
+      return { ok: false, reason: "This card has already started." };
+    }
+    const started = getTask(db, taskId) as Task;
+    const wf = workflowForTask(started);
+    const from = started.column as string;
+    if (toStart && from !== wf.start) {
+      const check = checkMove(wf, { assignee: id, column: from }, wf.start, { kind: "owner" });
+      moveCard(db, {
+        taskId,
+        from,
+        to: wf.start,
+        actor: "owner",
+        override: check.ok && check.override,
+      });
+    }
+    if (started.threadId) post(started.threadId, t("thread.direct", { agent: id }));
+    return { ok: true };
+  };
+
+  /**
+   * ADR-0066: the owner dropped a card into a column with `on_enter.start: assignee`. Its agent
+   * works on it once: a parked card starts, a finished one gets a successor on the same card,
+   * one that is queued or running is left alone. Only ownerMove calls this.
+   */
+  const dispatchCard = (taskId: string, column: string) => {
+    const card = getTask(db, taskId);
+    const agent = card?.assigneeAgentId;
+    // Without an agent the card is the owner's own work.
+    if (!card || !agent || agent === BOSS_ID) return;
+    const say = (text: string) => {
+      if (card.threadId) post(card.threadId, text);
+    };
+    const notStarted = (reason: string) =>
+      t("thread.moveNotStarted", { title: card.title, reason: reason.replace(/\.$/, "") });
+    if (card.parked) {
+      const r = startParkedCard(card.id, undefined, false);
+      if (!r.ok) say(notStarted(r.reason));
+      return;
+    }
+    if (card.status !== "done" && card.status !== "failed") return;
+    const rootId = cardKey(card);
+    const all = agents();
+    const boss = all.get(BOSS_ID);
+    const reason = !boss
+      ? "boss agent is not configured"
+      : (refuse(boss, all.get(agent), undefined, agent) ??
+        (lineTaskCount(db, rootId) >= MAX_LINE_TASKS
+          ? `task limit: at most ${MAX_LINE_TASKS} tasks per piece of work (delegations and handoffs)`
+          : remainingBudget(db, rootId) <= 0
+            ? "the card has used up its budget"
+            : undefined));
+    if (reason) {
+      say(notStarted(reason));
+      return;
+    }
+    const next = enqueueSuccessor(db, card, {
+      title: card.title,
+      description: `${card.description ?? ""}\n\nThe owner moved this card to "${column}": continue the work from where it stands, then report what you did.`,
+      assigneeAgentId: agent,
+      caller: BOSS_ID,
+    });
+    // The same card carries on (ADR-0059), with its sessions.
+    takeOverCard(db, card.id, next.id, column, "system");
+    carryCardSessions(db, home, cardKey(card), cardKey(next));
+    say(t("thread.direct", { agent }));
+  };
+
   /** The continuation note for a task interrupted by a planned stop. */
   const resumeNote = (items: { content: string; status: string }[]) =>
     [
@@ -1327,6 +1423,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       setSetting(db, pendingKey(taskId), "");
       clearActions(db, "move:", taskId);
       enterColumn(target, to, wf);
+      // ADR-0066: a working column starts the assignee; agent and system moves never do.
+      if (wf.on_enter[to]?.start === "assignee") dispatchCard(taskId, to);
       return { ok: true, override: check.override };
     },
 
@@ -2184,43 +2282,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
 
     startCard(taskId, agent) {
-      const task = getTask(db, taskId);
-      if (!task?.column || task.parentId) return { ok: false, reason: "There is no such card." };
-      if (!task.parked) return { ok: false, reason: "This card has already started." };
-      const id = agent ?? task.assigneeAgentId;
-      if (!id) return { ok: false, reason: "Pick an agent to start this card." };
-      const all = agents();
-      const boss = all.get(BOSS_ID);
-      if (!boss) return { ok: false, reason: "boss agent is not configured" };
-      const target = all.get(id);
-      // The same checks as work the boss hands out from a chat.
-      const reason = refuse(boss, target, undefined, id);
-      if (reason || !target)
-        return { ok: false, reason: reason ?? `There is no agent called ${id}.` };
-      const budget = target.budget.per_run_usd;
-      if (
-        !startParked(db, taskId, {
-          assigneeAgentId: id,
-          ...(budget !== undefined ? { budgetUsd: budget } : {}),
-        })
-      ) {
-        return { ok: false, reason: "This card has already started." };
-      }
-      const started = getTask(db, taskId) as Task;
-      const wf = workflowForTask(started);
-      const from = started.column as string;
-      if (from !== wf.start) {
-        const check = checkMove(wf, { assignee: id, column: from }, wf.start, { kind: "owner" });
-        moveCard(db, {
-          taskId,
-          from,
-          to: wf.start,
-          actor: "owner",
-          override: check.ok && check.override,
-        });
-      }
-      if (started.threadId) post(started.threadId, t("thread.direct", { agent: id }));
-      return { ok: true };
+      return startParkedCard(taskId, agent, true);
     },
 
     async handleMessage(threadId, text, channel) {
