@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { type CallScope, scopeRefusal } from "@achords/policy";
+import { type CallScope, type LiveGuard, liveRefusal, scopeRefusal } from "@achords/policy";
 import { remoteServer } from "./remote.ts";
 
 const HUB = process.env.ACHORDS_HUB_URL ?? "";
@@ -43,6 +43,7 @@ const launch = (await res.json()) as {
   env: Record<string, string>;
   files?: Record<string, Record<string, string>>;
   scope?: CallScope;
+  live?: LiveGuard;
   publish?: {
     integration: string;
     mode: "review" | "auto";
@@ -77,8 +78,8 @@ const {
   ...inherited
 } = process.env;
 if (TICKET_VAR) delete inherited[TICKET_VAR];
-const { scope, publish, untrusted, remote } = launch;
-const proxied = Boolean(scope || publish || untrusted || remote);
+const { scope, live, publish, untrusted, remote } = launch;
+const proxied = Boolean(scope || live || publish || untrusted || remote);
 // A remote server (ADR-0050) has no process: the launcher is its stdio end.
 const child = remote
   ? undefined
@@ -171,10 +172,11 @@ if (proxied) {
         params?: { name?: string; arguments?: Record<string, unknown> };
       };
       const tool = String(m.params?.name ?? "");
+      const call = m.method === "tools/call";
+      // The live rule before publishing: such a call never reaches the owner or the server.
       const refusal =
-        m.method === "tools/call" && scope
-          ? scopeRefusal(scope, tool, m.params?.arguments)
-          : undefined;
+        (call && scope ? scopeRefusal(scope, tool, m.params?.arguments) : undefined) ??
+        (call && live ? liveRefusal(live, tool, m.params?.arguments) : undefined);
       if (refusal !== undefined) {
         process.stdout.write(toolReply(m.id, `Refused: ${refusal}`, true));
         return;

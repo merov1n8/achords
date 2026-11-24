@@ -610,6 +610,11 @@ describe("integrations in runs (ADR-0034)", () => {
       };
       return launches;
     };
+    // wp writes with per-client credentials, so on a secured project the live rule (ADR-0067,
+    // tested below) would refuse them; the publishing mechanics are shown on an experimental one.
+    beforeEach(() => {
+      appendFileSync(join(home, "projects", "acme", "project.yaml"), "class: experimental\n");
+    });
 
     it("review: write tools go through the launcher to the owner, who approves the exact call", async () => {
       const launches = capture();
@@ -686,6 +691,152 @@ describe("integrations in runs (ADR-0034)", () => {
       const task = await give("marketer", "acme");
       const last = listMessages(db, task.threadId as string).at(-1)?.content;
       expect(last).toBe("Check the blog: ready, waiting for your approval above.");
+    });
+  });
+
+  describe("the secured-live rule (ADR-0067)", () => {
+    const WRITES = ["save_draft", "hide_post", "publish_post", "boost_post"];
+    const LIVE = "https://live.example";
+    const TAGGED = "https://tagged.example";
+    const STAGING = "https://staging.example";
+    const accounts = `integrations:\n  social:\n    - ${LIVE}\n    - { url: ${TAGGED}, env: live }\n    - { url: ${STAGING}, env: staging }\n`;
+    const capture = () => {
+      const launches: McpLaunch[] = [];
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launches.push(launch);
+        return original(launch);
+      };
+      return launches;
+    };
+    beforeEach(() => {
+      // One write tool per class, scoped per site (ADR-0036).
+      writeFileSync(
+        join(home, "catalog", "social.yaml"),
+        `id: social\nname: Social\ncommand: npx\nargs: ["social@1.0.0"]\nenv:\n  KEY: "vault:social-key"\ntools:\n  read: [list_posts]\n  write: [${WRITES.join(", ")}]\n  class:\n    save_draft: draft\n    hide_post: reversible\n    boost_post: spend\nscope:\n  args: [site]\n`,
+      );
+      // acme: class not chosen yet (counts as secured).
+      appendFileSync(join(home, "projects", "acme", "project.yaml"), accounts);
+      for (const [slug, cls] of [
+        ["sec", "secured"],
+        ["lab", "experimental"],
+      ] as const) {
+        createProject(join(home, "projects"), {
+          slug,
+          name: slug,
+          workspace: "web-clients",
+          class: cls,
+        });
+        appendFileSync(join(home, "projects", slug, "project.yaml"), accounts);
+      }
+      for (let level = 0; level <= 5; level++) {
+        agent(`l${level}`, `level: ${level}\nmcp: [social]\npublish_mode:\n  default: auto`);
+      }
+      agent("legacy", "mcp: [social]\npublish_mode:\n  default: auto");
+      orch.syncAgents();
+    });
+
+    /** A held publish of `agentId` on a task of `project`, as the launcher would have sent it. */
+    const held = async (agentId: string, project: string, tool: string, site?: string) => {
+      const task = await give("legacy", project);
+      setSetting(
+        db,
+        `publish_req:p-${agentId}-${tool}`,
+        JSON.stringify({
+          taskId: task.id,
+          agentId,
+          integration: "social",
+          tool,
+          args: site ? { site, text: "Hi" } : { text: "Hi" },
+        }),
+      );
+      return { task, action: `publish:approve:p-${agentId}-${tool}` };
+    };
+
+    it("owner approval never lifts it: live and untagged targets refuse every write class, any agent", async () => {
+      for (const project of ["acme", "sec"]) {
+        for (const agentId of ["l0", "l1", "l2", "l3", "l4", "l5", "legacy"]) {
+          for (const tool of WRITES) {
+            for (const site of [LIVE, TAGGED]) {
+              const { action } = await held(agentId, project, tool, site);
+              const r = orch.runAction(action);
+              expect(r.ok).toBe(false);
+              expect(r.message).toMatch(/live target of a secured project/);
+              expect(r.message).toMatch(/staging.*package/);
+            }
+          }
+        }
+      }
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called).toEqual([]);
+    });
+
+    it("still refused with an override raising the level and with full access granted", async () => {
+      writeFileSync(join(home, "overrides.yaml"), "- { agent: l3, project: sec, level: 5 }\n");
+      const { task, action } = await held("l3", "sec", "publish_post", LIVE);
+      setSetting(db, `elevation:${task.rootId ?? task.id}`, String(Date.now() + 3_600_000));
+      expect(orch.runAction(action)).toMatchObject({ ok: false });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called).toEqual([]);
+    });
+
+    it("every run on a secured project carries the rule; staging is writable from level 3", async () => {
+      const launches = capture();
+      for (const agentId of ["l3", "l4", "l5", "legacy"]) await give(agentId, "sec");
+      for (const l of launches) {
+        expect(l.live).toEqual({ tools: WRITES, args: ["site"], staging: [STAGING] });
+      }
+      expect(launches).toHaveLength(4);
+      // The level 3 run gets the draft tool directly; a held staging publish runs when approved.
+      expect(seen[0]?.req.allowedTools).toContain("mcp__social__save_draft");
+      const { action } = await held("l3", "sec", "publish_post", STAGING);
+      expect(orch.runAction(action).ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called.map((c) => c.args)).toEqual([{ site: STAGING, text: "Hi" }]);
+      expect(called[0]?.launch.live?.staging).toEqual([STAGING]);
+    });
+
+    it("the agent is told up front, and its live publish request is refused before it is held", async () => {
+      let request: unknown;
+      onRun = (task) => {
+        request = orch.requestPublish(
+          { from: "task", taskId: task.id },
+          { integration: "social", tool: "publish_post", args: { site: LIVE } },
+        );
+      };
+      const task = await give("legacy", "acme");
+      expect(request).toMatchObject({ ok: false, reason: expect.stringMatching(/live target/) });
+      expect(listMessages(db, task.threadId as string).some((m) => m.actions?.length)).toBe(false);
+      const prompt = seen[0]?.req.prompt ?? "";
+      expect(prompt).toMatch(/Project acme is secured: live targets are read-only/);
+      expect(prompt).toContain(`Writable (staging): social: ${STAGING}.`);
+      expect(prompt).toContain(`Read-only (live): social: ${LIVE}; social: ${TAGGED}.`);
+      expect(prompt).toMatch(/delivered as a package \(a diff or export plus a checklist\)/);
+    });
+
+    it("experimental projects and own accounts: writes follow the level", async () => {
+      const launches = capture();
+      await give("l5", "lab");
+      expect(launches[0]?.live).toBeUndefined();
+      expect(seen[0]?.req.prompt).not.toMatch(/is secured/);
+      const { action } = await held("l5", "lab", "publish_post", LIVE);
+      expect(orch.runAction(action).ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called).toHaveLength(1);
+    });
+
+    it("a write whose target cannot be told is refused on a secured project", async () => {
+      // No site argument on a project with several sites.
+      const { action } = await held("l5", "sec", "save_draft");
+      expect(orch.runAction(action).message).toMatch(/does not say which target/);
+      // Per-client credentials without a named account (wp): the target is the client's.
+      const task = await give("marketer", "acme");
+      const r = orch.requestPublish(
+        { from: "task", taskId: task.id },
+        { integration: "wp", tool: "create_post", args: { title: "T" } },
+      );
+      expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/does not say/) });
+      expect(called).toEqual([]);
     });
   });
 

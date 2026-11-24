@@ -68,6 +68,7 @@ export {
   overrideRefusal,
   saveOverrides,
 } from "./levels.ts";
+export { isSecured, LIVE_HINT, type LiveGuard, liveGuard, liveRefusal } from "./live.ts";
 export {
   loadAgents,
   loadManifest,

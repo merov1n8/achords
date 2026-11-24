@@ -120,6 +120,9 @@ import {
   grantedIntegrations,
   hostSandboxSettings,
   isLocalModel,
+  isSecured,
+  liveGuard,
+  liveRefusal,
   loadAgents,
   loadOverrides,
   loadProjects,
@@ -1013,6 +1016,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const builtin = entry.builtin ? builtins[entry.builtin] : undefined;
     if (entry.builtin && !builtin) throw new Error(`no builtin server ${entry.builtin}`);
     const auth = entry.authorization;
+    // ADR-0067: every launch carries the secured-live rule, so the launcher holds it for agent
+    // runs, owner-approved publishes and tests alike.
+    const live = project && liveGuard(entry, project);
     return {
       // Builtin servers run on the gateway's own Node, like the hub server.
       command: builtin ? process.execPath : (entry.command ?? ""),
@@ -1048,9 +1054,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             },
           }
         : {}),
+      ...(live ? { live } : {}),
     };
   };
   const publishKey = (id: string) => `publish_req:${id}`;
+  /** ADR-0067: why a write call to a project's live target is refused (own accounts: never). */
+  const liveRefused = (
+    entry: CatalogEntry,
+    slug: string | null | undefined,
+    tool: string,
+    args: unknown,
+  ): string | undefined => {
+    const project = slug ? projects().get(slug) : ownProject(home);
+    if (!project) return `project ${slug} no longer exists`;
+    const guard = liveGuard(entry, project);
+    return guard
+      ? liveRefusal(guard, tool, args as Record<string, unknown> | undefined)
+      : undefined;
+  };
   // A task that handed something to the owner ends with a short line, not a repeat of it.
   const awaitingKey = (taskId: string) => `publish_task:${taskId}`;
   // ADR-0066: the chat was told once that its card runs cannot keep a session.
@@ -1572,6 +1593,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ) {
           return { ok: false, message: t("action.publishNotAllowed", vars) };
         }
+        // ADR-0067: no approval lifts the secured-live rule (the launcher refuses it as well).
+        const live = liveRefused(entry, task?.project, req.tool, req.args);
+        if (live) return { ok: false, message: t("action.publishLive", { ...vars, reason: live }) };
         let launch: McpLaunch;
         try {
           launch = buildLaunch(
@@ -2125,6 +2149,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           reason: `${request.tool} is not a write tool of ${request.integration}`,
         };
       }
+      const refusal = liveRefused(entry, task.project, request.tool, request.args);
+      if (refusal) return { ok: false, reason: refusal };
       const id = randomBytes(6).toString("hex");
       setSetting(
         db,
@@ -3136,6 +3162,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const publishing = launches
         .filter((l) => l.publish)
         .map((l) => `${l.id} (${l.publish?.mode})`);
+      // ADR-0067: on a secured project live targets are read-only for every agent.
+      const targets = (env: "live" | "staging") =>
+        Object.entries(project?.integrationEntries ?? {}).flatMap(([channel, list]) =>
+          list.filter((e) => e.env === env).map((e) => `${channel}: ${e.value}`),
+        );
+      const securedNote =
+        project && isSecured(project)
+          ? [
+              `Project ${project.slug} is secured: live targets are read-only, writes go to staging targets only.`,
+              targets("staging").length
+                ? `Writable (staging): ${targets("staging").join("; ")}.`
+                : "",
+              targets("live").length ? `Read-only (live): ${targets("live").join("; ")}.` : "",
+              "Work meant for live is delivered as a package (a diff or export plus a checklist) for the owner to deploy.",
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : "";
       const scopeNote = [
         appsOpened.length
           ? `achords opened ${appsOpened.join(" and ")} on this Mac for this run and closes ${appsOpened.length > 1 ? "them" : "it"} again when no task needs ${appsOpened.length > 1 ? "them" : "it"}; say so in one line of your report.`
@@ -3147,6 +3191,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         scopes.length
           ? `This client's own integration targets (calls for anything else are refused): ${scopes.join("; ")}.`
           : "",
+        securedNote,
         unscoped.length
           ? `Not available in this run (${project ? `project.yaml of ${project.slug} names no targets` : "no client project, and your own accounts name none"}): ${unscoped.join(", ")}.`
           : "",

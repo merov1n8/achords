@@ -144,6 +144,7 @@
   "action.publishApproved": "Approved: {integration} {tool} is running; the result follows here.",
   "action.publishRejected": "Rejected: {integration} {tool} was not run.",
   "action.publishNotAllowed": "Not run: {integration} {tool} is no longer allowed for this agent or project.",
+  "action.publishLive": "Not run: {integration} {tool} would change a live target of a secured project. {reason}",
   "action.noPendingPublish": "No pending publish request with this id.",
   "action.changeStale": "Not changed: agents/{agent}/agent.yaml was edited since this proposal; ask again.",
   "action.projectUpdated": "Added to the description of {project}.",

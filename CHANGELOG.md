@@ -17,6 +17,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   level 3 and the chat says why. Level 0 agents get no work. The agent page shows the
   effective level per project.
 - Force pushes and git history rewrites are refused for every agent.
+- Live sites and accounts of secured projects are read-only for every agent (ADR-0067): no
+  level, approval (your Approve button included), override or full access lets an agent write
+  to them. Writes go only to targets you tag `staging`; work meant for live is handed to you as
+  a package (a diff or export plus a checklist) to deploy yourself. **Note for owners:** existing
+  projects count as secured, with every site and account live, until you choose a class and tag
+  their staging targets, so agents' write tools to those sites are refused until then. This is
+  intentional. Experimental projects and work without a project are unchanged.
 
 ### Fixed
 
