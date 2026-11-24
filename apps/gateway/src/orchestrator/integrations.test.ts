@@ -728,6 +728,30 @@ describe("integrations in runs (ADR-0034)", () => {
       await give("autopub", "acme");
       expect(launches[1]?.publish?.mode).toBe("auto");
     });
+
+    it("the project's own sites are not the open web; any site is (ADR-0066)", async () => {
+      appendFileSync(
+        join(home, "projects", "acme", "project.yaml"),
+        'integrations:\n  website: ["https://acme.example"]\n',
+      );
+      agent(
+        "anysite",
+        'mcp: [wp]\npublish_mode:\n  default: auto\nnetwork:\n  allow: ["*"]\ncontainer: false',
+        "[Read, WebFetch]",
+      );
+      orch.syncAgents();
+      const launches: McpLaunch[] = [];
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launches.push(launch);
+        return original(launch);
+      };
+      await give("autopub", "acme");
+      expect(seen.at(-1)?.req.allowedTools).toContain("WebFetch(domain:acme.example)");
+      expect(launches[0]?.publish?.mode).toBe("auto");
+      await give("anysite", "acme");
+      expect(launches[1]?.publish?.mode).toBe("review");
+    });
   });
 
   it("an OpenAI (codex) run gets hub tools and local integrations, never credentials (ADR-0040)", async () => {

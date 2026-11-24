@@ -303,7 +303,9 @@ describe("skills in agent runs (ADR-0049)", () => {
     for (const [id, tools] of [
       ["boss", "[]"],
       ["dev", "[Read]"],
-      ["researcher", "[WebFetch]"],
+      // ADR-0066: "*" is the open web even without WebSearch; a WebFetch to named hosts is not.
+      ["researcher", '[WebFetch]\nnetwork:\n  allow: ["*"]\ncontainer: false'],
+      ["docs", "[WebFetch]\nnetwork:\n  allow: [developer.wordpress.org]"],
     ]) {
       mkdirSync(join(home, "agents", id as string), { recursive: true });
       writeFileSync(
@@ -371,7 +373,11 @@ describe("skills in agent runs (ADR-0049)", () => {
       { from: "boss", threadId: thread.id },
       { agent: "researcher", title: "t", instructions: "x" },
     );
-    if (!dev.ok || !web.ok) throw new Error("delegate failed");
+    const docs = orch.delegate(
+      { from: "boss", threadId: thread.id },
+      { agent: "docs", title: "t", instructions: "x" },
+    );
+    if (!dev.ok || !web.ok || !docs.ok) throw new Error("delegate failed");
     await orch.workOnce();
     expect(seen[0]?.allowedTools).toEqual(
       expect.arrayContaining([
@@ -398,12 +404,18 @@ describe("skills in agent runs (ADR-0049)", () => {
       body: "Open the site.",
       reason: "r",
     };
-    // Auto mode in workspace web: saved at once for dev, review for the agent with the open web.
+    // Auto mode in workspace web: saved at once for dev and for a WebFetch limited to one host,
+    // review for the agent with the open web ("*", no WebSearch).
     expect(orch.skillPropose(from(dev.taskId), draft)).toMatchObject({
       ok: true,
       text: expect.stringMatching(/^Saved/),
     });
+    expect(orch.skillPropose(from(docs.taskId), { ...draft, name: "docs-tip" })).toMatchObject({
+      ok: true,
+      text: expect.stringMatching(/^Saved/),
+    });
     orch.skillPropose(from(web.taskId), { ...draft, name: "web-tip" });
+    expect(skillProposals(db)).toHaveLength(1);
     const id = skillProposals(db)[0]?.id as string;
     expect(orch.runAction(`skill:approve:${id}`)).toEqual({
       ok: true,

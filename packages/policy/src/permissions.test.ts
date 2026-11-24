@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { allowRules, siteOf, webFetchSettings } from "./permissions.ts";
+import { allowRules, openWeb, siteOf, webFetchSettings } from "./permissions.ts";
 
 describe("CLI allow rules scoped to the manifest (ADR-0010)", () => {
   it("scopes file tools to the agent's own folders instead of the whole disk", () => {
@@ -97,5 +97,18 @@ describe("CLI allow rules scoped to the manifest (ADR-0010)", () => {
     expect(allowed("https://acme.example/any/page")).toBe(true);
     expect(allowed("https://acme.example")).toBe(true);
     expect(allowed("https://acme.example.evil.com/")).toBe(false);
+  });
+});
+
+describe("open web (ADR-0066)", () => {
+  const run = (tools: string[], allow: string[]) => ({ tools, network: { allow } });
+  it("is any site, WebSearch or full access; WebFetch to named hosts is not", () => {
+    expect(openWeb(run(["WebFetch"], ["*"]), false)).toBe(true);
+    expect(openWeb(run(["Read", "WebSearch"], []), false)).toBe(true);
+    expect(openWeb(run(["Read"], []), true)).toBe(true);
+    expect(openWeb(run(["WebFetch"], ["acme.example", "shop.acme.example/api/"]), false)).toBe(
+      false,
+    );
+    expect(openWeb(run(["Read"], []), false)).toBe(false);
   });
 });

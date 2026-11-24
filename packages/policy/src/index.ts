@@ -48,7 +48,7 @@ export {
   manifestSchema,
   parseManifest,
 } from "./manifest.ts";
-export { allowRules, siteOf, webFetchSettings } from "./permissions.ts";
+export { allowRules, openWeb, siteOf, webFetchSettings } from "./permissions.ts";
 export { costOf, loadPricing, type Pricing } from "./pricing.ts";
 export {
   createProject,

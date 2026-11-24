@@ -197,16 +197,18 @@ Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, AD
   - **Data.** Agent transcripts sit on disk under `$ACHORDS_HOME/sessions/` until the card is done. They are part of the install's data, like memory.
   - **Memory.** Research on the open web no longer feeds memory. Its value survives on the card and in reports.
   - **Schema changes:**
-    - core migration 0025:
-      - on `tasks`: `stall_noticed_at`, `stall_reason`, `waiting_parent`, `parent_question`, `parent_answer`, `parent_questions`;
-      - `rooms.outcome`;
-      - table `card_sessions`;
+    - core migrations:
+      - 0025 (part 5): table `card_sessions`; `runs.resumed`;
+      - 0026 (part 3): on `tasks`: `waiting_parent`, `parent_question`, `parent_answer`, `parent_questions`;
+      - 0027 (part 4): `rooms.outcome`; on `task_comments`: `author`, `room_id`;
+      - 0028 (part 1): on `tasks`: `stall_noticed_at`, `stall_reason`;
     - workflow schema: `on_enter.start: assignee`;
     - settings: stall minutes and stall percentage.
-  - **UI changes:**
+  - **UI changes (built):**
     - the stall notice in the chat (the boss's message);
-    - working columns start work when the owner drops a card;
-    - the card modal shows room outcomes as comments;
-    - the run details show parent questions and answers, and the input tokens a resume read (cached and uncached);
-    - Settings show the stall thresholds.
+    - working columns start work when the owner drops a card (no new control: the drop itself);
+    - the card modal shows room outcomes as comments, under the opener agent's name;
+    - the run details show the input tokens a resume read (cached and uncached);
+    - Settings → Monitors show the stall thresholds.
+  - **UI not built:** parent questions and answers are not in the run details. They reach the agents' prompts only.
   - **Unchanged:** depth 3, cycles, fan-out 5, the shared budget, the ADR-0055 hop and task limits, and rooms staying out of chats.

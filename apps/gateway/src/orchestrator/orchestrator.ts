@@ -121,6 +121,7 @@ import {
   type Manifest,
   manifestChanges,
   OWN,
+  openWeb,
   ownProject,
   type Project,
   parseManifest,
@@ -1292,9 +1293,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       workspace: m.workspace,
       taskId: task.id,
       threadId: task.threadId,
-      openWeb:
-        m.tools.some((x) => x === "WebFetch" || x === "WebSearch") ||
-        elevatedUntil(task.rootId ?? task.id) !== undefined,
+      // The raw manifest suffices: a project's sites add neither "*" nor WebSearch (ADR-0066).
+      openWeb: openWeb(m, elevatedUntil(task.rootId ?? task.id) !== undefined),
     };
   };
 
@@ -2824,8 +2824,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               ? publishMode(runManifest, entry.id, runProject)
               : "off";
           // ADR-0038: a run that reads the open web never publishes without the owner.
-          const openWeb = runManifest.tools.some((x) => x === "WebFetch" || x === "WebSearch");
-          const mode = chosen === "auto" && openWeb ? "review" : chosen;
+          const web = openWeb(runManifest, until !== undefined);
+          const mode = chosen === "auto" && web ? "review" : chosen;
           return {
             id: entry.id,
             keyed: credentials,
@@ -3089,16 +3089,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const usedModel = `${built.provider.id}/${built.req.model}`;
     const sessionKey = { card: rootId, agent: manifest.id, project: task.project ?? "" };
     // Open web as in ADR-0066: the effective run has "*", WebSearch or full access.
-    const openWeb =
-      until !== undefined ||
-      manifest.network.allow.includes("*") ||
-      manifest.tools.includes("WebSearch");
+    const web = openWeb(manifest, until !== undefined);
     const keyed = launches.some((l) => l.keyed);
-    const trust = openWeb ? "open-web" : keyed ? "keyed" : "closed";
+    const trust = web ? "open-web" : keyed ? "keyed" : "closed";
     let session: { dir: string; prompt: string } | undefined;
     const cardRun = built.provider.id === "cli-claude" && !task.roomId && !task.workerSpec;
     // Open web and credentials in one run: its transcript must never be resumed either way.
-    if (cardRun && !(openWeb && keyed)) {
+    if (cardRun && !(web && keyed)) {
       // A separate config folder does not see the Mac's Keychain login: the container token
       // signs in instead (container runs carry it already, API mode needs none).
       const login = box || built.req.billing === "api" ? {} : deps.claudeToken?.();
@@ -3418,21 +3415,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             decision: redact(res.text).slice(0, MAX_POST),
             openPoints: [NOT_STATED],
           });
-        await deps.memory
-          ?.add(
-            {
-              workspace: project ? projectSpace(project) : manifest.workspace,
-              kind: "summary",
-              content: redact(`Task "${task.title}" (${manifest.id}): ${res.text}`).slice(
-                0,
-                SUMMARY_CHARS,
-              ),
-              source: task.id,
-              localOnly: task.sensitivity === "local-only",
-            },
-            deps.embedder,
-          )
-          .catch(() => {}); // memory is best effort; the task result is already safe
+        // ADR-0066: what a run read on the open web never becomes memory; its result stays in
+        // the report, on the card and in the chat.
+        if (!web)
+          await deps.memory
+            ?.add(
+              {
+                workspace: project ? projectSpace(project) : manifest.workspace,
+                kind: "summary",
+                content: redact(`Task "${task.title}" (${manifest.id}): ${res.text}`).slice(
+                  0,
+                  SUMMARY_CHARS,
+                ),
+                source: task.id,
+                localOnly: task.sensitivity === "local-only",
+              },
+              deps.embedder,
+            )
+            .catch(() => {}); // memory is best effort; the task result is already safe
         if (task.parentId) {
           childFinished(db, task.id);
           reviewFinished(task, manifest.id, res.text);

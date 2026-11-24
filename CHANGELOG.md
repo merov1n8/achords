@@ -73,6 +73,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   input tokens include the part read from cache; the message box grows as you type and can be
   dragged taller.
 - Chat: your own messages use a neutral colour instead of the accent colour.
+- Work that reads the open web (any website, web search, or full access) no longer adds its
+  result to memory (ADR-0066); the result stays in its report, on its card and in the chat.
+  Reading only the project's own websites is not the open web: such work is remembered as before,
+  its new skills follow the workspace's skill mode, and an integration set to publish
+  automatically keeps doing so instead of asking you first.
 - Project accounts: the type is a dropdown (Git repository included; GitHub and GitLab addresses,
   https or ssh, are checked); the chat title shows a pencil to show it can be renamed.
 - Chat: your own messages are a plain rounded bubble (as in the design); click the chat title to
