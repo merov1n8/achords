@@ -61,6 +61,12 @@ export function codexProfile(req: RunRequest, host: CodexHost) {
   const fs: Record<string, "read" | "write" | "deny"> = { "/": "read", [host.home]: "deny" };
   for (const d of host.path) if (d.startsWith(`${host.home}/`)) fs[d] = "read";
   fs[host.codexPackages] = "read";
+  // git's core.hooksPath from the run's env (achords' hook wrapper, inside the denied home).
+  for (const [k, v] of Object.entries(req.env ?? {})) {
+    if (!/^GIT_CONFIG_KEY_\d+$/.test(k) || v !== "core.hooksPath") continue;
+    const dir = req.env?.[k.replace("KEY", "VALUE")];
+    if (dir) fs[dir] = "read";
+  }
   for (const d of [req.cwd, ...dirs.read]) fs[d] = "read";
   if (writes) for (const d of [req.cwd, ...dirs.write]) fs[d] = "write";
   return { fs, network: req.allowedTools.includes("WebFetch") };

@@ -1,5 +1,6 @@
 import { type Db, transaction } from "./db/database.ts";
 import type { Task } from "./queue.ts";
+import { waitingOwnerSql } from "./threads.ts";
 
 export interface CardMove {
   from: string | null;
@@ -134,4 +135,25 @@ export function withCardTitles<T extends Task>(db: Db, tasks: T[]): (T & { cardT
     }
     return { ...t, cardTitle: cardTitleOf(t, t.threadId ? titles.get(t.threadId) : null) };
   });
+}
+
+/**
+ * Adds `waitsForOwner` to board cards: a task of the card's chain asked the owner something, or
+ * its chat waits for the owner (waitingOwnerSql). A parked card is not waiting for an answer.
+ */
+export function withOwnerWaits<T extends Task>(
+  db: Db,
+  tasks: T[],
+): (T & { waitsForOwner: boolean })[] {
+  const chain = db.prepare(
+    "SELECT 1 FROM tasks WHERE (id = ? OR root_id = ?) AND status = 'queued' AND waiting_owner = 1",
+  );
+  const chat = db.prepare(`SELECT ${waitingOwnerSql("?")} AS w`);
+  return tasks.map((t) => ({
+    ...t,
+    waitsForOwner:
+      t.column !== null &&
+      (chain.get(t.id, t.id) !== undefined ||
+        (t.threadId !== null && Number(chat.get(t.threadId, t.threadId)?.w) === 1)),
+  }));
 }

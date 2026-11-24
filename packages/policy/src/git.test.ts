@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { gitPushArgs } from "./check.ts";
-import { GIT_SHELL_ENV, gitTokenId, pushTarget, validBranch } from "./git.ts";
+import { GIT_SHELL_ENV, gitTokenId, hookedGitEnv, pushTarget, validBranch } from "./git.ts";
 import type { AccountEntry } from "./projects.ts";
 
 const repos = (...list: AccountEntry[]) => ({ repository: list });
@@ -120,6 +120,16 @@ describe("git in every shell (ADR-0067)", () => {
       SSH_ASKPASS: "/usr/bin/false",
       GCM_INTERACTIVE: "never",
       SSH_AUTH_SOCK: "/dev/null",
+    });
+  });
+
+  it("codex and gemini shells keep the empty helper list and get achords' hooks", () => {
+    expect(hookedGitEnv("/opt/hooks")).toEqual({
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "credential.helper",
+      GIT_CONFIG_VALUE_0: "",
+      GIT_CONFIG_KEY_1: "core.hooksPath",
+      GIT_CONFIG_VALUE_1: "/opt/hooks",
     });
   });
 

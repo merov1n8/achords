@@ -105,3 +105,16 @@ export const GIT_SHELL_ENV: Readonly<Record<string, string>> = {
   GCM_INTERACTIVE: "never",
   SSH_AUTH_SOCK: "/dev/null",
 };
+
+/**
+ * Git config for shells that pass the environment through (codex, gemini): GIT_SHELL_ENV's empty
+ * helper list stays at index 0, and `core.hooksPath` points at achords' hook wrapper, which strips
+ * Co-Authored-By trailers in commit-msg and then runs the repository's own hook.
+ */
+export const hookedGitEnv = (hooksDir: string): Record<string, string> => ({
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "credential.helper",
+  GIT_CONFIG_VALUE_0: "",
+  GIT_CONFIG_KEY_1: "core.hooksPath",
+  GIT_CONFIG_VALUE_1: hooksDir,
+});

@@ -12,6 +12,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   last review, as a normal send-back would (your decision does not count toward the limit), and
   "Accept, move to Done" moves the card past review as your own move. Replying in the chat
   still works.
+- Commits agents make carry no `Co-Authored-By` lines: claude runs have the CLI's attribution off
+  and a hook that refuses such commands, codex and gemini runs get a git hook that strips them.
+- Attention cues: a chat with a new agent reply since you last opened it shows its title a bit
+  bolder in the chat list, with a "!" badge when it waits for your answer (a question or approval
+  buttons); opening the chat clears both until something new arrives. A Kanban card waiting for
+  your answer has a light accent tint and a stronger border, and a card that belongs to a chat
+  has a chat button in its bottom-right corner.
+- Unsent text in a chat's message box is kept per chat in the browser: switching to another chat
+  or page and back brings it back (drafts older than 30 days are dropped).
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
   task's title; renaming the card in its detail view sticks across follow-up tasks, and an empty
   name goes back to the chat's name. The current task's title is shown below the field.
@@ -107,6 +116,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   since its last turn, above all the reviewer's verdict, so you no longer have to paste the
   review after the send-back limit; the boss's status lines and button requests are left out.
   A new task on the card always gets the latest review, even when the chat is long.
+- Agents no longer propose skills for working around a failing tool, a missing permission or a
+  problem of the machine; they report it so the owner can fix the cause (ADR-0049).
 - Codex and Gemini runs give git a neutral global config (`GIT_CONFIG_GLOBAL=/dev/null`, the
   owner's name and email from the gateway): their sandboxes deny the home, so git stopped at
   `~/.gitconfig` and reviewers kept proposing a skill to work around it.

@@ -391,7 +391,7 @@ describe("orchestrator", () => {
     writeFileSync(join(home, "agents", "boss", "prompt.md"), "legacy boss prompt");
     const { orch, calls } = make(boss({ action: "answer", message: "ok" }));
     await orch.handleMessage(createThread(db, {}).id, "hello", "web");
-    expect(calls[0]?.appendSystemPrompt).toMatch(/\n\nlegacy boss prompt$/);
+    expect(calls[0]?.appendSystemPrompt).toMatch(/\n\nlegacy boss prompt\n\n/);
   });
 
   it("boss asks a clarifying question: no task yet", async () => {
