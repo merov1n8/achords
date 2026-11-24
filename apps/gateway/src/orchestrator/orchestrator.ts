@@ -1232,8 +1232,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ? liveRefusal(guard, tool, args as Record<string, unknown> | undefined)
       : undefined;
   };
-  // A task that handed something to the owner ends with a short line, not a repeat of it.
-  const awaitingKey = (taskId: string) => `publish_task:${taskId}`;
+  // A task with a request still waiting on the owner ends with a short line, not a repeat of it.
+  // One the owner already decided during the run no longer hides the run's report.
+  const awaitingOwner = (taskId: string) =>
+    db
+      .prepare("SELECT 1 FROM settings WHERE key LIKE 'publish_req:%' AND value LIKE ?")
+      .get(`{"taskId":${JSON.stringify(taskId)},%`) !== undefined;
   // ADR-0066: the chat was told once that its card runs cannot keep a session.
   const sessionsOffKey = (threadId: string) => `sessions_off:${threadId}`;
 
@@ -2568,7 +2572,6 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           { label: t("action.reject"), data: `publish:reject:${id}` },
         ],
       });
-      setSetting(db, awaitingKey(task.id), "1");
       return {
         ok: true,
         text: `Sent to the owner for approval (request ${id}). It runs only if approved, exactly as sent; the result is posted in the conversation. Do not send it again; continue or finish your turn and mention it in your report.`,
@@ -3284,6 +3287,45 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * One boss turn in a thread (ADR-0025): for the owner's latest message, or for a stall notice
    * (ADR-0066). `query` finds memories, `ask` ends the prompt. Not a task: never watched.
    */
+  /**
+   * The chat's work that is not finished. The boss otherwise sees only messages, and agents are
+   * silent while they work, so it could not tell a long run from a stuck one and gave work out
+   * again that was still running.
+   */
+  function openWork(threadId: string, now: number): string {
+    const roots = db
+      .prepare(
+        `SELECT r.id FROM tasks r WHERE r.thread_id = ? AND r.root_id IS NULL
+           AND EXISTS (SELECT 1 FROM tasks t WHERE (t.id = r.id OR t.root_id = r.id)
+             AND t.status IN ('queued', 'claimed'))
+         ORDER BY r.created_at, r.rowid`,
+      )
+      .all(threadId)
+      .map((r) => String(r.id));
+    if (!roots.length) return "";
+    const ago = (at: number) => Math.max(0, Math.round((now - at) / 60_000));
+    const lines = roots.flatMap((rootId) =>
+      chainTasks(db, rootId)
+        .filter((c) => c.state !== "done" && c.state !== "failed" && c.state !== "cancelled")
+        .map((c) => {
+          const run = db
+            .prepare(
+              "SELECT started_at, progress_at FROM runs WHERE task_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+            )
+            .get(c.id);
+          let state = c.state;
+          if (run) {
+            const started = Number(run.started_at);
+            const life = Math.max(started, Number(run.progress_at ?? 0), activity.get(rootId) ?? 0);
+            state += `, running for ${ago(started)} min, last sign of work ${ago(life)} min ago`;
+          }
+          if (awaitingOwner(c.id)) state += ", has a request waiting for the owner's approval";
+          return `- ${c.title} (task #${c.id}, ${c.agent ?? "no agent"}): ${state}`;
+        }),
+    );
+    return `Unfinished work in this chat (agents post nothing while they work; a run of 10-20 minutes is normal):\n${lines.join("\n")}\nWhile this work is running, do not give the same work out again: tell the owner what is running and since when. Give it out again only if the owner explicitly asks for that.\n\n`;
+  }
+
   async function bossDecide(threadId: string, query: string, ask: string) {
     const all = agents();
     const boss = all.get(BOSS_ID);
@@ -3320,7 +3362,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       })
       .join("\n");
     const catalogIds = deps.integrations ? [...deps.integrations.catalog().keys()].join(", ") : "";
-    const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nSkills: when the owner sends a link to a skill to build in, delegate it to the agent whose work it fits; agents can fetch the link and save or merge the skill.\n\nConversation so far (latest last):\n${history}\n\n${ask}`;
+    const prompt = `${memories}${project ? projectBlock(project) : ""}Agents you can delegate to:\n${team || "(none)"}\n\nAgent settings (for change_agent; the owner approves every change):\n${settings}\nIntegrations: ${catalogIds || "none"}\n\nSkills: when the owner sends a link to a skill to build in, delegate it to the agent whose work it fits; agents can fetch the link and save or merge the skill.\n\n${openWork(threadId, Date.now())}Conversation so far (latest last):\n${history}\n\n${ask}`;
 
     const { provider, req } = toRequest(boss, prompt, BOSS_TIMEOUT_MS, sensitivity);
     const bossBudget = req.billing === "api" ? deps.budget?.(provider.id) : undefined;
@@ -4424,8 +4466,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         } else {
           const held = finishCard(task);
           if (task.threadId) {
-            const awaiting = getSetting(db, awaitingKey(task.id));
-            if (awaiting) setSetting(db, awaitingKey(task.id), "");
+            const awaiting = awaitingOwner(task.id);
             post(
               task.threadId,
               awaiting

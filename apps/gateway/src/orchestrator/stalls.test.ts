@@ -337,4 +337,26 @@ describe("stall watcher (ADR-0066 part 1)", () => {
     setSetting(db, QUIET_HOURS_KEY, "");
     expect(await orch.watchStalls()).toBe(1);
   });
+  describe("the boss sees the chat's unfinished work when the owner writes", () => {
+    it("names the running task, how long it has run and its last sign of life", async () => {
+      const { threadId, runId } = runningCard();
+      at(5 * MIN);
+      setRunProgress(db, runId, { done: 1, total: 3 });
+      at(14 * MIN);
+      bossDecision = { action: "answer", message: "It is still running." };
+      await orch.handleMessage(threadId, "Is it stuck?", "web");
+      const prompt = bossCalls[0]?.prompt ?? "";
+      expect(prompt).toContain("Unfinished work in this chat");
+      expect(prompt).toMatch(/- Build \(task #[\w-]+, dev\): claimed, running for 14 min/);
+      expect(prompt).toContain("last sign of work 9 min ago");
+      expect(prompt).toMatch(/do not give the same work out again/i);
+    });
+
+    it("says nothing when the chat's work is finished", async () => {
+      const thread = createThread(db, {});
+      bossDecision = { action: "answer", message: "Hi." };
+      await orch.handleMessage(thread.id, "Hello", "web");
+      expect(bossCalls[0]?.prompt).not.toContain("Unfinished work in this chat");
+    });
+  });
 });
