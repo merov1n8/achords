@@ -40,6 +40,7 @@ export interface Rights {
 const SHELL_RANK = { none: 0, list: 1, free: 2 } as const;
 const ARCHIVE = /\.(zip|tar|tgz|gz|bz2|xz|7z|rar|dmg|pkg)\b/i;
 const ABSOLUTE = /(^|[\s"'=])(\/|~\/)/;
+const OPEN_APP = /^\s*open\s+(?:-\S+\s+)*-a\s/;
 const UNITY =
   /(?:"([^"]*\/Unity\.app\/Contents\/MacOS\/Unity)"|'([^']*\/Unity\.app\/Contents\/MacOS\/Unity)'|(\/[^\s"']*\/Unity\.app\/Contents\/MacOS\/Unity))(?=\s|$)/;
 
@@ -149,6 +150,11 @@ export interface AgentPlan {
   lost: string[];
   /** One-off literal commands dropped from shell.allow. */
   dropped: string[];
+  /**
+   * Literal commands whose use the level covers another way (`<command>: <how>`): the
+   * `unsandboxed` executable, or opening an app (local apps, ADR-0054).
+   */
+  covered: string[];
   exceptions: string[];
   /** The remit it keeps (folders, integrations, models, documentation hosts). */
   kept: string[];
@@ -170,6 +176,7 @@ export function planAgentMigration(
     gained: [],
     lost: [],
     dropped: [],
+    covered: [],
     exceptions: [],
     kept: [],
     warnings: [],
@@ -185,7 +192,7 @@ export function planAgentMigration(
 
   const before = legacyRights(m, catalog);
   const allow = m.shell?.allow ?? [];
-  plan.dropped = allow.filter(isLiteralCommand);
+  const literals = allow.filter(isLiteralCommand);
   const named = m.network.allow.filter((h) => h !== "*");
   const drop: ("tools" | "shell" | "network" | "container")[] = ["tools", "shell", "container"];
   if (!named.length) drop.push("network");
@@ -241,7 +248,6 @@ export function planAgentMigration(
       return {
         ...plan,
         status: "unfit",
-        dropped: [],
         warnings: [
           "no level from 1 to 5 stays within its current rights; left unchanged (set a level by hand)",
         ],
@@ -249,13 +255,23 @@ export function planAgentMigration(
     }
   }
 
+  const unsandboxed = chosen.after.unsandboxed ?? [];
+  for (const cmd of literals) {
+    const bin = unityBinaries([cmd])[0];
+    if (bin && unsandboxed.includes(bin)) {
+      plan.covered.push(`${cmd}: Unity runs outside the sandbox (exception)`);
+    } else if (OPEN_APP.test(cmd)) {
+      plan.covered.push(`${cmd}: opening apps goes through local apps (ADR-0054)`);
+    } else plan.dropped.push(cmd);
+  }
   plan.level = chosen.after.level ?? 0;
   plan.text = chosen.next;
   plan.gained = grouped([...chosen.rights.labels].filter((l) => !before.labels.has(l)));
   plan.lost = grouped([...before.labels].filter((l) => !chosen.rights.labels.has(l)));
-  if (chosen.runs[0]?.split) {
+  const work = chosen.runs[0];
+  if (work?.split) {
     plan.warnings.push(
-      "works in two modes: work (shell and accounts, no open web) and web (no shell, no account tools that write)",
+      `works in two modes: work (${work.sandbox ? "shell and accounts" : "accounts"}, no open web) and web (no shell, no account tools that write)`,
     );
   }
   const list = (xs: string[]) => (xs.length ? xs.join(", ") : "none");

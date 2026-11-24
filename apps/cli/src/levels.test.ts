@@ -231,7 +231,15 @@ describe("achords levels migrate (ADR-0067 step 5)", () => {
     const game = parseManifest(plan(r, "game-dev")?.text as string, "game-dev");
     expect(game.unsandboxed).toEqual([UNITY]);
     expect(plan(r, "game-dev")?.warnings.join("\n")).toMatch(/Swift and Xcode/);
-    expect(plan(r, "game-dev")?.dropped).toHaveLength(2);
+    // The Unity binary and `open -a` are covered by the exception and local apps, not dropped.
+    expect(plan(r, "game-dev")?.dropped).toEqual([]);
+    expect(plan(r, "game-dev")?.covered).toEqual([
+      `${UNITY} -batchmode -quit -projectPath /srv/game: Unity runs outside the sandbox (exception)`,
+      "open -a /Applications/Unity/Hub/Editor/6000.0.23f1/Unity.app: opening apps goes through local apps (ADR-0054)",
+    ]);
+    const report = r.report.slice(r.report.indexOf("game-dev:"), r.report.indexOf("helper:"));
+    expect(report).toContain("covered otherwise:");
+    expect(report).not.toContain("one-off commands dropped:");
     const designer = parseManifest(plan(r, "3d-designer")?.text as string, "3d-designer");
     expect(designer.keys_beside_host_shell).toBe(true);
     expect(plan(r, "3d-designer")?.exceptions).toEqual([

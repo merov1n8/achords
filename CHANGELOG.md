@@ -36,8 +36,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - Force pushes and git history rewrites are refused for every agent.
 - `pnpm achords levels migrate` moves your agents to permission levels (ADR-0067). Run it
   first as is: it only prints a report (per agent: its level, the rights it gains and loses,
-  the one-off commands collected in its shell list that are dropped, the exceptions set and
-  any warnings). Read it, then run `pnpm achords levels migrate --write`: each `agent.yaml`
+  the one-off commands collected in its shell list that are dropped, those covered otherwise
+  (the Unity editor outside the sandbox, opening apps through local apps), the exceptions set
+  and any warnings). Read it, then run `pnpm achords levels migrate --write`: each `agent.yaml`
   is backed up next to your other backups (`backup-<agent>-agent-<time>.yaml` in the data
   folder), gets its level, keeps its folders, integrations, models and documentation hosts
   and loses `tools`, `shell`, `network: ["*"]` and `container`; the report is saved as

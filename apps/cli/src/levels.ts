@@ -51,7 +51,7 @@ export function migrateLevels(opts: {
         containerAvailable: opts.containerAvailable,
       });
     } catch (err) {
-      const none = { gained: [], lost: [], dropped: [], exceptions: [], kept: [] };
+      const none = { gained: [], lost: [], dropped: [], covered: [], exceptions: [], kept: [] };
       return { id, status: "invalid", ...none, warnings: [(err as Error).message] };
     }
   });
@@ -121,6 +121,7 @@ function formatReport(
         section("rights gained", p.gained);
         section("rights lost", p.lost);
         section("one-off commands dropped", p.dropped.map(redact));
+        section("covered otherwise", p.covered.map(redact));
         section("exceptions set", p.exceptions);
         section("remit kept", p.kept);
         section("warnings", p.warnings);

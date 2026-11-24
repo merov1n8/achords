@@ -136,6 +136,34 @@ container: false
     );
     expect(two.text).not.toContain("unsandboxed");
     expect(two.warnings.join("\n")).toMatch(/several Unity editor binaries/);
+    // Without the exception set, the Unity commands are dropped like any one-off.
+    expect(two.dropped).toHaveLength(2);
+    expect(two.covered).toEqual([]);
+  });
+
+  it("lists the unsandboxed binary and `open -a` as covered otherwise, not dropped", () => {
+    const bin = "/Applications/Unity/Hub/Editor/6000.0.23f1/Unity.app/Contents/MacOS/Unity";
+    const p = plan(
+      "game-dev",
+      `tools: [Bash]\nshell:\n  allow: ["${bin} -batchmode", "open -a /Applications/Blender.app", "unzip -o a.zip"]\n`,
+    );
+    expect(p.dropped).toEqual(["unzip -o a.zip"]);
+    expect(p.covered).toEqual([
+      `${bin} -batchmode: Unity runs outside the sandbox (exception)`,
+      "open -a /Applications/Blender.app: opening apps goes through local apps (ADR-0054)",
+    ]);
+  });
+
+  it("names the work mode as it is: a shell only where the run has one", () => {
+    const l4 = plan("web-dev", "tools: [Bash]\nshell:\n  allow: [git status]\n");
+    expect(l4.warnings).toContain(
+      "works in two modes: work (shell and accounts, no open web) and web (no shell, no account tools that write)",
+    );
+    const l3 = plan("seo", 'tools: [Read]\nmcp: [meta]\nnetwork:\n  allow: ["*"]\n');
+    expect(l3.level).toBe(3);
+    expect(l3.warnings).toContain(
+      "works in two modes: work (accounts, no open web) and web (no shell, no account tools that write)",
+    );
   });
 });
 
