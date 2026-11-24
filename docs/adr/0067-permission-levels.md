@@ -93,6 +93,11 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
     - A run with the open web (WebFetch to any host, WebSearch, elevation) gets no account tools of class `draft` and above.
     - Work that needs both is split into two runs with a handoff (ADR-0055).
     - Project sites read under ADR-0057 are not the open web.
+  - **Shell and the open web never share a host run** (owner decision, 2026-11-24).
+    - A level 4 or 5 run on the host has its shell without the open web. It keeps project sites (ADR-0057), the package registries and any documentation hosts in its remit.
+    - Research on the open web switches to web mode by handoff to the same agent. Web mode has no shell and no account tools of class `draft` and above.
+    - Every leveled agent at level 3 or above that has a shell or such tools therefore works in two modes, as the accounts split already does.
+    - The Apple container stays for the cases ADR-0055 requires (keyed integrations next to a shell without `keys_beside_host_shell`).
   - **A shell exists only in a sandbox:**
     - in the Apple container (ADR-0051);
     - or, on the host, in the Claude CLI's own sandbox: writes are limited to the run's folders and network to the registry hosts and the run's allowed hosts.
