@@ -71,6 +71,16 @@ export function updateAgent(agentsDir: string, id: string, f: AgentFields): void
     doc.setIn(path, doc.createNode([...items], { flow: old ? old.flow === true : true }));
   };
   editManifest(join(dir, "agent.yaml"), (doc) => {
+    // ADR-0067: an agent with a level has no tool, shell, network or container lists to edit;
+    // giving a level-less agent one is the migration's job (it reports gains and losses).
+    const leveled = doc.has("level");
+    if (f.level !== undefined && !leveled) {
+      throw new Error(`${id} has no level yet: run \`pnpm achords levels migrate\` first`);
+    }
+    if (leveled) {
+      refuseLegacy(f);
+      if (f.level !== undefined) doc.setIn(["level"], f.level);
+    }
     doc.setIn(["name"], f.name.trim());
     doc.setIn(["role"], f.role.trim());
     doc.setIn(["workspace"], f.workspace.trim());
@@ -78,18 +88,20 @@ export function updateAgent(agentsDir: string, id: string, f: AgentFields): void
     else doc.deleteIn(["roles"]);
     doc.setIn(["models", "default"], f.models.default);
     list(doc, ["models", "allowed"], f.models.allowed);
-    list(doc, ["tools"], f.tools ?? []);
     list(doc, ["fs", "read"], f.fs?.read ?? []);
     list(doc, ["fs", "write"], f.fs?.write ?? []);
-    // Absent shell = no shell at all (deny by default).
-    if (f.shell) list(doc, ["shell", "allow"], f.shell.allow);
-    else doc.deleteIn(["shell"]);
-    list(doc, ["network", "allow"], f.network?.allow ?? []);
-    // ADR-0051: written out next to "*" so the owner sees the choice; next to a shell only when
-    // on (ADR-0055, off is the default there); gone otherwise.
-    const box = containerChoice(f);
-    if (box === undefined) doc.deleteIn(["container"]);
-    else doc.setIn(["container"], box);
+    if (!leveled) {
+      list(doc, ["tools"], f.tools ?? []);
+      // Absent shell = no shell at all (deny by default).
+      if (f.shell) list(doc, ["shell", "allow"], f.shell.allow);
+      else doc.deleteIn(["shell"]);
+      list(doc, ["network", "allow"], f.network?.allow ?? []);
+      // ADR-0051: written out next to "*" so the owner sees the choice; next to a shell only
+      // when on (ADR-0055, off is the default there); gone otherwise.
+      const box = containerChoice(f);
+      if (box === undefined) doc.deleteIn(["container"]);
+      else doc.setIn(["container"], box);
+    }
     list(doc, ["delegation", "can_delegate_to"], f.delegation?.can_delegate_to ?? []);
     list(doc, ["delegation", "accepts_from"], f.delegation?.accepts_from ?? []);
     if (f.budget?.per_run_usd) doc.setIn(["budget", "per_run_usd"], f.budget.per_run_usd);
@@ -109,7 +121,12 @@ export interface NewAgent {
   workspace: string;
   roles?: string[];
   models: { default: string; allowed: string[] };
-  /** Permissions: everything omitted is "nothing allowed" (deny by default). */
+  /**
+   * ADR-0067: what the agent may do without asking (0–5). With a level, `tools`, `shell`,
+   * `network` and `container` are refused: the level compiles them.
+   */
+  level?: number;
+  /** Permissions of an agent without a level: everything omitted is "nothing allowed". */
   tools?: string[];
   fs?: { read?: string[]; write?: string[] };
   shell?: { allow: string[] };
@@ -121,6 +138,17 @@ export interface NewAgent {
   budget?: { per_run_usd?: number };
   /** Scope paragraph for AGENT.md. */
   description: string;
+}
+
+const LEGACY = ["tools", "shell", "network", "container"] as const;
+
+function refuseLegacy(a: Pick<NewAgent, (typeof LEGACY)[number]>): void {
+  const sent = LEGACY.filter((k) => a[k] !== undefined);
+  if (sent.length) {
+    throw new Error(
+      `${sent.join(", ")}: not set by hand on an agent with a level (ADR-0067); the level decides`,
+    );
+  }
 }
 
 /** The container value to write: next to "*" always, next to a shell only when on. */
@@ -139,6 +167,7 @@ export function createAgentFiles(agentsDir: string, a: NewAgent): { id: string }
   if (!ID.test(a.id)) throw new Error("id: lowercase letters, digits and dashes");
   const dir = join(agentsDir, a.id);
   if (existsSync(dir)) throw new Error(`agent ${a.id} already exists`);
+  if (a.level !== undefined) refuseLegacy(a);
   const manifest = {
     id: a.id,
     name: a.name.trim(),
@@ -146,7 +175,7 @@ export function createAgentFiles(agentsDir: string, a: NewAgent): { id: string }
     workspace: a.workspace.trim(),
     ...(a.roles?.length ? { roles: a.roles } : {}),
     models: a.models,
-    tools: a.tools ?? [],
+    ...(a.level !== undefined ? { level: a.level } : { tools: a.tools ?? [] }),
     fs: { read: a.fs?.read ?? [], write: a.fs?.write ?? [] },
     ...(a.shell ? { shell: a.shell } : {}),
     ...(a.network?.allow.length ? { network: a.network } : {}),

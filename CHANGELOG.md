@@ -56,6 +56,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   their staging targets, so agents' write tools to those sites are refused until then. This is
   intentional. Experimental projects and work without a project are unchanged.
 
+- The forms show permission levels (ADR-0067). Agents → Edit, for an agent with a level: a level
+  picker with one line on what each level means, its folders, the integrations given to it, its
+  overrides per project (a different level on one project, optionally only while named skills
+  are enabled; raising is refused unless the project is experimental, with the reason shown
+  there), the effective level on each project with the reason (its own level, an override, the
+  project's ceiling, a skill not enabled, no sandbox or a local model) and its owner-approved
+  exceptions. The tool checkboxes and the shell, network and container fields are gone for
+  these agents; agents without a level keep the old form with a note to run
+  `pnpm achords levels migrate`. New agents start at level 1 with a level picker instead of
+  tool lists.
+- Projects → New asks for a class (secured or experimental), each explained in a sentence;
+  Projects → Edit shows the class ("not chosen yet, counts as secured" until you pick one), the
+  highest level it allows, and for experimental projects the "spend without asking" switch.
+  Every account row and WordPress site, in projects and in your own accounts, has a Live /
+  Staging toggle. Account rows are now one entry each instead of one per channel.
+- The run details of a chat show a delegated agent's questions to its parent agent and the
+  answers (ADR-0066).
+- Telegram puts the four approval buttons (Once, For this card, Always, Reject) in two rows of
+  two, so none is cut off on a phone.
+
 ### Fixed
 
 - A review ended in silence: the reviewer's verdict was not shown anywhere, and a card it sent

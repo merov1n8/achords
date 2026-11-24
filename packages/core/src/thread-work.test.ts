@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { upsertAgent } from "./agents.ts";
 import { openCoreDatabase } from "./db/database.ts";
-import { askOwner, enqueueChild, enqueueRoot } from "./delegation.ts";
+import {
+  answerParentQuestion,
+  askOwner,
+  askParent,
+  enqueueChild,
+  enqueueRoot,
+} from "./delegation.ts";
 import { claim, enqueue, getTask } from "./queue.ts";
 import { finishRun, listActiveRuns, startRun } from "./runs.ts";
 import { stopThread, threadSummary } from "./thread-work.ts";
@@ -96,7 +102,49 @@ describe("thread work", () => {
       resumedCached: 0,
       costUsd: 0,
       participants: [],
+      parentQuestions: [],
     });
+  });
+
+  it("shows a child's question to its parent and the parent's answer (ADR-0066)", () => {
+    const { db, thread } = setup();
+    const root = enqueueRoot(db, {
+      title: "Site",
+      threadId: thread.id,
+      assigneeAgentId: "coder",
+      caller: "boss",
+    });
+    const review = enqueueChild(db, root, {
+      title: "Review",
+      caller: "coder",
+      assigneeAgentId: "reviewer",
+    });
+    const test = enqueueChild(db, root, {
+      title: "Test",
+      caller: "coder",
+      assigneeAgentId: "tester",
+    });
+    askParent(db, review.id, "Which branch?");
+    answerParentQuestion(db, review.id, "main");
+    askParent(db, test.id, "Staging or local?");
+    expect(threadSummary(db, thread.id).parentQuestions).toEqual([
+      {
+        task: review.id,
+        title: "Review",
+        agent: "reviewer",
+        name: "Reviewer",
+        question: "Which branch?",
+        answer: "main",
+      },
+      {
+        task: test.id,
+        title: "Test",
+        agent: "tester",
+        name: "Tester",
+        question: "Staging or local?",
+        answer: null,
+      },
+    ]);
   });
 
   it("counts the chat's tasks (cards), done of all, and says when work waits for the owner", () => {

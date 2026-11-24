@@ -1,8 +1,17 @@
-import { Pencil, Plus } from "lucide-preact";
+import { Pencil, Plus, Trash2 } from "lucide-preact";
 import { useEffect, useId, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { Modal } from "../components/Modal.tsx";
 import { t } from "../i18n.ts";
+import {
+  type EffectiveRow,
+  LEVELS,
+  levelLabel,
+  type Override,
+  overrideProblem,
+  parseSkills,
+  reasonText,
+} from "../levels.ts";
 import { usePoll } from "../poll.ts";
 import type { Agent } from "../types.ts";
 
@@ -25,8 +34,15 @@ type AgentDetail = {
   delegation: { can_delegate_to: string[]; accepts_from: string[] };
   budget?: { per_run_usd: number };
   doc: string;
+  mcp: string[];
+  /** ADR-0067: only on agents with a level. */
+  level?: number;
+  unsandboxed?: string[];
+  keys_beside_host_shell?: boolean;
+  overrides?: Override[];
+  effectiveLevels?: EffectiveRow[];
+  conflicts?: string[];
 };
-
 export function Agents() {
   const agents = usePoll(() => api<Agent[]>("/api/agents"), 10000);
   const [editing, setEditing] = useState<string>();
@@ -102,8 +118,9 @@ const lines = (text: string) =>
     .filter(Boolean);
 
 /**
- * Create or edit an agent with one form. New agents start with every permission off; editing
- * loads the same fields (fields the form does not show, like integrations, stay as they are).
+ * Create or edit an agent with one form. New agents start at level 1 (ADR-0067); editing loads
+ * the same fields (fields the form does not show, like integrations, stay as they are). Agents
+ * without a level keep the old per-agent lists until `achords levels migrate`.
  */
 function AgentForm({
   id,
@@ -127,6 +144,8 @@ function AgentForm({
     effort: "",
     description: "",
     models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] } as Models,
+    /** null: an agent without a level (old per-agent lists). */
+    level: 1 as number | null,
     tools: [] as string[],
     write: "",
     read: "",
@@ -139,6 +158,7 @@ function AgentForm({
   });
   const [error, setError] = useState<string>();
   const [loaded, setLoaded] = useState(!id);
+  const [info, setInfo] = useState<AgentDetail>();
   const [custom, setCustom] = useState("");
   const formId = useId();
   useEffect(() => {
@@ -148,6 +168,7 @@ function AgentForm({
     if (!id) return;
     api<AgentDetail>(`/api/agents/${id}`)
       .then((d) => {
+        setInfo(d);
         setF({
           id: d.id,
           name: d.name,
@@ -157,6 +178,7 @@ function AgentForm({
           effort: d.effort ?? "",
           description: d.doc,
           models: { default: d.models.default, allowed: d.models.allowed ?? [d.models.default] },
+          level: d.level ?? null,
           tools: d.tools,
           write: d.fs.write.join("\n"),
           read: d.fs.read.join("\n"),
@@ -172,6 +194,14 @@ function AgentForm({
       .catch((err: Error) => setError(err.message));
   }, [id]);
   const set = (patch: Partial<typeof f>) => setF({ ...f, ...patch });
+  const leveled = f.level !== null;
+  // After an override change: the effective levels change, the form's own edits stay.
+  const reloadInfo = () => {
+    if (!id) return;
+    api<AgentDetail>(`/api/agents/${id}`)
+      .then((d) => setInfo(d))
+      .catch((err: Error) => setError(err.message));
+  };
   const toggle = (list: string[], v: string) =>
     list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
   const workspaces = [...new Set(agents.map((a) => a.workspace))];
@@ -210,13 +240,18 @@ function AgentForm({
         roles: f.roles,
         ...(f.effort ? { effort: f.effort } : {}),
         models: f.models,
-        tools: f.tools,
         fs: { write: lines(f.write), read: lines(f.read) },
-        ...(f.tools.includes("Bash") ? { shell: { allow: lines(f.shell) } } : {}),
-        network: { allow: lines(f.network) },
-        ...(lines(f.network).includes("*") || f.tools.includes("Bash")
-          ? { container: f.container }
-          : {}),
+        // ADR-0067: the level replaces the tool, shell, network and container lists.
+        ...(f.level !== null
+          ? { level: f.level }
+          : {
+              tools: f.tools,
+              ...(f.tools.includes("Bash") ? { shell: { allow: lines(f.shell) } } : {}),
+              network: { allow: lines(f.network) },
+              ...(lines(f.network).includes("*") || f.tools.includes("Bash")
+                ? { container: f.container }
+                : {}),
+            }),
         delegation: { can_delegate_to: f.delegatesTo, accepts_from: f.acceptsFrom },
         ...(Number(f.budget) > 0 ? { budget: { per_run_usd: Number(f.budget) } } : {}),
       };
@@ -385,54 +420,119 @@ function AgentForm({
           </div>
         </div>
 
-        <h3 class="sec">{t("agents.form.permissions")}</h3>
-        <p class="muted">{t("agents.form.permissionsHelp")}</p>
-        <div class="field">
-          {t("agents.form.tools")}
-          <div class="row wrap">
-            {(opts?.tools ?? []).map((tool) => (
-              <label key={tool} class="row">
-                <input
-                  type="checkbox"
-                  checked={f.tools.includes(tool)}
-                  onChange={() => set({ tools: toggle(f.tools, tool) })}
-                />
-                <code>{tool}</code>
-              </label>
-            ))}
-          </div>
-        </div>
-        {area("write", t("agents.form.write"), t("agents.form.pathsHelp"))}
-        {area("read", t("agents.form.read"), t("agents.form.pathsHelp"))}
-        {f.tools.includes("Bash") &&
-          area("shell", t("agents.form.shell"), t("agents.form.shellHelp"))}
-        {area("network", t("agents.form.network"), t("agents.form.networkHelp"))}
-        {(lines(f.network).includes("*") || f.tools.includes("Bash")) && (
-          <div class="field">
-            <label class="row">
-              <input
-                type="checkbox"
-                checked={f.container}
-                onChange={() => set({ container: !f.container })}
-              />
-              {t("agents.form.container")}
-            </label>
-            <span class="muted small">
-              {t(
-                lines(f.network).includes("*")
-                  ? "agents.form.containerHelp"
-                  : "agents.form.containerShellHelp",
-              )}
-            </span>
-            {!f.container && lines(f.network).includes("*") && (
-              <p class="error">{t("agents.form.containerOff")}</p>
+        {leveled ? (
+          <>
+            <h3 class="sec">{t("agents.form.level")}</h3>
+            <p class="muted">{t("agents.form.levelHelp")}</p>
+            <div class="level-pick">
+              {LEVELS.map((l, n) => (
+                <label key={l.name}>
+                  <input
+                    type="radio"
+                    name={`${formId}-level`}
+                    checked={f.level === n}
+                    onChange={() => set({ level: n })}
+                  />
+                  <span>
+                    <strong>{levelLabel(n)}</strong>
+                    <span class="muted small">{l.meaning}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <h3 class="sec">{t("agents.form.remit")}</h3>
+            <p class="muted">{t("agents.form.remitHelp")}</p>
+            {area("write", t("agents.form.write"), t("agents.form.pathsHelp"))}
+            {area("read", t("agents.form.read"), t("agents.form.pathsHelp"))}
+            <div class="field">
+              {t("agents.form.integrations")}
+              <div class="row wrap">
+                {info?.mcp.length ? (
+                  info.mcp.map((m) => (
+                    <span key={m} class="chip">
+                      {m}
+                    </span>
+                  ))
+                ) : (
+                  <span class="muted small">{t("agents.form.noIntegrations")}</span>
+                )}
+              </div>
+              <span class="muted small">{t("agents.form.integrationsHelp")}</span>
+            </div>
+            {(info?.unsandboxed?.length || info?.keys_beside_host_shell) && (
+              <div class="field exception">
+                <strong>{t("agents.form.exception")}</strong>
+                {info.unsandboxed?.length ? (
+                  <span>
+                    {t("agents.form.unsandboxed")}{" "}
+                    {info.unsandboxed.map((p) => (
+                      <code key={p}>{p} </code>
+                    ))}
+                  </span>
+                ) : null}
+                {info.keys_beside_host_shell && <span>{t("agents.form.keysBeside")}</span>}
+                <span class="muted small">{t("agents.form.exceptionHelp")}</span>
+              </div>
             )}
-            {f.container &&
-              !f.models.default.startsWith("cli-claude/") &&
-              !/^local(-[a-z0-9-]+)?\//.test(f.models.default) && (
-                <p class="error">{t("agents.form.containerModel")}</p>
-              )}
-          </div>
+            {info?.conflicts?.map((c) => (
+              <p key={c} class="error small">
+                {c}
+              </p>
+            ))}
+          </>
+        ) : (
+          <>
+            <h3 class="sec">{t("agents.form.permissions")}</h3>
+            <p class="muted">{t("agents.form.legacy")}</p>
+            <p class="muted">{t("agents.form.permissionsHelp")}</p>
+            <div class="field">
+              {t("agents.form.tools")}
+              <div class="row wrap">
+                {(opts?.tools ?? []).map((tool) => (
+                  <label key={tool} class="row">
+                    <input
+                      type="checkbox"
+                      checked={f.tools.includes(tool)}
+                      onChange={() => set({ tools: toggle(f.tools, tool) })}
+                    />
+                    <code>{tool}</code>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {area("write", t("agents.form.write"), t("agents.form.pathsHelp"))}
+            {area("read", t("agents.form.read"), t("agents.form.pathsHelp"))}
+            {f.tools.includes("Bash") &&
+              area("shell", t("agents.form.shell"), t("agents.form.shellHelp"))}
+            {area("network", t("agents.form.network"), t("agents.form.networkHelp"))}
+            {(lines(f.network).includes("*") || f.tools.includes("Bash")) && (
+              <div class="field">
+                <label class="row">
+                  <input
+                    type="checkbox"
+                    checked={f.container}
+                    onChange={() => set({ container: !f.container })}
+                  />
+                  {t("agents.form.container")}
+                </label>
+                <span class="muted small">
+                  {t(
+                    lines(f.network).includes("*")
+                      ? "agents.form.containerHelp"
+                      : "agents.form.containerShellHelp",
+                  )}
+                </span>
+                {!f.container && lines(f.network).includes("*") && (
+                  <p class="error">{t("agents.form.containerOff")}</p>
+                )}
+                {f.container &&
+                  !f.models.default.startsWith("cli-claude/") &&
+                  !/^local(-[a-z0-9-]+)?\//.test(f.models.default) && (
+                    <p class="error">{t("agents.form.containerModel")}</p>
+                  )}
+              </div>
+            )}
+          </>
         )}
         <div class="field">
           {t("agents.form.acceptsFrom")}
@@ -467,6 +567,156 @@ function AgentForm({
         {text("budget", t("agents.form.budget"), t("agents.form.budgetHelp"))}
         {error && <p class="error">{error}</p>}
       </form>
+      {/* Outside the form: overrides save on their own, not with the Save button. */}
+      {id && leveled && info?.level !== undefined && (
+        <>
+          <Overrides
+            agentId={id}
+            base={info.level}
+            overrides={info.overrides ?? []}
+            projects={info.effectiveLevels ?? []}
+            onSaved={reloadInfo}
+          />
+          <h3 class="sec">{t("agents.form.effective")}</h3>
+          <p class="muted small">{t("agents.form.effectiveHelp")}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>{t("agents.form.project")}</th>
+                <th>{t("agents.form.level")}</th>
+                <th>{t("agents.form.why")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {info.effectiveLevels?.map((r) => (
+                <tr key={r.project}>
+                  <td>{r.name}</td>
+                  <td>{levelLabel(r.level)}</td>
+                  <td class="muted small">{reasonText(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </Modal>
+  );
+}
+
+/** Level overrides of one agent per project (ADR-0067), saved on each add or remove. */
+function Overrides(props: {
+  agentId: string;
+  base: number;
+  overrides: Override[];
+  projects: EffectiveRow[];
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState({ project: "", level: props.base, skills: "" });
+  const [error, setError] = useState<string>();
+  const name = (slug: string) => props.projects.find((p) => p.project === slug)?.name ?? slug;
+  const save = async (overrides: Override[]) => {
+    setError(undefined);
+    try {
+      await api(`/api/agents/${props.agentId}/overrides`, {
+        method: "PUT",
+        body: { overrides },
+      });
+      props.onSaved();
+      return true;
+    } catch (err) {
+      // The server's refusal (overrideRefusal), shown where the owner made the change.
+      setError((err as Error).message);
+      return false;
+    }
+  };
+  const add = async () => {
+    const o = {
+      project: draft.project,
+      level: draft.level,
+      requires_skills: parseSkills(draft.skills),
+    };
+    const problem = overrideProblem(o, props.overrides, props.base, props.projects);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    if (await save([...props.overrides, o])) {
+      setDraft({ project: "", level: props.base, skills: "" });
+    }
+  };
+  return (
+    <>
+      <h3 class="sec">{t("overrides.title")}</h3>
+      <p class="muted small">{t("overrides.help")}</p>
+      {props.overrides.length === 0 ? (
+        <p class="muted small">{t("overrides.empty")}</p>
+      ) : (
+        <table>
+          <tbody>
+            {props.overrides.map((o) => (
+              <tr key={o.project}>
+                <td>{name(o.project)}</td>
+                <td>{levelLabel(o.level)}</td>
+                <td class="muted small">{o.requires_skills.join(", ")}</td>
+                <td class="actions">
+                  <button
+                    type="button"
+                    class="iconbtn"
+                    aria-label={t("common.remove")}
+                    title={t("common.remove")}
+                    onClick={() => save(props.overrides.filter((x) => x.project !== o.project))}
+                  >
+                    <Trash2 class="icon" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div class="row wrap">
+        <select
+          class="input"
+          aria-label={t("agents.form.project")}
+          value={draft.project}
+          onChange={(e) => setDraft({ ...draft, project: e.currentTarget.value })}
+        >
+          <option value="" disabled>
+            {t("agents.form.project")}
+          </option>
+          {props.projects
+            .filter((p) => !props.overrides.some((o) => o.project === p.project))
+            .map((p) => (
+              <option key={p.project} value={p.project}>
+                {p.name}
+              </option>
+            ))}
+        </select>
+        <select
+          class="input"
+          aria-label={t("agents.form.level")}
+          value={String(draft.level)}
+          onChange={(e) => setDraft({ ...draft, level: Number(e.currentTarget.value) })}
+        >
+          {LEVELS.map((l, n) => (
+            <option key={l.name} value={String(n)}>
+              {levelLabel(n)}
+            </option>
+          ))}
+        </select>
+        <input
+          class="input"
+          aria-label={t("overrides.skills")}
+          placeholder={t("overrides.skillsPlaceholder")}
+          value={draft.skills}
+          onInput={(e) => setDraft({ ...draft, skills: e.currentTarget.value })}
+        />
+        <button type="button" class="btn" onClick={add}>
+          <Plus class="icon" />
+          {t("overrides.add")}
+        </button>
+      </div>
+      {error && <p class="error">{error}</p>}
+    </>
   );
 }

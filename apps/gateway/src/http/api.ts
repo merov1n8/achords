@@ -69,16 +69,23 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
+  type AccountEntry,
+  type AccountListsInput,
   AGENT_SKILLS,
   type AgentFields,
   agentSkillScope,
   type Catalog,
   type CatalogEntry,
+  ceilingOf,
+  compileLevel,
   createAgentFiles,
   createProject,
   deleteSkill,
+  type Env,
   effectiveLevel,
+  entryValues,
   type IntegrationStatus,
+  isLocalModel,
   isSkillName,
   isSkillScope,
   isSkillWorkspace,
@@ -87,13 +94,16 @@ import {
   loadAgents,
   loadManifest,
   loadOverrides,
-  loadOwnAccounts,
+  loadOwnAccountEntries,
   loadProjects,
+  MAX_LEVEL,
   OWN,
   ownerSecrets,
+  type ProjectClass,
   parseSkillText,
   readSkill,
   removeProject,
+  saveOverrides,
   saveOwnAccounts,
   secretRefs,
   setIntegrationAgents,
@@ -730,6 +740,7 @@ export function createApiHandler(deps: ApiDeps) {
             slug: str(b.slug, "slug", 64),
             name: str(b.name, "name", 100),
             workspace: str(b.workspace, "workspace", 64),
+            ...(b.class !== undefined ? { class: projectClass(b.class) } : {}),
           });
           log(`project created in the web UI: ${p.slug}`);
           send(res, 201, { slug: p.slug, dir: p.dir, filesDir: p.filesDir });
@@ -754,6 +765,12 @@ export function createApiHandler(deps: ApiDeps) {
           filesDir: p.filesDir,
           doc: p.doc,
           integrations: p.integrations,
+          // ADR-0067: the same lists with each entry's live/staging tag, and the class (null =
+          // not chosen yet, counts as secured) with its ceiling.
+          entries: p.integrationEntries,
+          class: p.class ?? null,
+          ceiling: ceilingOf(p.class),
+          spend_without_asking: p.spend_without_asking === true,
         };
       },
     ],
@@ -797,6 +814,10 @@ export function createApiHandler(deps: ApiDeps) {
               ? { doc: typeof b.doc === "string" ? b.doc.slice(0, 50_000) : "" }
               : {}),
             ...(b.integrations !== undefined ? { integrations: accountLists(b.integrations) } : {}),
+            ...(b.class !== undefined ? { class: projectClass(b.class) } : {}),
+            ...(b.spend_without_asking !== undefined
+              ? { spend_without_asking: b.spend_without_asking === true }
+              : {}),
           }),
         );
         return { slug: p.slug, name: p.name, workspace: p.workspace };
@@ -1410,13 +1431,14 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     // The owner's own accounts (ADR-0042): for work without a client project.
-    ["GET", /^\/api\/accounts$/, () => ({ integrations: loadOwnAccounts(homeOrThrow()) })],
+    ["GET", /^\/api\/accounts$/, () => ownAccountsView()],
     [
       "PUT",
       /^\/api\/accounts$/,
       async ({ body }) => {
         const lists = accountLists((await body()).integrations);
-        return { integrations: attempt(() => saveOwnAccounts(homeOrThrow(), lists)) };
+        attempt(() => saveOwnAccounts(homeOrThrow(), lists));
+        return ownAccountsView();
       },
     ],
     // Sites of a project with their own credentials (ADR-0047), e.g. WordPress; "own" is the
@@ -1439,6 +1461,28 @@ export function createApiHandler(deps: ApiDeps) {
         if (urls.includes(url)) throw new HttpError(409, `${url} is already listed`);
         attempt(() => saveAccounts(slug, { ...lists, [channel]: [...urls, url] }));
         send(res, 201, sitesView(slug, entry));
+      },
+    ],
+    // ADR-0067: a site's live/staging tag.
+    [
+      "PUT",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})\/sites\/([a-z0-9][a-z0-9-]{0,63})\/([^/]+)$/,
+      async ({ params, body }) => {
+        const slug = params[0] as string;
+        const entry = siteEntry(params[1] as string);
+        const url = decodeURIComponent(params[2] as string);
+        const env = envOf((await body()).env, "env");
+        const lists = entriesOf(slug);
+        const channel = entry.sites?.channel as string;
+        const list = lists[channel] ?? [];
+        if (!list.some((e) => e.value === url)) throw new HttpError(404, `${url} is not listed`);
+        attempt(() =>
+          saveAccounts(slug, {
+            ...lists,
+            [channel]: list.map((e) => (e.value === url ? { ...e, env } : e)),
+          }),
+        );
+        return sitesView(slug, entry);
       },
     ],
     [
@@ -1485,6 +1529,7 @@ export function createApiHandler(deps: ApiDeps) {
           models: m.models,
           // The same fields as the create form, for editing.
           roles: m.roles,
+          mcp: m.mcp,
           tools: m.tools,
           fs: m.fs,
           ...(m.shell ? { shell: m.shell } : {}),
@@ -1574,6 +1619,41 @@ export function createApiHandler(deps: ApiDeps) {
         deps.orchestrator.syncAgents(); // name/workspace show in the list right away
         log(`agent edited in the web UI: ${id}`);
         return { ok: true };
+      },
+    ],
+    // ADR-0067: this agent's level overrides per project; the others in the file are kept.
+    [
+      "PUT",
+      /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})\/overrides$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        manifestPath(id); // 404 for an unknown agent
+        const home = homeOrThrow();
+        const b = await body();
+        if (!Array.isArray(b.overrides)) throw new HttpError(400, "overrides: must be a list");
+        const projects = deps.projectsDir ? loadProjects(deps.projectsDir) : new Map();
+        const mine = (b.overrides as unknown[]).map((o) => {
+          const x = o && typeof o === "object" ? (o as Record<string, unknown>) : {};
+          const project = str(x.project, "project", 64);
+          if (project !== OWN && !projects.has(project)) {
+            throw new HttpError(400, `no project ${project}`);
+          }
+          return { ...x, agent: id };
+        });
+        const agents = loadAgents(deps.agentsDir ?? "");
+        const saved = attempt(() =>
+          saveOverrides(home, [...loadOverrides(home).filter((o) => o.agent !== id), ...mine], {
+            base: (a) => agents.get(a)?.level,
+            projectClass: (slug) =>
+              slug === OWN ? "experimental" : (projects.get(slug)?.class as ProjectClass),
+          }),
+        );
+        log(`level overrides of ${id} edited in the web UI`);
+        return {
+          overrides: saved
+            .filter((o) => o.agent === id)
+            .map(({ project, level, requires_skills }) => ({ project, level, requires_skills })),
+        };
       },
     ],
     [
@@ -1697,19 +1777,46 @@ export function createApiHandler(deps: ApiDeps) {
     return out;
   };
 
-  /** Project accounts from the web editor: channel id → list of strings (ADR-0036). */
-  const accountLists = (v: unknown): Record<string, string[]> => {
+  const envOf = (v: unknown, field: string): Env => {
+    if (v !== "live" && v !== "staging") throw new HttpError(400, `${field}: live or staging`);
+    return v;
+  };
+  const projectClass = (v: unknown): ProjectClass => {
+    if (v !== "secured" && v !== "experimental") {
+      throw new HttpError(400, "class: secured or experimental");
+    }
+    return v;
+  };
+  /**
+   * Project accounts from the web editor: channel id → list (ADR-0036). An entry is a plain
+   * string (keeps the live/staging tag it had, new ones are live) or `{value, env}` (ADR-0067).
+   */
+  const accountLists = (v: unknown): AccountListsInput => {
     if (!v || typeof v !== "object" || Array.isArray(v)) {
       throw new HttpError(400, "integrations: must be an object of lists");
     }
     const lists = Object.fromEntries(
-      Object.entries(v as Record<string, unknown>).map(([key, list]) => [
-        key,
-        strList(list, `integrations.${key}`),
-      ]),
+      Object.entries(v as Record<string, unknown>).map(([key, list]) => {
+        const field = `integrations.${key}`;
+        if (!Array.isArray(list) || list.length > 200) {
+          throw new HttpError(400, `${field}: must be a list`);
+        }
+        return [
+          key,
+          list.map((e): string | AccountEntry => {
+            if (typeof e === "string") return strList([e], field)[0] as string;
+            const x = e && typeof e === "object" ? (e as Record<string, unknown>) : {};
+            return {
+              value: str(x.value, `${field}.value`, 200),
+              env: envOf(x.env, `${field}.env`),
+            };
+          }),
+        ];
+      }),
     );
     // Git repositories: an https or ssh address of a repository (GitHub, GitLab, self-hosted).
-    for (const r of lists.repository ?? []) {
+    for (const e of lists.repository ?? []) {
+      const r = typeof e === "string" ? e : e.value;
       if (r.trim() && !GIT_REPO.test(r.trim())) {
         throw new HttpError(
           400,
@@ -1729,24 +1836,35 @@ export function createApiHandler(deps: ApiDeps) {
     if (!entry?.sites) throw new HttpError(404, `integration ${id} has no sites`);
     return entry;
   };
-  /** Account lists of a project, or of the owner's own accounts ("own"). */
-  const accountsOf = (slug: string): Record<string, string[]> => {
-    if (slug === OWN) return loadOwnAccounts(homeOrThrow());
+  /** Account lists of a project, or of the owner's own accounts ("own"), with their tags. */
+  const entriesOf = (slug: string): Record<string, AccountEntry[]> => {
+    if (slug === OWN) return loadOwnAccountEntries(homeOrThrow());
     const p = loadProjects(projectsDirOrThrow()).get(slug);
     if (!p) throw new HttpError(404, "no such project");
-    return p.integrations;
+    return p.integrationEntries;
   };
-  const saveAccounts = (slug: string, lists: Record<string, string[]>) =>
+  const accountsOf = (slug: string): Record<string, string[]> => entryValues(entriesOf(slug));
+  const saveAccounts = (slug: string, lists: AccountListsInput) =>
     slug === OWN
       ? saveOwnAccounts(homeOrThrow(), lists)
       : updateProject(projectsDirOrThrow(), slug, { integrations: lists });
+  const ownAccountsView = () => {
+    const entries = loadOwnAccountEntries(homeOrThrow());
+    return { integrations: entryValues(entries), entries };
+  };
   const sitesView = (slug: string, entry: CatalogEntry) => {
     const channel = entry.sites?.channel as string;
-    const urls = accountsOf(slug)[channel] ?? [];
+    const list = entriesOf(slug)[channel] ?? [];
+    const sites = siteStatus(
+      entry,
+      slug,
+      list.map((e) => e.value),
+      (id) => vault().status(id).set,
+    );
     return {
       integration: entry.id,
       channel,
-      sites: siteStatus(entry, slug, urls, (id) => vault().status(id).set),
+      sites: sites.map((x, i) => ({ ...x, env: list[i]?.env ?? "live" })),
     };
   };
   /** A site address as stored: http(s), no login, query or fragment, no trailing slash. */
@@ -1805,12 +1923,17 @@ export function createApiHandler(deps: ApiDeps) {
         default: str(models.default, "models.default", 200),
         allowed: list(models.allowed, "models.allowed"),
       },
-      tools: list(b.tools, "tools"),
+      // ADR-0067: with a level the lists below are refused (updateAgent, createAgentFiles), so
+      // only what the form sent is passed on.
+      ...(b.level !== undefined ? { level: levelOf(b.level) } : {}),
+      ...(b.tools !== undefined ? { tools: list(b.tools, "tools") } : {}),
       fs: { read: list(fs.read, "fs.read"), write: list(fs.write, "fs.write") },
       ...(b.shell !== undefined
         ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
         : {}),
-      network: { allow: list(obj(b.network).allow, "network.allow") },
+      ...(b.network !== undefined
+        ? { network: { allow: list(obj(b.network).allow, "network.allow") } }
+        : {}),
       ...(typeof b.container === "boolean" ? { container: b.container } : {}),
       delegation: {
         can_delegate_to: list(obj(b.delegation).can_delegate_to, "delegation.can_delegate_to"),
@@ -1821,6 +1944,12 @@ export function createApiHandler(deps: ApiDeps) {
         ? { effort: str(b.effort, "effort", 10) as NonNullable<AgentFields["effort"]> }
         : {}),
     };
+  };
+  const levelOf = (v: unknown): number => {
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > MAX_LEVEL) {
+      throw new HttpError(400, `level: a whole number from 0 to ${MAX_LEVEL}`);
+    }
+    return v;
   };
   /**
    * ADR-0067: the agent's level, its effective level per project and why (no project = the
@@ -1837,21 +1966,53 @@ export function createApiHandler(deps: ApiDeps) {
       ...projects.map((p) => ({ slug: p.slug, name: p.name, class: p.class })),
       { slug: OWN, name: "Own accounts", class: "experimental" as const },
     ];
+    const catalog = deps.catalog?.();
     return {
       level: base,
       ...(m.unsandboxed ? { unsandboxed: m.unsandboxed } : {}),
       ...(m.keys_beside_host_shell ? { keys_beside_host_shell: true } : {}),
-      effectiveLevels: where.map((p) => ({
-        project: p.slug,
-        name: p.name,
-        ...effectiveLevel({
+      overrides: overrides
+        .filter((o) => o.agent === m.id)
+        .map(({ project, level, requires_skills }) => ({ project, level, requires_skills })),
+      effectiveLevels: where.map((p) => {
+        const eff = effectiveLevel({
           base,
           override: overrides.find((o) => o.agent === m.id && o.project === p.slug),
           projectClass: p.class,
           enabledSkills,
-        }),
-      })),
-      conflicts: deps.catalog ? levelConflicts(m, deps.catalog()) : [],
+        });
+        return {
+          project: p.slug,
+          name: p.name,
+          class: p.class ?? null,
+          ...eff,
+          ...(catalog ? compiledBelow(m, eff.level, p.class, catalog) : {}),
+        };
+      }),
+      conflicts: catalog ? levelConflicts(m, catalog) : [],
+    };
+  };
+  /**
+   * What a run with the default model actually gets when it is below the effective level: a
+   * level 4 shell without a sandbox runs as 3, a local model at most at 3 (ADR-0067). The
+   * gateway always has the container runner; whether the Mac can start one shows at run time.
+   */
+  const compiledBelow = (
+    m: ReturnType<typeof loadManifest>,
+    level: number,
+    cls: ProjectClass | undefined,
+    catalog: Catalog,
+  ) => {
+    const c = compileLevel(m, {
+      level,
+      project: { class: cls },
+      catalog,
+      run: { model: m.models.default, containerAvailable: true },
+    });
+    if (c.refusal || c.level >= level) return {};
+    return {
+      level: c.level,
+      reason: isLocalModel(m.models.default) ? "local-model" : "no-sandbox",
     };
   };
   const manifestPath = (id: string) => {

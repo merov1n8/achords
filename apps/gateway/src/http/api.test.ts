@@ -12,10 +12,13 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  answerParentQuestion,
+  askParent,
   createPairingCode,
   createThread,
   type Db,
   enqueue,
+  enqueueChild,
   finishRun,
   getCardSession,
   getSetting,
@@ -533,7 +536,30 @@ describe("HTTP API", () => {
       costUsd: 0.4,
       budgetDayUsd: 5,
       participants: [{ agent: "coder", name: "Coder", status: "queued" }],
+      parentQuestions: [],
     });
+    // ADR-0066: a child's question to its parent and the answer show in the run details.
+    const kid = enqueueChild(db, task, {
+      title: "Check",
+      caller: "coder",
+      assigneeAgentId: "coder",
+    });
+    askParent(db, kid.id, "Which branch?");
+    answerParentQuestion(db, kid.id, "main");
+    db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(kid.id);
+    expect(
+      ((await (await call(`/api/threads/${thread.id}/summary`)).json()) as Record<string, unknown>)
+        .parentQuestions,
+    ).toEqual([
+      {
+        task: kid.id,
+        title: "Check",
+        agent: "coder",
+        name: "Coder",
+        question: "Which branch?",
+        answer: "main",
+      },
+    ]);
     budgetDay = 0;
     expect(await (await call(`/api/threads/${thread.id}/summary`)).json()).not.toHaveProperty(
       "budgetDayUsd",
@@ -690,15 +716,43 @@ describe("HTTP API", () => {
 
   it("own accounts: read and save lists for work without a client project (ADR-0042)", async () => {
     const { call } = await pair();
-    expect(await (await call("/api/accounts")).json()).toEqual({ integrations: {} });
+    expect(await (await call("/api/accounts")).json()).toEqual({ integrations: {}, entries: {} });
     const put = await call("/api/accounts", {
       method: "PUT",
       body: JSON.stringify({ integrations: { facebook: ["1365", ""], instagram: ["1784"] } }),
     });
-    expect(await put.json()).toEqual({ integrations: { facebook: ["1365"], instagram: ["1784"] } });
-    expect(await (await call("/api/accounts")).json()).toEqual({
+    expect(await put.json()).toMatchObject({
       integrations: { facebook: ["1365"], instagram: ["1784"] },
     });
+    expect(await (await call("/api/accounts")).json()).toEqual({
+      integrations: { facebook: ["1365"], instagram: ["1784"] },
+      entries: {
+        facebook: [{ value: "1365", env: "live" }],
+        instagram: [{ value: "1784", env: "live" }],
+      },
+    });
+    // ADR-0067: the live/staging toggle; a plain string keeps the tag its entry had.
+    await call("/api/accounts", {
+      method: "PUT",
+      body: JSON.stringify({
+        integrations: { facebook: [{ value: "1365", env: "staging" }], instagram: ["1784"] },
+      }),
+    });
+    await call("/api/accounts", {
+      method: "PUT",
+      body: JSON.stringify({ integrations: { facebook: ["1365"], instagram: ["1784"] } }),
+    });
+    expect(
+      ((await (await call("/api/accounts")).json()) as Record<string, unknown>).entries,
+    ).toEqual({
+      facebook: [{ value: "1365", env: "staging" }],
+      instagram: [{ value: "1784", env: "live" }],
+    });
+    const badEnv = await call("/api/accounts", {
+      method: "PUT",
+      body: JSON.stringify({ integrations: { facebook: [{ value: "1365", env: "prod" }] } }),
+    });
+    expect(badEnv.status).toBe(400);
     const bad = await call("/api/accounts", {
       method: "PUT",
       body: JSON.stringify({ integrations: { "Bad Key": ["x"] } }),
@@ -748,6 +802,7 @@ describe("HTTP API", () => {
         missing: [],
         legacy: true,
         ready: true,
+        env: "live",
       },
       {
         url: "https://shop.acme.example",
@@ -758,12 +813,39 @@ describe("HTTP API", () => {
         missing: ["wordpress-password-acme-shop-acme-example"],
         legacy: false,
         ready: false,
+        env: "live",
       },
     ]);
     // Other account lists of the project stay as they were.
     expect(await (await call("/api/projects/acme")).json()).toMatchObject({
       integrations: { wordpress: ["https://acme.example", "https://shop.acme.example"] },
     });
+    // ADR-0067: a site switches to staging and keeps the tag when another site is added.
+    const toStaging = await call(`${path}/${encodeURIComponent("https://shop.acme.example")}`, {
+      method: "PUT",
+      body: '{"env":"staging"}',
+    });
+    expect(
+      ((await toStaging.json()) as { sites: { url: string; env: string }[] }).sites.map(
+        (x) => x.env,
+      ),
+    ).toEqual(["live", "staging"]);
+    expect(
+      (
+        await call(`${path}/${encodeURIComponent("https://shop.acme.example")}`, {
+          method: "PUT",
+          body: '{"env":"prod"}',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(`${path}/${encodeURIComponent("https://nope.example")}`, {
+          method: "PUT",
+          body: '{"env":"live"}',
+        })
+      ).status,
+    ).toBe(404);
     const del = await call(`${path}/${encodeURIComponent("https://acme.example")}`, {
       method: "DELETE",
     });
@@ -778,7 +860,7 @@ describe("HTTP API", () => {
     expect((await add("https://mine.example", "/api/projects/own/sites/wordpress")).status).toBe(
       201,
     );
-    expect(await (await call("/api/accounts")).json()).toEqual({
+    expect(await (await call("/api/accounts")).json()).toMatchObject({
       integrations: { wordpress: ["https://mine.example"] },
     });
     expect((await call("/api/projects/nope/sites/wordpress")).status).toBe(404);
@@ -1451,8 +1533,8 @@ describe("HTTP API", () => {
     expect(a.unsandboxed).toEqual(["/opt/blender/Blender"]);
     expect(a.effectiveLevels).toEqual(
       expect.arrayContaining([
-        { project: "client", name: "Client", level: 4, reason: "ceiling" },
-        { project: "own", name: "Own accounts", level: 5, reason: "base" },
+        { project: "client", name: "Client", class: null, level: 4, reason: "ceiling" },
+        { project: "own", name: "Own accounts", class: "experimental", level: 5, reason: "base" },
       ]),
     );
     // Meshy holds a key and Blender is a local app: a level 4+ shell cannot have both.
@@ -1533,6 +1615,201 @@ describe("HTTP API", () => {
         })
       ).status,
     ).toBe(404);
+  });
+
+  it("agents with a level: created and saved with level and remit, legacy lists refused (ADR-0067)", async () => {
+    const { call } = await pair();
+    const form = {
+      id: "writer",
+      name: "Writer",
+      role: "writes",
+      workspace: "shared",
+      models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+      level: 1,
+      fs: { read: ["/tmp/in"], write: [] },
+      description: "Writes texts.",
+    };
+    expect((await call("/api/agents", { method: "POST", body: JSON.stringify(form) })).status).toBe(
+      201,
+    );
+    const text = readFileSync(join(agentsDir, "writer", "agent.yaml"), "utf8");
+    expect(text).toMatch(/^level: 1$/m);
+    expect(text).not.toMatch(/^tools:/m);
+    const legacy = await call("/api/agents", {
+      method: "POST",
+      body: JSON.stringify({ ...form, id: "writer2", tools: ["Read"] }),
+    });
+    expect(legacy.status).toBe(400);
+    expect(((await legacy.json()) as { error: string }).error).toMatch(/level decides/);
+    for (const level of [7, -1, 2.5, "3"]) {
+      const r = await call("/api/agents", {
+        method: "POST",
+        body: JSON.stringify({ ...form, id: "writer3", level }),
+      });
+      expect(r.status, String(level)).toBe(400);
+    }
+
+    const { id: _id, description: _d, ...rest } = form;
+    const put = (id: string, body: unknown) =>
+      call(`/api/agents/${id}`, { method: "PUT", body: JSON.stringify(body) });
+    expect((await put("writer", { ...rest, level: 2, doc: "# Writer\n" })).status).toBe(200);
+    expect(readFileSync(join(agentsDir, "writer", "agent.yaml"), "utf8")).toMatch(/^level: 2$/m);
+    const detail = (await (await call("/api/agents/writer")).json()) as Record<string, unknown>;
+    expect(detail).toMatchObject({ level: 2, mcp: [], overrides: [] });
+    for (const extra of [
+      { tools: ["Bash"] },
+      { network: { allow: ["*"] } },
+      { shell: { allow: [] } },
+      { container: true },
+    ]) {
+      const r = await put("writer", { ...rest, ...extra, doc: "x" });
+      expect(r.status, JSON.stringify(extra)).toBe(400);
+    }
+    // A level-less agent keeps its lists; it gets a level through the migration only.
+    const boss = await put("boss", {
+      ...rest,
+      name: "Boss",
+      level: 3,
+      doc: "x",
+    });
+    expect(boss.status).toBe(400);
+    expect(((await boss.json()) as { error: string }).error).toMatch(/levels migrate/);
+  });
+
+  it("level overrides per agent and project: saved, refused where raising is not allowed (ADR-0067)", async () => {
+    const { call } = await pair();
+    mkdirSync(join(agentsDir, "maker"));
+    writeFileSync(
+      join(agentsDir, "maker", "agent.yaml"),
+      "id: maker\nname: Maker\nrole: maker\nworkspace: shared\nmodels:\n  default: cli-claude/sonnet\nlevel: 3\n",
+    );
+    createProject(projectsDir, { slug: "client", name: "Client", workspace: "shared" });
+    createProject(projectsDir, {
+      slug: "lab",
+      name: "Lab",
+      workspace: "shared",
+      class: "experimental",
+    });
+    // Another agent's entry in the file is kept.
+    writeFileSync(join(runDir, "overrides.yaml"), "- agent: boss\n  project: lab\n  level: 1\n");
+    const save = (overrides: unknown) =>
+      call("/api/agents/maker/overrides", {
+        method: "PUT",
+        body: JSON.stringify({ overrides }),
+      });
+    const ok = await save([
+      { project: "client", level: 1 },
+      { project: "lab", level: 5, requires_skills: ["deploy"] },
+    ]);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({
+      overrides: [
+        { project: "client", level: 1, requires_skills: [] },
+        { project: "lab", level: 5, requires_skills: ["deploy"] },
+      ],
+    });
+    expect(readFileSync(join(runDir, "overrides.yaml"), "utf8")).toMatch(/agent: boss/);
+    const detail = (await (await call("/api/agents/maker")).json()) as {
+      overrides: unknown[];
+      effectiveLevels: { project: string; level: number; reason: string }[];
+    };
+    expect(detail.overrides).toHaveLength(2);
+    expect(detail.effectiveLevels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ project: "client", level: 1, reason: "override" }),
+        // The required skill is not enabled: the base level applies.
+        expect.objectContaining({ project: "lab", level: 3, reason: "missing-skill" }),
+      ]),
+    );
+    // Raising on a secured (or not yet chosen) project is refused with the reason; nothing changes.
+    const raise = await save([{ project: "client", level: 4 }]);
+    expect(raise.status).toBe(400);
+    expect(((await raise.json()) as { error: string }).error).toMatch(/experimental project/);
+    expect(
+      ((await (await call("/api/agents/maker")).json()) as { overrides: unknown[] }).overrides,
+    ).toHaveLength(2);
+    expect((await save([{ project: "nowhere", level: 1 }])).status).toBe(400);
+    expect((await save([{ project: "lab", level: 9 }])).status).toBe(400);
+    // Removing: the list without the entry.
+    expect((await save([])).status).toBe(200);
+    expect(readFileSync(join(runDir, "overrides.yaml"), "utf8")).not.toMatch(/maker/);
+    expect((await save("x")).status).toBe(400);
+    expect((await call("/api/agents/nobody/overrides", { method: "PUT", body: "{}" })).status).toBe(
+      404,
+    );
+  });
+
+  it("projects: class, ceiling, spend switch and live/staging entries round-trip (ADR-0067)", async () => {
+    const { call } = await pair();
+    expect(
+      (
+        await call("/api/projects", {
+          method: "POST",
+          body: '{"slug":"acme","name":"Acme","workspace":"web-clients","class":"secured"}',
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await call("/api/projects", {
+          method: "POST",
+          body: '{"slug":"bad","name":"Bad","workspace":"web-clients","class":"wild"}',
+        })
+      ).status,
+    ).toBe(400);
+    expect(await (await call("/api/projects/acme")).json()).toMatchObject({
+      class: "secured",
+      ceiling: 4,
+      spend_without_asking: false,
+      entries: {},
+    });
+    const put = (body: unknown) =>
+      call("/api/projects/acme", { method: "PUT", body: JSON.stringify(body) });
+    // The spend switch is for experimental projects only.
+    expect((await put({ spend_without_asking: true })).status).toBe(400);
+    expect(
+      (
+        await put({
+          class: "experimental",
+          spend_without_asking: true,
+          integrations: {
+            ga4: [{ value: "123", env: "staging" }, "456"],
+            website: [{ value: "https://staging.acme.example", env: "staging" }],
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect(await (await call("/api/projects/acme")).json()).toMatchObject({
+      class: "experimental",
+      ceiling: 5,
+      spend_without_asking: true,
+      integrations: { ga4: ["123", "456"], website: ["https://staging.acme.example"] },
+      entries: {
+        ga4: [
+          { value: "123", env: "staging" },
+          { value: "456", env: "live" },
+        ],
+        website: [{ value: "https://staging.acme.example", env: "staging" }],
+      },
+    });
+    expect(readFileSync(join(projectsDir, "acme", "project.yaml"), "utf8")).toMatch(
+      /url: https:\/\/staging\.acme\.example\n\s+env: staging/,
+    );
+    // Plain strings (older clients) keep each entry's tag.
+    expect((await put({ integrations: { ga4: ["123", "456"] } })).status).toBe(200);
+    expect(
+      ((await (await call("/api/projects/acme")).json()) as { entries: Record<string, unknown> })
+        .entries.ga4,
+    ).toEqual([
+      { value: "123", env: "staging" },
+      { value: "456", env: "live" },
+    ]);
+    expect((await put({ class: "secured", spend_without_asking: false })).status).toBe(200);
+    expect((await put({ class: "open" })).status).toBe(400);
+    expect((await put({ integrations: { ga4: [{ value: "1", env: "prod" }] } })).status).toBe(400);
+    expect(
+      (await put({ integrations: { repository: [{ value: "not a repo", env: "live" }] } })).status,
+    ).toBe(400);
   });
 
   it("agent rooms: agents open them with their run token; the owner reads them (ADR-0032)", async () => {

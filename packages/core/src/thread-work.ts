@@ -22,6 +22,18 @@ export interface ThreadSummary {
   resumedCached: number;
   costUsd: number;
   participants: { agent: string; name: string; status: ParticipantStatus }[];
+  /**
+   * ADR-0066: a delegated task's latest question to its parent (ask_parent) and the parent's
+   * answer, null while open. Oldest first.
+   */
+  parentQuestions: {
+    task: string;
+    title: string;
+    agent: string;
+    name: string;
+    question: string;
+    answer: string | null;
+  }[];
 }
 
 // Delegated children carry the thread too; the root clause also catches older rows without it.
@@ -78,6 +90,22 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
        FROM tasks WHERE thread_id = ? AND parent_id IS NULL`,
     )
     .get(threadId);
+  const questions = db
+    .prepare(
+      `SELECT t.id, t.title, t.assignee_agent_id AS agent, a.name, t.parent_question, t.parent_answer
+       FROM tasks t LEFT JOIN agents a ON a.id = t.assignee_agent_id
+       WHERE t.id IN (${THREAD_TASKS}) AND t.parent_question IS NOT NULL
+       ORDER BY t.created_at, t.rowid`,
+    )
+    .all(threadId, threadId)
+    .map((r) => ({
+      task: String(r.id),
+      title: String(r.title),
+      agent: String(r.agent ?? ""),
+      name: String(r.name ?? r.agent ?? ""),
+      question: String(r.parent_question),
+      answer: r.parent_answer === null ? null : String(r.parent_answer),
+    }));
   return {
     agentsWorking: participants.filter((p) => p.status === "running").length,
     agentsTotal: participants.length,
@@ -91,6 +119,7 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
     resumedCached: Number(totals?.rc ?? 0),
     costUsd: Number(totals?.usd ?? 0),
     participants,
+    parentQuestions: questions,
   };
 }
 

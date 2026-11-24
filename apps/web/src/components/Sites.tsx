@@ -1,9 +1,11 @@
 import { KeyRound, Plus, Trash2 } from "lucide-preact";
 import { useState } from "preact/hooks";
+import type { Env } from "../accounts.ts";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { usePoll } from "../poll.ts";
 import { SecretInput } from "../views/SecretInput.tsx";
+import { EnvToggle } from "./EnvToggle.tsx";
 import { Confirm, Modal } from "./Modal.tsx";
 
 type Site = {
@@ -12,6 +14,8 @@ type Site = {
   missing: string[];
   legacy: boolean;
   ready: boolean;
+  /** ADR-0067: live or staging. */
+  env: Env;
 };
 
 /**
@@ -24,7 +28,17 @@ export function Sites(props: { slug: string }) {
   const [adding, setAdding] = useState(false);
   const [creds, setCreds] = useState<string>();
   const [removing, setRemoving] = useState<string>();
+  const [error, setError] = useState<string>();
   const list = sites.data?.sites ?? [];
+  const setEnv = async (url: string, env: Env) => {
+    setError(undefined);
+    try {
+      await api(`${base}/${encodeURIComponent(url)}`, { method: "PUT", body: { env } });
+      sites.refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
   return (
     <div class="field">
       <div class="row">
@@ -45,6 +59,9 @@ export function Sites(props: { slug: string }) {
                   <a href={s.url} target="_blank" rel="noreferrer">
                     {s.url}
                   </a>
+                </td>
+                <td>
+                  <EnvToggle env={s.env ?? "live"} onChange={(env) => setEnv(s.url, env)} />
                 </td>
                 <td>
                   {s.ready ? (
@@ -75,6 +92,7 @@ export function Sites(props: { slug: string }) {
       )}
       <span class="muted small">{t("sites.help")}</span>
       {sites.error && <span class="error small">{sites.error}</span>}
+      {error && <span class="error small">{error}</span>}
       {adding && (
         <AddSite
           base={base}

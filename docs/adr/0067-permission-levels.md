@@ -181,15 +181,15 @@ Status: Accepted (2026-11-24). Amends ADR-0010, ADR-0011, ADR-0034, ADR-0035, AD
 - UI changes:
   - **Agent edit dialog:**
     - a level picker with a one-line meaning per level;
-    - the remit (folders, accounts and integrations, models);
+    - the remit (folders, accounts and integrations, models); as built, integrations are shown read-only there and stay assigned on the Integrations page;
     - overrides per project;
-    - an "Effective level" section listing each project with its effective level and why (base, override, ceiling, or a missing skill or sandbox).
+    - an "Effective level" section listing each project with its effective level and why (base, override, ceiling, or a missing skill or sandbox; as built also a local model's cap at 3).
     - Tool checkboxes and the shell, network and container fields are gone.
   - **Project form:**
     - the class, with its explanation;
     - the ceiling (read-only);
     - the "spend without asking" switch (`experimental` only);
-    - a `live`/`staging` toggle on each account and site row.
+    - a `live`/`staging` toggle on each account and site row (as built, account rows are one entry each, and "Your own accounts" has the same toggle).
   - **Approval buttons:** once, this card and always, with "always" hidden where it is not allowed.
 
 - Tests:

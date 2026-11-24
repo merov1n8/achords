@@ -209,6 +209,6 @@ Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, AD
     - working columns start work when the owner drops a card (no new control: the drop itself);
     - the card modal shows room outcomes as comments, under the opener agent's name;
     - the run details show the input tokens a resume read (cached and uncached);
-    - Settings → Monitors show the stall thresholds.
-  - **UI not built:** parent questions and answers are not in the run details. They reach the agents' prompts only.
+    - Settings → Monitors show the stall thresholds;
+    - the run details show each delegated task's latest parent question and its answer (built with ADR-0067 step 6; earlier questions of the same task are not kept).
   - **Unchanged:** depth 3, cycles, fan-out 5, the shared budget, the ADR-0055 hop and task limits, and rooms staying out of chats.

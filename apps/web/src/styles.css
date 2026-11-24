@@ -1947,3 +1947,36 @@ td.actions > * {
 .md a {
   color: var(--accent);
 }
+
+/* ADR-0067: live/staging tag on account and site rows, the level picker. */
+.btn.env {
+  min-width: 5.5rem;
+  justify-content: center;
+}
+.btn.env.live {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.btn.env.staging {
+  background: var(--info-soft);
+  color: var(--info);
+}
+.level-pick {
+  display: grid;
+  gap: 4px;
+}
+.level-pick label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 6px 0;
+  font-weight: 400;
+}
+.level-pick strong {
+  display: block;
+}
+.exception {
+  border-left: 3px solid var(--warn);
+  padding: 4px 10px;
+}

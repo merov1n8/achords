@@ -19,6 +19,15 @@ export interface ThreadSummary {
     name: string;
     status: "running" | "queued" | "idle" | "waiting";
   }[];
+  /** ADR-0066: a delegated task's question to its parent and the answer (null while open). */
+  parentQuestions?: {
+    task: string;
+    title: string;
+    agent: string;
+    name: string;
+    question: string;
+    answer: string | null;
+  }[];
 }
 
 export function formatTokens(n: number): string {
