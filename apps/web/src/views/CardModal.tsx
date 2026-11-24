@@ -8,7 +8,7 @@ import { usePoll } from "../poll.ts";
 import type { Agent, Task } from "../types.ts";
 
 type Item = { id: number; text: string; done: boolean };
-type Comment = { id: number; text: string; createdAt: number };
+type Comment = { id: number; text: string; author: string | null; createdAt: number };
 type Detail = Task & { description: string | null; checklist: Item[]; comments: Comment[] };
 
 /** Card details: edit title and description, sub-items, own comments, move, start, delete. */
@@ -239,7 +239,10 @@ export function CardModal(props: {
             {c.comments.map((cm) => (
               <li key={cm.id}>
                 <div class="row small muted">
-                  <span class="grow">{ago(cm.createdAt)}</span>
+                  <span class="grow">
+                    {cm.author ? `${cm.author} · ` : ""}
+                    {ago(cm.createdAt)}
+                  </span>
                   <button
                     type="button"
                     class="iconbtn"

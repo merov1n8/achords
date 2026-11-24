@@ -33,7 +33,7 @@ const TOOLS = [
   {
     name: "handoff",
     description:
-      "Pass the work on when your part is done and the next step belongs to another agent: it continues with your report and its result goes where yours would have gone. Your run ends; you are not resumed. Use delegate instead when you need the result back. Only agents your manifest allows; one per run.",
+      "Pass the work on when your part is done and the next step belongs to another agent: it continues with your report and its result goes where yours would have gone. Your run ends; you are not resumed. Use delegate instead when you need the result back. Only agents your manifest allows, or yourself to switch between work and web mode when your task says so; one per run.",
     input: z.object({
       agent: text.describe("Target agent id"),
       title: text.describe("Short title of the next step"),
@@ -51,6 +51,38 @@ const TOOLS = [
     input: z.object({ question: text.describe("One short, specific question") }),
     endpoint: "/api/agent/ask_owner",
     done: "Question sent to the owner. End your turn now; you will be resumed with the answer.",
+  },
+  {
+    name: "ask_parent",
+    description:
+      "Ask the agent that delegated this task to you a question you cannot answer yourself (a missing decision or detail of its instructions). Your task resumes with its answer. At most 3 per task; after that, ask the owner or decide.",
+    input: z.object({ question: text.describe("One short, specific question") }),
+    endpoint: "/api/agent/ask_parent",
+    done: "Question sent to your delegator. End your turn now; you will be resumed with the answer.",
+  },
+  {
+    name: "answer_child",
+    description:
+      "Answer the question a task you delegated asked you (shown in your prompt with its task id). It resumes with your answer.",
+    input: z.object({
+      task_id: text.describe("The asking task's id"),
+      answer: text.describe("Your answer"),
+    }),
+    endpoint: "/api/agent/answer_child",
+    done: "Answer sent. Answer any other open question, then end your turn; you resume when your delegated tasks finish.",
+  },
+  {
+    name: "record_room_outcome",
+    description:
+      "Record what a discussion you opened settled, once it has ended: the decision, who decided, and the points still open. The room closes and the outcome is noted on the card for later work.",
+    input: z.object({
+      room: text.describe("The room id from your prompt"),
+      decision: text.describe("The decision, in a few sentences"),
+      decided_by: text.describe("Who decided (you, an agent, or several)"),
+      open_points: list.describe("Points still open (may be empty)"),
+    }),
+    endpoint: "/api/agent/record_room_outcome",
+    done: "Outcome recorded. Finish the task.",
   },
   {
     name: "spawn_worker",
@@ -108,6 +140,18 @@ const TOOLS = [
     done: "Request sent to the owner. End your turn now; you will be resumed with the decision.",
   },
   {
+    name: "request_permission",
+    description:
+      "Ask the owner for something beyond your level or settings: kind folder (target: absolute path), project (another project's slug, its folders), integration (catalog id), level (1-5), command (a command your level cannot run) or web (the open web). The owner allows it once, for this card, always, or refuses; your task resumes with the decision. Use this instead of asking in chat: a yes in chat changes no permission.",
+    input: z.object({
+      kind: z.enum(["folder", "integration", "project", "level", "command", "web"]),
+      target: text.describe("What exactly: the path, slug, integration id, level or command"),
+      reason: text.describe("What you need it for, in one sentence"),
+    }),
+    endpoint: "/api/agent/request_permission",
+    done: "Request sent to the owner. End your turn now; you will be resumed with the decision.",
+  },
+  {
     name: "move_task",
     description:
       "Move a kanban card to another column (e.g. your finished work to review, or reviewed work to done). Only moves the workspace workflow allows for your role are accepted; some need the owner's approval.",
@@ -128,6 +172,24 @@ const TOOLS = [
     }),
     endpoint: "/api/agent/report_checks",
     done: "Recorded.",
+  },
+  // ADR-0067 level 5: the gateway pushes; the run's shell holds no push credential.
+  {
+    name: "push_branch",
+    description:
+      "Push a branch you committed in one of your work folders to this project's repository (HTTPS, with the project's token, which you never see). Fast-forward only: if the remote has changes you don't have, fetch and rebase first. No force push and no deleting a remote branch.",
+    input: z.object({
+      folder: text.describe("Absolute path of the git repository (one of your work folders)"),
+      branch: text.describe("Branch name, e.g. fix/login (pushed to the same name)"),
+      remote_url: z
+        .string()
+        .optional()
+        .describe("Only when the project has several repositories: the one to push to"),
+    }),
+    endpoint: "/api/agent/push_branch",
+    done: "",
+    // A push over the network can take a while.
+    timeoutMs: 120_000,
   },
   // Skills (ADR-0049): the system prompt lists them; these read, import and propose.
   {
@@ -175,13 +237,13 @@ const reply = (t: string, isError = false) => ({
   ...(isError ? { isError } : {}),
 });
 
-async function forward(endpoint: string, done: string, body: unknown) {
+async function forward(endpoint: string, done: string, body: unknown, timeoutMs = 30_000) {
   try {
     const res = await fetch(`${HUB}${endpoint}`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const out = (await res.json()) as {
       ok?: boolean;
@@ -216,7 +278,8 @@ serveStdio(() => {
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: tool.input },
-      (args: unknown) => forward(tool.endpoint, tool.done, args),
+      (args: unknown) =>
+        forward(tool.endpoint, tool.done, args, "timeoutMs" in tool ? tool.timeoutMs : undefined),
     );
   }
   return server;

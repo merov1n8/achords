@@ -17,8 +17,23 @@ export interface ThreadSummary {
   /** Input read from the prompt cache (not in tokensIn). */
   tokensCached: number;
   tokensOut: number;
+  /** ADR-0066: what runs that resumed a card's session read as input, and how much from cache. */
+  resumedIn: number;
+  resumedCached: number;
   costUsd: number;
   participants: { agent: string; name: string; status: ParticipantStatus }[];
+  /**
+   * ADR-0066: a delegated task's latest question to its parent (ask_parent) and the parent's
+   * answer, null while open. Oldest first.
+   */
+  parentQuestions: {
+    task: string;
+    title: string;
+    agent: string;
+    name: string;
+    question: string;
+    answer: string | null;
+  }[];
 }
 
 // Delegated children carry the thread too; the root clause also catches older rows without it.
@@ -33,14 +48,16 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
   const totals = db
     .prepare(
       `SELECT COALESCE(SUM(input_tokens), 0) AS i, COALESCE(SUM(output_tokens), 0) AS o,
-         COALESCE(SUM(cached_tokens), 0) AS c, COALESCE(SUM(cost_usd), 0) AS usd
+         COALESCE(SUM(cached_tokens), 0) AS c, COALESCE(SUM(cost_usd), 0) AS usd,
+         COALESCE(SUM(CASE WHEN resumed = 1 THEN input_tokens END), 0) AS ri,
+         COALESCE(SUM(CASE WHEN resumed = 1 THEN cached_tokens END), 0) AS rc
        FROM runs WHERE task_id IN (${THREAD_TASKS})`,
     )
     .get(threadId, threadId);
   const rows = db
     .prepare(
       `SELECT x.*, a.name FROM (
-         SELECT t.status, t.waiting_children, t.waiting_owner, t.parked, t.created_at,
+         SELECT t.status, t.waiting_children, t.waiting_owner, t.waiting_parent, t.parked, t.created_at,
            t.rowid AS seq, COALESCE(t.assignee_agent_id, (SELECT r.agent_id FROM runs r
              WHERE r.task_id = t.id ORDER BY r.started_at DESC LIMIT 1)) AS agent
          FROM tasks t WHERE t.id IN (${THREAD_TASKS})
@@ -55,7 +72,9 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
         ? "running"
         : r.status !== "queued" || Number(r.parked) === 1
           ? "idle"
-          : Number(r.waiting_children) > 0 || Number(r.waiting_owner) === 1
+          : Number(r.waiting_children) > 0 ||
+              Number(r.waiting_owner) === 1 ||
+              Number(r.waiting_parent) > 0
             ? "waiting"
             : "queued";
     const agent = String(r.agent);
@@ -71,6 +90,22 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
        FROM tasks WHERE thread_id = ? AND parent_id IS NULL`,
     )
     .get(threadId);
+  const questions = db
+    .prepare(
+      `SELECT t.id, t.title, t.assignee_agent_id AS agent, a.name, t.parent_question, t.parent_answer
+       FROM tasks t LEFT JOIN agents a ON a.id = t.assignee_agent_id
+       WHERE t.id IN (${THREAD_TASKS}) AND t.parent_question IS NOT NULL
+       ORDER BY t.created_at, t.rowid`,
+    )
+    .all(threadId, threadId)
+    .map((r) => ({
+      task: String(r.id),
+      title: String(r.title),
+      agent: String(r.agent ?? ""),
+      name: String(r.name ?? r.agent ?? ""),
+      question: String(r.parent_question),
+      answer: r.parent_answer === null ? null : String(r.parent_answer),
+    }));
   return {
     agentsWorking: participants.filter((p) => p.status === "running").length,
     agentsTotal: participants.length,
@@ -80,8 +115,11 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
     tokensIn: Number(totals?.i ?? 0),
     tokensCached: Number(totals?.c ?? 0),
     tokensOut: Number(totals?.o ?? 0),
+    resumedIn: Number(totals?.ri ?? 0),
+    resumedCached: Number(totals?.rc ?? 0),
     costUsd: Number(totals?.usd ?? 0),
     participants,
+    parentQuestions: questions,
   };
 }
 
@@ -91,12 +129,31 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
  * cancelled first, so the worker that sees its run die cannot put the task back in the queue.
  */
 export function stopThread(db: Db, threadId: string): { cancelled: number; stopped: number } {
-  const open = db
-    .prepare(
-      `SELECT id FROM tasks WHERE id IN (${THREAD_TASKS}) AND status IN ('queued', 'claimed')`,
-    )
-    .all(threadId, threadId)
-    .map((r) => String(r.id));
+  return stopTasks(
+    db,
+    db
+      .prepare(
+        `SELECT id FROM tasks WHERE id IN (${THREAD_TASKS}) AND status IN ('queued', 'claimed')`,
+      )
+      .all(threadId, threadId)
+      .map((r) => String(r.id)),
+  );
+}
+
+/** ADR-0066: the boss's stop_chain after a stall notice, the same Stop for one root's chain. */
+export function stopChain(db: Db, rootId: string): { cancelled: number; stopped: number } {
+  return stopTasks(
+    db,
+    db
+      .prepare(
+        "SELECT id FROM tasks WHERE (id = ? OR root_id = ?) AND status IN ('queued', 'claimed')",
+      )
+      .all(rootId, rootId)
+      .map((r) => String(r.id)),
+  );
+}
+
+function stopTasks(db: Db, open: string[]): { cancelled: number; stopped: number } {
   let cancelled = 0;
   for (const id of open) if (cancel(db, id)) cancelled++;
   const ids = new Set(open);

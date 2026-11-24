@@ -378,6 +378,66 @@ describe("updateAgent (web: edit with the same form as create)", () => {
     ).toThrow(/only Claude models work/);
   });
 
+  it("an agent with a level (ADR-0067): sets the level, refuses the lists it replaces", () => {
+    const path = join(dir, "social", "agent.yaml");
+    const { tools: _t, network: _n, ...remit } = fields;
+    // A level-less agent is given its level by the migration, not by the form.
+    expect(() => updateAgent(dir, "social", { ...remit, level: 3 })).toThrow(/levels migrate/);
+    writeFileSync(
+      path,
+      "id: social\nname: Social\nrole: posts\nworkspace: marketing\nmodels:\n  default: cli-claude/sonnet\nlevel: 2\nnetwork:\n  allow: [docs.example.com]\nmcp: [wordpress, meta] # owner's note\n",
+    );
+    updateAgent(dir, "social", { ...remit, level: 3 });
+    const m = loadManifest(path);
+    expect(m).toMatchObject({
+      level: 3,
+      tools: [],
+      fs: { read: ["/tmp/a"] },
+      mcp: ["wordpress", "meta"],
+    });
+    // Named documentation hosts are remit the form does not show: kept.
+    expect(m.network.allow).toEqual(["docs.example.com"]);
+    const before = readFileSync(path, "utf8");
+    for (const legacy of [
+      { tools: ["Read"] },
+      { shell: { allow: ["ls"] } },
+      { network: { allow: [] } },
+      { container: true },
+    ]) {
+      expect(() => updateAgent(dir, "social", { ...remit, ...legacy })).toThrow(/level decides/);
+    }
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("creates an agent with a level and no tool lists; legacy lists next to it are refused", () => {
+    createAgentFiles(dir, {
+      id: "reader",
+      name: "Reader",
+      role: "reads",
+      workspace: "marketing",
+      models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+      level: 1,
+      fs: { read: ["/tmp/a"] },
+      description: "Reads.",
+    });
+    const text = readFileSync(join(dir, "reader", "agent.yaml"), "utf8");
+    expect(text).toMatch(/^level: 1$/m);
+    expect(text).not.toMatch(/^tools:/m);
+    expect(() =>
+      createAgentFiles(dir, {
+        id: "reader2",
+        name: "Reader",
+        role: "reads",
+        workspace: "marketing",
+        models: { default: "cli-claude/sonnet", allowed: ["cli-claude/sonnet"] },
+        level: 1,
+        tools: ["Read"],
+        description: "Reads.",
+      }),
+    ).toThrow(/level decides/);
+    expect(existsSync(join(dir, "reader2"))).toBe(false);
+  });
+
   it("refuses invalid values and leaves both files untouched", () => {
     const before = readFileSync(join(dir, "social", "agent.yaml"), "utf8");
     expect(() =>

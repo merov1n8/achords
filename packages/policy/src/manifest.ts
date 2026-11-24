@@ -47,6 +47,20 @@ export const manifestSchema = z
         allowed: z.array(modelId).optional(),
       })
       .strict(),
+    // ADR-0067: what the agent may do without asking (0 off … 5 full). While absent, the
+    // tools, shell, network and container lists below apply as written.
+    level: z.number().int().min(0).max(5).optional(),
+    // ADR-0067 owner-approved exception: exact executables that run outside the sandbox.
+    unsandboxed: z
+      .array(z.string().refine(isAbsolute, "must be an absolute path to an executable"))
+      .optional(),
+    // ADR-0067 owner-approved exception (until ADR-0055 stage 2): a level 4+ shell stays in the
+    // CLI's host sandbox next to keyed integrations (served on the gateway's side) instead of
+    // moving into a container, so local apps stay reachable.
+    keys_beside_host_shell: z.boolean().optional(),
+    // Deprecated (ADR-0067): `tools`, `shell`, `network: ["*"]` and `container` are compiled
+    // from `level`. Still parsed so agents without a level keep working until migrated
+    // (`achords levels migrate`); next to a level they are a warning (`legacyBesideLevel`).
     tools: z.array(z.string().min(1)).default([]),
     mcp: z.array(z.string().min(1)).default([]),
     fs: z
@@ -56,17 +70,19 @@ export const manifestSchema = z
       })
       .strict()
       .default({ read: [], write: [] }),
-    // Absent = no shell at all. Present = allow-list runs directly, the rest needs approval.
+    // Deprecated (ADR-0067), see tools. Absent = no shell at all. Present = allow-list runs
+    // directly, the rest needs approval.
     shell: z
       .object({ allow: z.array(z.string().min(1)).default([]) })
       .strict()
       .optional(),
+    // Named hosts stay as remit (documentation hosts); "*" is deprecated (ADR-0067), see tools.
     network: z
       .object({ allow: z.array(z.string().min(1)).default([]) })
       .strict()
       .default({ allow: [] }),
-    // ADR-0051: with "*" in network.allow the run executes in an Apple container unless the
-    // owner sets false (own risk). Absent = true with "*", false otherwise. ADR-0055: an agent
+    // Deprecated (ADR-0067), see tools. ADR-0051: with "*" in network.allow the run executes in
+    // an Apple container unless the owner sets false (own risk). Absent = true with "*", false otherwise. ADR-0055: an agent
     // with a shell may be put in a container too (required next to keyed integrations).
     container: z.boolean().optional(),
     // Claude --effort (codex reasoning effort, capped at high); absent = the CLI's default.
@@ -114,6 +130,20 @@ export const manifestSchema = z
   });
 
 export type Manifest = z.output<typeof manifestSchema>;
+
+/**
+ * Fields the level replaces that are still set next to a `level` (ADR-0067): ignored there, so
+ * a validation warning (`achords doctor`), not an error.
+ */
+export function legacyBesideLevel(m: Manifest): string[] {
+  if (m.level === undefined) return [];
+  return [
+    ...(m.tools.length ? ["tools"] : []),
+    ...(m.shell ? ["shell"] : []),
+    ...(m.network.allow.includes("*") ? ['network "*"'] : []),
+    ...(m.container ? ["container"] : []),
+  ];
+}
 
 export function parseManifest(text: string, source: string): Manifest {
   let raw: unknown;

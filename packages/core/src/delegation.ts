@@ -69,7 +69,13 @@ export function enqueueChild(
 export function enqueueSuccessor(
   db: Db,
   caller: Task,
-  input: { title: string; description?: string; assigneeAgentId?: string; caller: string },
+  input: {
+    title: string;
+    description?: string;
+    assigneeAgentId?: string;
+    caller: string;
+    runMode?: "accounts" | "web";
+  },
   now = Date.now(),
 ): Task {
   return transaction(db, () => {
@@ -77,8 +83,8 @@ export function enqueueSuccessor(
       .prepare(
         `INSERT INTO tasks (id, thread_id, parent_id, root_id, depth, agent_chain, title,
            description, assignee_agent_id, max_attempts, sensitivity, project, continues_from,
-           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+           run_mode, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(
         randomUUID(),
@@ -94,6 +100,7 @@ export function enqueueSuccessor(
         caller.sensitivity,
         caller.project,
         caller.id,
+        input.runMode ?? null,
         now,
         now,
       );
@@ -230,4 +237,52 @@ export function answerOwnerQuestion(
     "UPDATE tasks SET waiting_owner = 0, owner_answer = ?, updated_at = ? WHERE id = ?",
   ).run(answer, now, task.id);
   return getTask(db, task.id);
+}
+
+/**
+ * A delegated task asks its parent (ADR-0066): it waits for the answer, and its question wakes
+ * the parent although the parent still waits for its children. Separate from `askOwner`, so the
+ * owner's chat reply never answers it.
+ */
+export function askParent(db: Db, id: string, question: string, now = Date.now()): void {
+  db.prepare(
+    `UPDATE tasks SET waiting_parent = 1, parent_question = ?, parent_answer = NULL,
+       parent_questions = parent_questions + 1, updated_at = ? WHERE id = ?`,
+  ).run(question, now, id);
+}
+
+/** The parent's answer: the child is claimable again and resumes with it. */
+export function answerParentQuestion(
+  db: Db,
+  childId: string,
+  answer: string,
+  now = Date.now(),
+): boolean {
+  const r = db
+    .prepare(
+      "UPDATE tasks SET waiting_parent = 0, parent_answer = ?, updated_at = ? WHERE id = ? AND waiting_parent > 0",
+    )
+    .run(answer, now, childId);
+  return r.changes === 1;
+}
+
+/** Children of `parentId` with an open question to it, oldest first. */
+export function childQuestions(db: Db, parentId: string): Task[] {
+  return db
+    .prepare(
+      "SELECT id FROM tasks WHERE parent_id = ? AND waiting_parent > 0 ORDER BY updated_at, rowid",
+    )
+    .all(parentId)
+    .map((r) => getTask(db, String(r.id)) as Task);
+}
+
+/**
+ * A parent run saw these questions and ended without answering: they stay open, but no longer
+ * wake the parent (else an unanswered question would wake it again and again).
+ */
+export function childQuestionsSeen(db: Db, childIds: string[]): void {
+  const stmt = db.prepare(
+    "UPDATE tasks SET waiting_parent = 2 WHERE id = ? AND waiting_parent = 1",
+  );
+  for (const id of childIds) stmt.run(id);
 }

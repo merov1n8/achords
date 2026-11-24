@@ -1,6 +1,9 @@
 import { KeyRound, Pencil, Plus, Trash2, Unplug } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
+import { type Entry, type Row, siteLists, toLists, toRows } from "../accounts.ts";
 import { api } from "../api.ts";
+import { EnvToggle } from "../components/EnvToggle.tsx";
+import { GitToken } from "../components/GitToken.tsx";
 import { Confirm, Modal } from "../components/Modal.tsx";
 import { SiteLogin, Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
@@ -8,7 +11,7 @@ import { revocable, revokeAffects } from "../integrations.ts";
 import { usePoll } from "../poll.ts";
 import type { IntegrationStatus } from "../types.ts";
 import { AddSignin, LocalApp } from "./IntegrationForms.tsx";
-import { CHANNELS, type Row, siteLists, toLists, toRows } from "./Projects.tsx";
+import { CHANNELS } from "./Projects.tsx";
 
 /** What each integration still needs, in plain words. */
 function needs(s: IntegrationStatus): string[] {
@@ -160,12 +163,12 @@ function Group(props: {
 
 /** The owner's own pages and properties (ADR-0042): what work without a client may use. */
 function OwnAccounts(props: { onSaved: () => void }) {
-  const [lists, setLists] = useState<Record<string, string[]>>();
+  const [lists, setLists] = useState<Record<string, Entry[]>>();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string>();
   const load = () =>
-    api<{ integrations: Record<string, string[]> }>("/api/accounts")
-      .then((r) => setLists(r.integrations))
+    api<{ entries: Record<string, Entry[]> }>("/api/accounts")
+      .then((r) => setLists(r.entries))
       .catch((err: Error) => setError(err.message));
   useEffect(() => {
     load();
@@ -174,12 +177,12 @@ function OwnAccounts(props: { onSaved: () => void }) {
     setError(undefined);
     try {
       // Sites are edited below on their own: send the current ones back unchanged.
-      const current = await api<{ integrations: Record<string, string[]> }>("/api/accounts");
-      const out = await api<{ integrations: Record<string, string[]> }>("/api/accounts", {
+      const current = await api<{ entries: Record<string, Entry[]> }>("/api/accounts");
+      const out = await api<{ entries: Record<string, Entry[]> }>("/api/accounts", {
         method: "PUT",
-        body: { integrations: { ...toLists(rows), ...siteLists(current.integrations) } },
+        body: { integrations: { ...toLists(rows), ...siteLists(current.entries) } },
       });
-      setLists(out.integrations);
+      setLists(out.entries);
       props.onSaved();
     } catch (err) {
       setError((err as Error).message);
@@ -209,6 +212,7 @@ function OwnAccounts(props: { onSaved: () => void }) {
                 <th>{t("projects.channel")}</th>
                 <th>{t("projects.accountValue")}</th>
                 <th />
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -217,6 +221,12 @@ function OwnAccounts(props: { onSaved: () => void }) {
                   <td>{label(r.channel)}</td>
                   <td>
                     <code>{r.value}</code>
+                  </td>
+                  <td>
+                    <EnvToggle
+                      env={r.env}
+                      onChange={(env) => save(rows.map((x, j) => (j === i ? { ...x, env } : x)))}
+                    />
                   </td>
                   <td class="actions">
                     <button
@@ -235,6 +245,14 @@ function OwnAccounts(props: { onSaved: () => void }) {
           </table>
         )}
         <Sites slug="own" />
+        {/* Remounted when the repositories change, so the token row follows at once. */}
+        <GitToken
+          slug="own"
+          key={rows
+            .filter((r) => r.channel === "repository")
+            .map((r) => r.value)
+            .join(" ")}
+        />
       </div>
       {error && <p class="error">{error}</p>}
       {adding && (
@@ -251,7 +269,7 @@ function OwnAccounts(props: { onSaved: () => void }) {
 }
 
 function AddAccount(props: { onClose: () => void; onAdd: (row: Row) => Promise<void> }) {
-  const [row, setRow] = useState<Row>({ channel: CHANNELS[0]?.id ?? "", value: "" });
+  const [row, setRow] = useState<Row>({ channel: CHANNELS[0]?.id ?? "", value: "", env: "live" });
   return (
     <Modal
       title={t("projects.addAccount")}

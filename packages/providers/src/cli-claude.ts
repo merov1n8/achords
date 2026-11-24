@@ -20,6 +20,7 @@ export interface CliClaudeOptions {
 }
 
 const KILL_GRACE_MS = 3000;
+const SCRUB = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB";
 const STDERR_LIMIT = 4000;
 
 /**
@@ -40,7 +41,8 @@ export function buildArgs(req: RunRequest): string[] {
     "--output-format",
     "stream-json",
     "--verbose",
-    "--no-session-persistence",
+    ...(req.session ? [] : ["--no-session-persistence"]),
+    ...(req.session?.resume ? ["--resume", req.session.resume] : []),
     "--model",
     req.model,
     "--tools",
@@ -130,12 +132,17 @@ function runOnce(
     const env: NodeJS.ProcessEnv = { ...process.env, ...opts.env, ...req.env };
     // Subscription runs never pick up an API key that happens to be in the environment.
     if (req.billing !== "api") delete env.ANTHROPIC_API_KEY;
+    // The CLI's own login token (CLAUDE_CODE_OAUTH_TOKEN of a per-card session or a container
+    // run) and an API key stay with the CLI: its Bash commands, hooks and MCP servers get the
+    // environment without them. Checked with claude 2.1.331: other variables still reach Bash.
+    env[SCRUB] = "1";
     // ADR-0051: the same command inside a VM; only the run's own variables go in, by name.
     const box = req.container;
     let command: [string, string[]];
     try {
+      const names = [...Object.keys(req.env ?? {}).filter((n) => n !== SCRUB), SCRUB];
       command = box
-        ? [box.bin, containerRunArgs(box, req.cwd, Object.keys(req.env ?? {}), [bin, ...args])]
+        ? [box.bin, containerRunArgs(box, req.cwd, names, [bin, ...args])]
         : [bin, args];
     } catch (err) {
       resolve({
@@ -211,6 +218,7 @@ function runOnce(
       }
       if (typeof event !== "object" || event === null) return;
       opts.onEvent?.(event);
+      req.onActivity?.();
       if (event.type === "rate_limit_event") windows = parseWindows(event.rate_limit_info);
       if (event.type === "assistant" && req.onProgress) {
         const progress = parseTodos(event);
@@ -250,6 +258,9 @@ function runOnce(
           error: `claude exited with exit code ${code} and no result${detail}`,
           usage: emptyUsage(),
           windows,
+          ...(req.session?.resume && /no conversation found/i.test(stderr)
+            ? { resumeRejected: true }
+            : {}),
         });
         return;
       }

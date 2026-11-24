@@ -241,6 +241,96 @@ describe("integration launcher (ADR-0034)", () => {
     });
   });
 
+  it("asks the owner for tools listed in review even in auto mode (ADR-0067)", async () => {
+    const echo =
+      "require('readline').createInterface({input: process.stdin}).on('line', (l) => console.log(JSON.stringify({ jsonrpc: '2.0', id: JSON.parse(l).id, result: { saw: JSON.parse(l).params?.name } })))";
+    const call = (id: number, name: string) =>
+      JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: {} } });
+    scoped = {
+      command: process.execPath,
+      args: ["-e", echo],
+      env: {},
+      files: {},
+      publish: {
+        integration: "social",
+        mode: "auto",
+        tools: ["publish_post", "boost_post"],
+        review: ["boost_post"],
+        token: "pub",
+      },
+    };
+    const r = await launch("good", [call(1, "publish_post"), call(2, "boost_post"), ""].join("\n"));
+    const lines = r.out
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines.filter((l) => l.result?.saw).map((l) => l.result.saw)).toEqual(["publish_post"]);
+    for (let i = 0; i < 50 && published.length < 2; i++)
+      await new Promise((r) => setTimeout(r, 20));
+    expect(published.map((p) => [p.path, p.body.tool]).sort()).toEqual([
+      ["/api/agent/publish", "boost_post"],
+      ["/api/agent/publish_log", "publish_post"],
+    ]);
+  });
+
+  it("refuses writes to live targets before publishing review or the server; reads and staging pass (ADR-0067)", async () => {
+    const echo =
+      "require('readline').createInterface({input: process.stdin}).on('line', (l) => console.log(JSON.stringify({ jsonrpc: '2.0', id: JSON.parse(l).id, result: { saw: JSON.parse(l).params?.name } })))";
+    const call = (id: number, name: string, args: object) =>
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name, arguments: args },
+      });
+    scoped = {
+      command: process.execPath,
+      args: ["-e", echo],
+      env: {},
+      files: {},
+      scope: { args: ["site"], free: ["reply"], allowed: ["live.example", "staging.example"] },
+      live: {
+        tools: ["save_draft", "hide_post", "publish_post", "boost_post", "reply"],
+        args: ["site"],
+        staging: ["staging.example"],
+      },
+      // Review for every write: even then a live write must never reach the owner.
+      publish: {
+        integration: "social",
+        mode: "review",
+        tools: ["save_draft", "hide_post", "publish_post", "boost_post", "reply"],
+        token: "pub",
+      },
+    };
+    const writes = ["save_draft", "hide_post", "publish_post", "boost_post"];
+    const r = await launch(
+      "good",
+      [
+        call(1, "list_posts", { site: "live.example" }),
+        ...writes.map((t, i) => call(10 + i, t, { site: "live.example" })),
+        call(20, "publish_post", { site: "staging.example" }),
+        call(21, "reply", {}),
+        "",
+      ].join("\n"),
+    );
+    const lines = r.out
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const byId = (id: number) => lines.find((l) => l.id === id);
+    expect(byId(1).result.saw).toBe("list_posts");
+    for (let i = 0; i < writes.length; i++) {
+      expect(byId(10 + i).result.isError).toBe(true);
+      expect(byId(10 + i).result.content[0].text).toMatch(/live.example is a live target/);
+    }
+    expect(byId(21).result.content[0].text).toMatch(/does not say which target/);
+    for (let i = 0; i < 50 && !published.length; i++) await new Promise((r) => setTimeout(r, 20));
+    // Only the staging write went to the owner.
+    expect(published.map((p) => p.body)).toEqual([
+      { integration: "social", tool: "publish_post", arguments: { site: "staging.example" } },
+    ]);
+  });
+
   it("marks results of client accounts as third-party data (ADR-0038)", async () => {
     scoped = {
       command: process.execPath,

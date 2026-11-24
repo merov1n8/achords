@@ -12,6 +12,8 @@ import {
   setDraining,
 } from "@achords/core";
 import { t } from "@achords/i18n";
+import { findContainerBin } from "@achords/platform";
+import { loadCatalog } from "@achords/policy";
 import { openHomeVault, parseClientJson } from "@achords/secrets";
 import { connectGoogle } from "./connect-google.ts";
 import { buildImage, killRunContainers } from "./container.ts";
@@ -19,6 +21,7 @@ import { type ControlContext, kill, resume, start, status, stop } from "./contro
 import { runDoctor, systemDoctorEnv } from "./doctor.ts";
 import { runInit } from "./init.ts";
 import { launchdService, protectedFolderOf, unsupportedService } from "./launchd.ts";
+import { migrateLevels } from "./levels.ts";
 import { createPrompter, readSecret } from "./secret-input.ts";
 import { systemdService } from "./systemd.ts";
 import { exportHome, importHome } from "./transfer.ts";
@@ -250,6 +253,23 @@ async function run(
     case "resume":
       console.log(resume(ctx));
       return 0;
+    case "levels": {
+      if (args[0] !== "migrate" || (options.write && options["dry-run"])) {
+        console.log(t("cli.levels.usage"));
+        return 2;
+      }
+      const r = migrateLevels({
+        home: ctx.paths.home,
+        catalog: loadCatalog(
+          new URL("../../../seed/catalog/", import.meta.url).pathname,
+          `${ctx.paths.home}/catalog`,
+        ),
+        write: options.write === true,
+        containerAvailable: findContainerBin() !== undefined,
+      });
+      process.stdout.write(r.report);
+      return 0;
+    }
     case "container": {
       if (args[0] !== "build") {
         console.log(t("cli.container.usage"));
@@ -294,7 +314,12 @@ async function run(
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   strict: false,
-  options: { now: { type: "boolean" }, wait: { type: "string" } },
+  options: {
+    now: { type: "boolean" },
+    wait: { type: "string" },
+    write: { type: "boolean" },
+    "dry-run": { type: "boolean" },
+  },
 });
 try {
   process.exitCode = await run(positionals[0], positionals.slice(1), values);

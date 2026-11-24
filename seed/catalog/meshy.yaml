@@ -46,6 +46,28 @@ tools:
     - meshy_auto_split
     - meshy_download_model
     - meshy_cancel_task
+  # ADR-0067: tasks use account credits; downloading and cancelling do not.
+  class:
+    meshy_text_to_3d: spend
+    meshy_text_to_3d_refine: spend
+    meshy_image_to_3d: spend
+    meshy_multi_image_to_3d: spend
+    meshy_text_to_image: spend
+    meshy_image_to_image: spend
+    meshy_creative_lab: spend
+    meshy_remesh: spend
+    meshy_retexture: spend
+    meshy_rig: spend
+    meshy_animate: spend
+    meshy_text_to_motion: spend
+    meshy_convert: spend
+    meshy_resize: spend
+    meshy_uv_unwrap: spend
+    meshy_repair_printability: spend
+    meshy_process_multicolor: spend
+    meshy_auto_split: spend
+    meshy_download_model: reversible
+    meshy_cancel_task: reversible
 # Connection test (web Integrations page).
 test:
   tool: meshy_check_balance

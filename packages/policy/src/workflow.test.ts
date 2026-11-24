@@ -13,6 +13,8 @@ describe("default workflow", () => {
     expect(wf.start).toBe("in_progress");
     expect(wf.finish).toBe("review");
     expect(wf.on_enter.review).toEqual({ assign: "role:qa" });
+    // ADR-0066: the owner dropping a card into in_progress starts its agent.
+    expect(wf.on_enter.in_progress).toEqual({ start: "assignee" });
   });
 });
 
@@ -61,6 +63,20 @@ describe("checkMove", () => {
 });
 
 describe("parseWorkflow", () => {
+  it("accepts on_enter.start: assignee on any column, and nothing else for start", () => {
+    const custom = parseWorkflow(
+      "columns: [a, b]\nstart: a\nfinish: b\ntransitions: []\non_enter:\n  b: { start: assignee }\n",
+      "w",
+    );
+    expect(custom.on_enter.b).toEqual({ start: "assignee" });
+    expect(() =>
+      parseWorkflow(
+        "columns: [a, b]\nstart: a\nfinish: b\ntransitions: []\non_enter:\n  b: { start: owner }\n",
+        "w",
+      ),
+    ).toThrow(/on_enter.b.start/);
+  });
+
   it("rejects transitions, start or on_enter that name unknown columns", () => {
     expect(() =>
       parseWorkflow(

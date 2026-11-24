@@ -5,6 +5,92 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- Permission levels now decide what an agent may do (ADR-0067), for agents that have a `level`
+  (agents without one work exactly as before): what it may read, write, fetch and run, which
+  account tools it gets and which ones ask you first. Spending and changes to live targets ask
+  you below level 5. An agent that has both web access and account tools works on its accounts
+  or on the web per task, never both at once, and switches by handing the work to itself. A
+  level 4 shell runs in a sandbox: Apple's container, or on this Mac in Claude's own sandbox,
+  which cannot read your keys or achords' data; when neither is possible the agent works at
+  level 3 and the chat says why. Level 0 agents get no work. The agent page shows the
+  effective level per project.
+- A leveled agent with a shell no longer has the open web in the same run (ADR-0067): it works
+  in work mode (shell and accounts, with package registries, your project's sites and the
+  documentation hosts you gave it) or web mode (any website and web search, no shell, no
+  account tools that write), switching by handing the work to itself. Shell runs without keyed
+  accounts therefore stay on this Mac in Claude's sandbox instead of Apple's container, so an
+  agent like web-dev is no longer always containerized. Web mode runs in Apple's container like
+  every run with the open web, so apps on this Mac are not reachable from it.
+- Agents with a level ask you for what is beyond their level or settings (ADR-0067): another
+  folder or project, an integration, a higher level, a command or the open web. You answer with
+  Once (its next run only), For this card (every task of the card until it is done, archived or
+  deleted) or Always (added to the agent's settings, or a level override on an experimental
+  project; it is not asked again). Always is not offered for deleting outside its folders,
+  changing permissions, reading keys, a new paid service or a higher level on a secured project.
+  No approval makes live targets of a secured project writable, and force push, history
+  rewrite and git push stay refused. The 4-hour full access no longer applies to these agents.
+  Agents without a level keep their requests; their buttons are now Once and For this card (the
+  former "This task"/Approve, still 4 hours), with Always for commands as before.
+- Force pushes and git history rewrites are refused for every agent.
+- A level 4 shell on this Mac no longer reads your home folder: only its own folders and the
+  developer toolchains found there (node version managers, rustup, .NET, Xcode's folders, the
+  install folders of programs linked from `~/.local/bin`…) are readable, never `~/.npmrc`,
+  `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.kube`, `~/.config` or `~/.pypirc`. Your
+  `~/.gitconfig` (and `~/.config/git/config`) is readable only when it holds nothing that looks
+  like a token or password; otherwise git cannot run in that shell. Package downloads go to a
+  cache folder of the run (removed afterwards), and commits use your git name and email.
+- Level 5 agents can push a branch in work mode (ADR-0067) with the tool `push_branch`: achords
+  itself pushes it to an HTTPS repository listed in the project, fast-forward only, with the
+  push token you set in the project form (or under your own accounts). The token stays in the
+  vault and never reaches the agent or its shell; each push is in the audit log. Force push and
+  deleting a remote branch are not offered; level 4 and below, web mode and SSH remotes have no
+  push. An agent's own `git push` is refused, and git in every agent shell no longer uses this
+  Mac's git logins (keychain helper, stored credentials, ssh-agent) or prompts for one.
+- `pnpm achords levels migrate` moves your agents to permission levels (ADR-0067). Run it
+  first as is: it only prints a report (per agent: its level, the rights it gains and loses,
+  the one-off commands collected in its shell list that are dropped, those covered otherwise
+  (the Unity editor outside the sandbox, opening apps through local apps), the exceptions set
+  and any warnings). Read it, then run `pnpm achords levels migrate --write`: each `agent.yaml`
+  is backed up next to your other backups (`backup-<agent>-agent-<time>.yaml` in the data
+  folder), gets its level, keeps its folders, integrations, models and documentation hosts
+  and loses `tools`, `shell`, `network: ["*"]` and `container`; the report is saved as
+  `levels-migration-<time>.txt`. Agents in the approved starting assignment get their level
+  (game-dev with its Unity editor as the one command outside the sandbox, 3d-designer with its
+  shell next to its keyed integrations); any other agent gets the highest level that gives it
+  nothing new, or is left unchanged when none does. The boss and agents that already have a
+  level are skipped, so running it again changes nothing. No gateway restart is needed. New
+  installs ship web-dev at level 4. Agents without a level keep working as before, and
+  `achords doctor` warns when an agent has a level and the old lists side by side.
+- Live sites and accounts of secured projects are read-only for every agent (ADR-0067): no
+  level, approval (your Approve button included), override or full access lets an agent write
+  to them. Writes go only to targets you tag `staging`; work meant for live is handed to you as
+  a package (a diff or export plus a checklist) to deploy yourself. **Note for owners:** existing
+  projects count as secured, with every site and account live, until you choose a class and tag
+  their staging targets, so agents' write tools to those sites are refused until then. This is
+  intentional. Experimental projects and work without a project are unchanged.
+
+- The forms show permission levels (ADR-0067). Agents → Edit, for an agent with a level: a level
+  picker with one line on what each level means, its folders, the integrations given to it, its
+  overrides per project (a different level on one project, optionally only while named skills
+  are enabled; raising is refused unless the project is experimental, with the reason shown
+  there), the effective level on each project with the reason (its own level, an override, the
+  project's ceiling, a skill not enabled, no sandbox or a local model) and its owner-approved
+  exceptions. The tool checkboxes and the shell, network and container fields are gone for
+  these agents; agents without a level keep the old form with a note to run
+  `pnpm achords levels migrate`. New agents start at level 1 with a level picker instead of
+  tool lists.
+- Projects → New asks for a class (secured or experimental), each explained in a sentence;
+  Projects → Edit shows the class ("not chosen yet, counts as secured" until you pick one), the
+  highest level it allows, and for experimental projects the "spend without asking" switch.
+  Every account row and WordPress site, in projects and in your own accounts, has a Live /
+  Staging toggle. Account rows are now one entry each instead of one per channel.
+- The run details of a chat show a delegated agent's questions to its parent agent and the
+  answers (ADR-0066).
+- Telegram puts the four approval buttons (Once, For this card, Always, Reject) in two rows of
+  two, so none is cut off on a phone.
+
 ### Fixed
 
 - A review ended in silence: the reviewer's verdict was not shown anywhere, and a card it sent
@@ -73,6 +159,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   input tokens include the part read from cache; the message box grows as you type and can be
   dragged taller.
 - Chat: your own messages use a neutral colour instead of the accent colour.
+- Work that reads the open web (any website, web search, or full access) no longer adds its
+  result to memory (ADR-0066); the result stays in its report, on its card and in the chat.
+  Reading only the project's own websites is not the open web: such work is remembered as before,
+  its new skills follow the workspace's skill mode, and an integration set to publish
+  automatically keeps doing so instead of asking you first.
 - Project accounts: the type is a dropdown (Git repository included; GitHub and GitLab addresses,
   https or ssh, are checked); the chat title shows a pencil to show it can be renamed.
 - Chat: your own messages are a plain rounded bubble (as in the design); click the chat title to
@@ -118,6 +209,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Groundwork for permission levels (ADR-0067), no change to runs yet: an agent may carry a
+  `level` (0 off to 5 full), a project a `class` (secured or experimental, unset counts as
+  secured) and `spend_without_asking` (experimental only), and every account and site in a
+  project or in your own accounts may be tagged `env: live | staging` (plain entries stay live).
+  Per-project overrides live in `~/.achords/overrides.yaml`, and every shipped integration tool
+  has a class (read, draft, reversible, live, spend).
+- Stuck work reaches you within minutes (ADR-0066): when a chat's work makes no progress for 15
+  minutes, or has spent 80 % of its budget, the boss looks at it once and asks you, stops it, or
+  lets it run. Queued work waiting for its turn and work waiting for your answer are left alone.
+  Both thresholds are in Settings → Monitors.
+- Dragging a card into "in progress" now starts its agent (ADR-0066): a card that was not
+  started starts as with its Start button, a finished or failed card continues as a new run on
+  the same card (same chat, same budget, same agent session), and a card already queued or running
+  is left alone. Only your own moves start work, never an agent's, and a card without an agent
+  stays yours. A spent budget or the task limit is explained in the card's chat instead. Any
+  column can do this with `on_enter: { <column>: { start: assignee } }` in its workflow. New
+  installs get it on `in_progress`; an existing install keeps its own `workflows/<workspace>.yaml`
+  (never overwritten), so add `in_progress: { start: assignee }` under `on_enter:` there to turn it on.
+- A discussion between agents (a room) now leaves its result on the card (ADR-0066): the agent
+  that opened it records the decision, who decided and the points still open, shown as a comment
+  on the card under that agent's name. Later work on the card sees the latest five. Without a
+  recorded outcome its final answer is used; a discussion that failed says "no decision: room
+  failed". Rooms still stay out of your chats and Telegram.
+- A delegated agent can ask the agent that gave it the work (ADR-0066): `ask_parent` wakes the
+  delegating agent with the question even while it waits for its delegated tasks, it answers with
+  `answer_child` (or asks you first), and the asking agent continues with the answer. At most
+  three questions per task; questions add no tasks but their runs count against the chain's
+  budget. Your own chat replies never answer them, and work that is the chat's own (not
+  delegated) or a review still asks only you.
+- An agent keeps its working memory on a card (ADR-0066): its next run on the same card (after
+  delegated work comes back, or after you answer its question) continues its own
+  Claude session and gets only what is new. Sessions live in `sessions/<card>/<agent>/` under the
+  achords home, never in your own `~/.claude`, sign in with the token for container runs, and
+  are deleted when the card reaches its finish column, is deleted, or its chat is archived or deleted.
+  Without that token runs start from scratch as before, and the chat says so once. The token
+  stays with Claude Code: agent shell commands never see it (nor an API key). The run
+  details show what resumed sessions read (and how much came from the cache); a run's input now
+  counts prompt-cache writes too.
 - A project can work in a folder outside Achords: add `workdir: ~/path/to/repo` to its
   `project.yaml` and its agents start there (and Unity is opened for that folder) instead of in
   the project's `files/`.

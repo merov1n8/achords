@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,6 +14,7 @@ import {
   getTask,
   listMessages,
   openCoreDatabase,
+  setSetting,
   type Task,
 } from "@achords/core";
 import type { Memory } from "@achords/memory";
@@ -287,6 +295,48 @@ describe("projects in runs (ADR-0031)", () => {
     expect(searched[0]).toEqual(["web-clients", "shared", "web-clients/acme"]);
     expect(searched[1]).toEqual(["web-clients", "shared"]);
     expect(stored).toEqual(["web-clients/acme", "web-clients"]);
+  });
+
+  describe("no memory from open-web runs (ADR-0066)", () => {
+    const agent = (id: string, rest: string) => {
+      mkdirSync(join(home, "agents", id), { recursive: true });
+      writeFileSync(
+        join(home, "agents", id, "agent.yaml"),
+        `id: ${id}\nname: ${id}\nrole: ${id}\nworkspace: web-clients\n${rest}\nmodels:\n  default: cli-claude/sonnet\n`,
+      );
+      orch.syncAgents();
+    };
+
+    it("an open-web run writes no summary, whether WebSearch or any site", async () => {
+      agent("scout", "tools: [Read, WebSearch]");
+      agent("crawler", 'tools: [WebFetch]\nnetwork:\n  allow: ["*"]\ncontainer: false');
+      const a = give("scout", "acme");
+      const b = give("crawler");
+      await drain();
+      expect([getTask(db, a)?.status, getTask(db, b)?.status]).toEqual(["done", "done"]);
+      expect(stored).toEqual([]);
+    });
+
+    it("an elevated run writes none", async () => {
+      const id = give("web-dev", "acme");
+      setSetting(db, `elevation:${id}`, String(Date.now() + 60_000));
+      await drain();
+      expect(calls[0]?.req.allowedTools).toContain("WebSearch");
+      expect(getTask(db, id)?.status).toBe("done");
+      expect(stored).toEqual([]);
+    });
+
+    it("a project-sites-only run writes as before, and so does a run without web", async () => {
+      appendFileSync(
+        join(home, "projects", "acme", "project.yaml"),
+        'integrations:\n  website: ["https://acme.example"]\n',
+      );
+      give("web-dev", "acme");
+      give("web-dev");
+      await drain();
+      expect(calls[0]?.req.allowedTools).toContain("WebFetch(domain:acme.example)");
+      expect(stored).toEqual(["web-clients/acme", "web-clients"]);
+    });
   });
 
   it("a project's workflow.yaml replaces the workspace's for its cards", () => {

@@ -107,6 +107,18 @@ describe("doctor", () => {
     });
   });
 
+  it("warns, never fails, when a level sits next to the fields it replaces (ADR-0067)", async () => {
+    const checks = await byName({
+      ...env,
+      legacyBesideLevel: () => ["web-dev (tools, shell)"],
+    });
+    expect(checks["agent levels"]).toMatchObject({
+      level: "warn",
+      detail: expect.stringContaining("web-dev (tools, shell)"),
+    });
+    expect((await byName({ ...env, legacyBesideLevel: () => [] }))["agent levels"]).toBeUndefined();
+  });
+
   it("flags a data folder readable by others", async () => {
     rmSync(env.paths.home, { recursive: true });
     mkdirSync(env.paths.home, { mode: 0o755 });

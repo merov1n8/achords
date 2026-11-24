@@ -283,6 +283,7 @@ function runCodex(
       } catch {
         return;
       }
+      req.onActivity?.();
       if (e.type === "turn.completed") {
         const u = (e.usage ?? {}) as Record<string, number>;
         usage = {

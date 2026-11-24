@@ -18,7 +18,7 @@ import {
 import { createProject } from "@achords/policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Transcriber } from "../voice/transcribe.ts";
-import { createTelegramChannel, type TelegramChannel } from "./telegram.ts";
+import { actionRows, createTelegramChannel, type TelegramChannel } from "./telegram.ts";
 
 const TOKEN = "123456789:AAH-TestTokenTestTokenTestToken0123";
 const OWNER = 1001;
@@ -772,5 +772,19 @@ describe("telegram channel", () => {
     expect(handled[0]?.threadId).toBe(threadId);
     // The boss reply lands in that same core thread (visible on the web too).
     expect(listMessages(db, threadId).map((m) => m.content)).toContain("re: x");
+  });
+});
+
+describe("actionRows", () => {
+  const a = (label: string) => ({ label, data: label.toLowerCase() });
+  it("keeps up to three buttons in one row and puts four (approval scopes) in rows of two", () => {
+    expect(actionRows([])).toEqual([]);
+    expect(actionRows([a("Once"), a("Card"), a("Reject")]).map((r) => r.length)).toEqual([3]);
+    expect(
+      actionRows([a("Once"), a("Card"), a("Always"), a("Reject")]).map((r) => r.map((b) => b.text)),
+    ).toEqual([
+      ["Once", "Card"],
+      ["Always", "Reject"],
+    ]);
   });
 });

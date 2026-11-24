@@ -139,6 +139,20 @@ interface Update {
   };
 }
 
+/**
+ * Inline keyboard rows for a message's actions: one row, or rows of two from four buttons on
+ * (Once / For this card / Always / Reject would be cut off side by side on a phone).
+ */
+export function actionRows(
+  actions: { label: string; data: string }[],
+): { text: string; callback_data: string }[][] {
+  const buttons = actions.map((a) => ({ text: a.label, callback_data: a.data }));
+  if (buttons.length <= 3) return buttons.length ? [buttons] : [];
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2));
+  return rows;
+}
+
 export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
   const { db } = deps;
   const base = deps.apiBase ?? "https://api.telegram.org";
@@ -190,7 +204,7 @@ export function createTelegramChannel(deps: TelegramDeps): TelegramChannel {
     topic?: number,
   ) => {
     const rows = [
-      ...(actions?.length ? [actions.map((a) => ({ text: a.label, callback_data: a.data }))] : []),
+      ...actionRows(actions ?? []),
       ...(speak && deps.speaker
         ? [[{ text: t("telegram.readAloud"), callback_data: `tts:${speak}` }]]
         : []),

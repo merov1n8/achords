@@ -40,6 +40,16 @@ tools:
     - meta_publish_instagram_reel
     - meta_reply_post_comment
     - meta_reply_instagram_comment
+  # ADR-0067: posts and replies are public at once.
+  class:
+    meta_create_post: live
+    meta_create_photo_post: live
+    meta_cross_post: live
+    meta_publish_instagram_photo: live
+    meta_publish_instagram_carousel: live
+    meta_publish_instagram_reel: live
+    meta_reply_post_comment: live
+    meta_reply_instagram_comment: live
 # Per client (ADR-0036): page and Instagram account ids from the project's facebook and instagram
 # accounts. Listing every page or account is refused in a project run. Tools that only take a
 # post, media or comment id are free: those ids come from the scoped listings.

@@ -115,6 +115,7 @@ export function Monitors() {
         {error && <p class="error">{error}</p>}
       </div>
       <QuietHours />
+      <StallThresholds />
       {(creating || editing) && (
         <MonitorForm
           key={editing?.id ?? "new"}
@@ -360,6 +361,61 @@ function QuietHours() {
         />
         <span class="muted small">{t("monitors.quietHelp")}</span>
       </label>
+      <button type="submit" class="btn">
+        {t("common.save")}
+      </button>
+      {status && <span class={status.ok ? "muted" : "error"}> {status.text}</span>}
+    </form>
+  );
+}
+
+// ADR-0066: when the boss is told about stuck work.
+function StallThresholds() {
+  const [v, setV] = useState({ minutes: "", percent: "" });
+  const [status, setStatus] = useState<{ ok: boolean; text: string }>();
+  useEffect(() => {
+    api<{ minutes: number; percent: number }>("/api/monitors/stalls")
+      .then((r) => setV({ minutes: String(r.minutes), percent: String(r.percent) }))
+      .catch(() => {});
+  }, []);
+  const save = async (e: Event) => {
+    e.preventDefault();
+    try {
+      await api("/api/monitors/stalls", {
+        method: "PUT",
+        body: { minutes: Number(v.minutes), percent: Number(v.percent) },
+      });
+      setStatus({ ok: true, text: t("projects.saved") });
+    } catch (err) {
+      setStatus({ ok: false, text: (err as Error).message });
+    }
+  };
+  return (
+    <form class="panel gap-top narrow" onSubmit={save}>
+      <h2>{t("monitors.stalls")}</h2>
+      <label class="field">
+        {t("monitors.stallMinutes")}
+        <input
+          class="input"
+          type="number"
+          min={1}
+          max={1440}
+          value={v.minutes}
+          onInput={(e) => setV({ ...v, minutes: e.currentTarget.value })}
+        />
+      </label>
+      <label class="field">
+        {t("monitors.stallPercent")}
+        <input
+          class="input"
+          type="number"
+          min={1}
+          max={100}
+          value={v.percent}
+          onInput={(e) => setV({ ...v, percent: e.currentTarget.value })}
+        />
+      </label>
+      <p class="muted small">{t("monitors.stallsHelp")}</p>
       <button type="submit" class="btn">
         {t("common.save")}
       </button>

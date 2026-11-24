@@ -33,6 +33,7 @@ import { CODEX_API_KEY_ENV, cliClaude, cliCodex, cliGemini, localOpenAI } from "
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApps } from "./apps.ts";
 import { containerHost } from "./container.ts";
+import { pushBranch } from "./git-push.ts";
 import { createApiHandler } from "./http/api.ts";
 import { callTool } from "./mcp/call.ts";
 import { createMcpHost } from "./mcp/host.ts";
@@ -94,7 +95,31 @@ const log = (msg: string) => console.log(`${new Date().toISOString()} gateway: $
  * Runs until SIGTERM/SIGINT or until the STOP marker appears. Every "won't run" path exits 0:
  * the launchd job uses KeepAlive.SuccessfulExit=false, so only crashes are respawned.
  */
+/**
+ * The owner's git author identity for host shells (ADR-0067), which cannot read ~/.gitconfig:
+ * only user.name and user.email, read once by the gateway.
+ */
+function ownerGitIdentity(): Record<string, string> {
+  const get = (key: string) => {
+    try {
+      return execFileSync("git", ["config", "--global", "--get", key], {
+        encoding: "utf8",
+        timeout: 5000,
+      }).trim();
+    } catch {
+      return "";
+    }
+  };
+  const name = get("user.name");
+  const email = get("user.email");
+  return {
+    ...(name ? { GIT_AUTHOR_NAME: name, GIT_COMMITTER_NAME: name } : {}),
+    ...(email ? { GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_EMAIL: email } : {}),
+  };
+}
+
 export function runGateway(home: string): Promise<number> {
+  let identity: Record<string, string> | undefined;
   const paths = homePaths(home);
   mkdirSync(paths.runDir, { recursive: true, mode: 0o700 });
 
@@ -301,7 +326,20 @@ export function runGateway(home: string): Promise<number> {
         };
       },
     },
+    // ADR-0066: card runs with their own CLI config folder sign in with the same token.
+    claudeToken: () =>
+      existsSync(paths.vaultDb) && getVault().status(CLAUDE_CONTAINER_TOKEN).set
+        ? {
+            CLAUDE_CODE_OAUTH_TOKEN: getVault().resolve(
+              CLAUDE_CONTAINER_TOKEN,
+              "provider:cli-claude/session",
+            ),
+          }
+        : undefined,
     budget,
+    // ADR-0067 level 5: push_branch runs git here, in a folder only the gateway reads.
+    gitPush: (input) => pushBranch({ ...input, tmpRoot: join(home, "run") }),
+    gitIdentity: () => (identity ??= ownerGitIdentity()),
     // Price list for CLIs that report tokens only; read per run, so edits apply at once.
     price: (model, usage) => costOf(loadPricing(home), model, usage),
     db,
@@ -389,6 +427,7 @@ export function runGateway(home: string): Promise<number> {
     let working: Promise<unknown> | undefined;
     let delivering = false;
     let monitoring = false;
+    let watchingStalls = false;
     let sweepingApps = false;
     let updating = false;
     let ticks = 0;
@@ -471,6 +510,16 @@ export function runGateway(home: string): Promise<number> {
           .catch((err) => log(`monitor error: ${(err as Error).message}`))
           .finally(() => {
             monitoring = false;
+          });
+      }
+      // Stall watcher (ADR-0066): cheap checks; a stalled chain gets one boss notice.
+      if (!watchingStalls) {
+        watchingStalls = true;
+        orchestrator
+          .watchStalls()
+          .catch((err) => log(`stall watcher error: ${(err as Error).message}`))
+          .finally(() => {
+            watchingStalls = false;
           });
       }
       if (apps && !sweepingApps && ticks % APPS_EVERY_TICKS === 0) {

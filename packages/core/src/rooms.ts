@@ -1,8 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { type Db, transaction } from "./db/database.ts";
+import { getTask } from "./queue.ts";
+import { cardHolder, cardKey } from "./sessions.ts";
 import { appendMessage } from "./threads.ts";
 
 // Agent rooms (ADR-0032): a bounded, turn-based discussion kept in a hidden thread.
+
+/** What a room settled (ADR-0066 part 4); stored on the room and commented on the card. */
+export interface RoomOutcome {
+  decision: string;
+  decidedBy: string;
+  openPoints: string[];
+}
+
+/** Fallbacks: an outcome is never empty. */
+export const NOT_STATED = "not stated";
+export const ROOM_FAILED = "no decision: room failed";
 
 export interface Room {
   id: string;
@@ -15,7 +28,14 @@ export interface Room {
   turnsDone: number;
   createdAt: number;
   closedAt: number | null;
+  outcome: RoomOutcome | null;
 }
+
+const parseOutcome = (raw: unknown): RoomOutcome | null => {
+  if (typeof raw !== "string") return null;
+  const o = JSON.parse(raw) as { decision: string; decided_by: string; open_points: string[] };
+  return { decision: o.decision, decidedBy: o.decided_by, openPoints: o.open_points };
+};
 
 const toRoom = (r: Record<string, unknown>): Room => ({
   id: r.id as string,
@@ -28,6 +48,7 @@ const toRoom = (r: Record<string, unknown>): Room => ({
   turnsDone: Number(r.turns_done),
   createdAt: Number(r.created_at),
   closedAt: r.closed_at === null ? null : Number(r.closed_at),
+  outcome: parseOutcome(r.outcome),
 });
 
 export function openRoom(
@@ -115,25 +136,66 @@ export function recordTurn(
   });
 }
 
-/** Ends the room; the opener's decision (if any) is its closing message. */
-export function closeRoom(db: Db, roomId: string, decision?: string, now = Date.now()): void {
-  transaction(db, () => {
+/** The card comment for an outcome: decision, who decided, open points as a short list. */
+export function outcomeText(topic: string, o: RoomOutcome): string {
+  return [
+    `Room outcome: ${topic}`,
+    `Decision: ${o.decision}`,
+    `Decided by: ${o.decidedBy}`,
+    o.openPoints.length
+      ? `Open points:\n${o.openPoints.map((p) => `- ${p}`).join("\n")}`
+      : "Open points: none",
+  ].join("\n");
+}
+
+/**
+ * Ends the room with its outcome (ADR-0066 part 4): the decision is the room's closing message,
+ * the outcome is stored on the room and commented on the card of the opener's root (never in a
+ * chat). Blank fields fall back, so an outcome is never empty. Returns undefined when the room
+ * was already closed.
+ */
+export function closeRoom(
+  db: Db,
+  roomId: string,
+  input: { decision: string; decidedBy?: string; openPoints?: string[] },
+  now = Date.now(),
+): RoomOutcome | undefined {
+  return transaction(db, () => {
     const room = getRoom(db, roomId);
-    if (!room || room.closedAt !== null) return;
-    if (decision) {
-      appendMessage(
-        db,
-        {
-          threadId: roomId,
-          role: "agent",
-          author: room.openerAgentId,
-          channel: "system",
-          content: decision,
-        },
-        now,
-      );
+    if (!room || room.closedAt !== null) return undefined;
+    const outcome: RoomOutcome = {
+      decision: input.decision.trim() || NOT_STATED,
+      decidedBy: input.decidedBy?.trim() || room.openerAgentId,
+      openPoints: (input.openPoints ?? []).map((p) => p.trim()).filter(Boolean),
+    };
+    appendMessage(
+      db,
+      {
+        threadId: roomId,
+        role: "agent",
+        author: room.openerAgentId,
+        channel: "system",
+        content: outcome.decision,
+      },
+      now,
+    );
+    db.prepare("UPDATE rooms SET closed_at = ?, outcome = ? WHERE id = ?").run(
+      now,
+      JSON.stringify({
+        decision: outcome.decision,
+        decided_by: outcome.decidedBy,
+        open_points: outcome.openPoints,
+      }),
+      roomId,
+    );
+    const opener = getTask(db, room.openerTaskId);
+    const card = opener && cardHolder(db, cardKey(opener));
+    if (card) {
+      db.prepare(
+        "INSERT INTO task_comments (task_id, text, author, room_id, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(card.id, outcomeText(room.topic, outcome), room.openerAgentId, roomId, now);
     }
-    db.prepare("UPDATE rooms SET closed_at = ? WHERE id = ?").run(now, roomId);
+    return outcome;
   });
 }
 

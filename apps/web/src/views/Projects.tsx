@@ -1,6 +1,17 @@
 import { Plus, Trash2 } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
+import {
+  classPayload,
+  type Entry,
+  type ProjectClass,
+  type Row,
+  siteLists,
+  toLists,
+  toRows,
+} from "../accounts.ts";
 import { api } from "../api.ts";
+import { EnvToggle } from "../components/EnvToggle.tsx";
+import { GitToken } from "../components/GitToken.tsx";
 import { Confirm, Modal } from "../components/Modal.tsx";
 import { Sites } from "../components/Sites.tsx";
 import { t } from "../i18n.ts";
@@ -97,12 +108,18 @@ export function Projects() {
 
 function NewProject(props: { workspaces: string[]; onClose: () => void; onCreated: () => void }) {
   const [f, setF] = useState({ slug: "", name: "", workspace: props.workspaces[0] ?? "" });
+  // ADR-0067: a new project must choose its class.
+  const [cls, setCls] = useState<ProjectClass | null>(null);
   const [error, setError] = useState<string>();
   const submit = async (e: Event) => {
     e.preventDefault();
     setError(undefined);
+    if (!cls) {
+      setError(t("projects.classRequired"));
+      return;
+    }
     try {
-      await api("/api/projects", { method: "POST", body: f });
+      await api("/api/projects", { method: "POST", body: { ...f, class: cls } });
       props.onCreated();
     } catch (err) {
       setError((err as Error).message);
@@ -156,6 +173,7 @@ function NewProject(props: { workspaces: string[]; onClose: () => void; onCreate
           </datalist>
           <span class="muted small">{t("projects.workspaceHelp")}</span>
         </label>
+        <ClassPicker name="new-project-class" value={cls} onChange={setCls} />
         {error && <p class="error">{error}</p>}
       </form>
     </Modal>
@@ -180,31 +198,55 @@ export const CHANNELS = [
   { id: "repository", label: t("projects.channel.repository") },
 ];
 
-// Channels with their own editor (several logins each, ADR-0047): kept out of the account rows,
-// and carried over unchanged when the rows are saved.
-export const SITE_CHANNELS = ["wordpress"];
-
-/** One row per channel; its value holds that channel's entries, one per line. */
-export type Row = { channel: string; value: string };
-export const toRows = (lists: Record<string, string[]>): Row[] =>
-  Object.entries(lists)
-    .filter(([channel]) => !SITE_CHANNELS.includes(channel))
-    .map(([channel, values]) => ({ channel, value: values.join("\n") }));
-/** The site lists of `lists`, to send back with edited account rows. */
-export const siteLists = (lists: Record<string, string[]>): Record<string, string[]> =>
-  Object.fromEntries(Object.entries(lists).filter(([c]) => SITE_CHANNELS.includes(c)));
-export const toLists = (rows: Row[]): Record<string, string[]> => {
-  const out: Record<string, string[]> = {};
-  for (const r of rows) {
-    const channel = r.channel.trim().toLowerCase();
-    const values = r.value
-      .split("\n")
-      .map((v) => v.trim())
-      .filter(Boolean);
-    if (channel && values.length) out[channel] = [...new Set([...(out[channel] ?? []), ...values])];
-  }
-  return out;
-};
+/**
+ * The project's class with its explanation (ADR-0067). `unset`: the project has none yet and
+ * counts as secured until the owner picks one.
+ */
+function ClassPicker(props: {
+  name: string;
+  value: ProjectClass | null;
+  unset?: boolean;
+  onChange: (c: ProjectClass) => void;
+}) {
+  const options = [
+    {
+      id: "secured" as const,
+      label: t("projectClass.secured"),
+      help: t("projectClass.secured.help"),
+    },
+    {
+      id: "experimental" as const,
+      label: t("projectClass.experimental"),
+      help: t("projectClass.experimental.help"),
+    },
+  ];
+  return (
+    <div class="field">
+      {t("projects.class")}
+      {props.unset && props.value === null && (
+        <span>
+          <span class="chip local">{t("projectClass.unset")}</span>
+        </span>
+      )}
+      <div class="level-pick">
+        {options.map((o) => (
+          <label key={o.id}>
+            <input
+              type="radio"
+              name={props.name}
+              checked={props.value === o.id}
+              onChange={() => props.onChange(o.id)}
+            />
+            <span>
+              <strong>{o.label}</strong>
+              <span class="muted small">{o.help}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /** One list per channel; a client can have several of each (two Instagram accounts, …). */
 export function Accounts(props: {
@@ -240,9 +282,8 @@ export function Accounts(props: {
               <option value={r.channel}>{r.channel}</option>
             )}
           </select>
-          <textarea
+          <input
             class="input"
-            rows={Math.max(1, r.value.split("\n").length)}
             placeholder={
               r.channel === "repository"
                 ? "https://github.com/owner/repo"
@@ -252,6 +293,7 @@ export function Accounts(props: {
             value={r.value}
             onInput={(e) => set(i, { value: e.currentTarget.value })}
           />
+          <EnvToggle env={r.env} onChange={(env) => set(i, { env })} />
           <button
             type="button"
             class="btn ghost"
@@ -266,13 +308,14 @@ export function Accounts(props: {
         <button
           type="button"
           class="btn ghost"
-          onClick={() => props.onChange([...props.rows, { channel: "", value: "" }])}
+          onClick={() => props.onChange([...props.rows, { channel: "", value: "", env: "live" }])}
         >
           <Plus class="icon" />
           {t("projects.addAccount")}
         </button>
       </div>
       <span class="muted small">{props.help ?? t("projects.accountsHelp")}</span>
+      <span class="muted small">{t("env.help")}</span>
     </div>
   );
 }
@@ -285,7 +328,17 @@ function EditProject(props: {
   onSaved: () => void;
   onDeleted: (movedTo: string) => void;
 }) {
-  const [f, setF] = useState<{ name: string; workspace: string; doc: string; rows: Row[] }>();
+  const [f, setF] = useState<{
+    name: string;
+    workspace: string;
+    doc: string;
+    rows: Row[];
+    class: ProjectClass | null;
+    spend: boolean;
+  }>();
+  // As loaded: an unset class shows "not chosen yet"; a spend switch on is switched off when
+  // the project leaves experimental.
+  const [loaded, setLoaded] = useState<{ class: ProjectClass | null; spend: boolean }>();
   const [deleting, setDeleting] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string }>();
   useEffect(() => {
@@ -293,16 +346,21 @@ function EditProject(props: {
       name: string;
       workspace: string;
       doc: string;
-      integrations: Record<string, string[]>;
+      entries: Record<string, Entry[]>;
+      class: ProjectClass | null;
+      spend_without_asking: boolean;
     }>(`/api/projects/${props.slug}`)
-      .then((p) =>
+      .then((p) => {
+        setLoaded({ class: p.class, spend: p.spend_without_asking });
         setF({
           name: p.name,
           workspace: p.workspace,
           doc: p.doc,
-          rows: toRows(p.integrations ?? {}),
-        }),
-      )
+          rows: toRows(p.entries ?? {}),
+          class: p.class,
+          spend: p.spend_without_asking,
+        });
+      })
       .catch((err: Error) => setStatus({ ok: false, text: err.message }));
   }, [props.slug]);
   const save = async (e: Event) => {
@@ -310,16 +368,17 @@ function EditProject(props: {
     if (!f) return;
     setStatus(undefined);
     try {
-      const { rows, ...rest } = f;
+      const { rows, class: cls, spend, ...rest } = f;
       // Sites are edited on their own (and may have changed meanwhile): keep the current ones.
-      const current = await api<{ integrations: Record<string, string[]> }>(
+      const current = await api<{ entries: Record<string, Entry[]> }>(
         `/api/projects/${props.slug}`,
       );
       await api(`/api/projects/${props.slug}`, {
         method: "PUT",
         body: {
           ...rest,
-          integrations: { ...toLists(rows), ...siteLists(current.integrations ?? {}) },
+          ...classPayload(cls, spend, loaded?.spend === true),
+          integrations: { ...toLists(rows), ...siteLists(current.entries ?? {}) },
         },
       });
       props.onSaved();
@@ -390,6 +449,29 @@ function EditProject(props: {
               ))}
             </datalist>
           </label>
+          <ClassPicker
+            name="edit-project-class"
+            value={f.class}
+            unset={loaded?.class === null}
+            onChange={(c) => setF({ ...f, class: c })}
+          />
+          <p class="muted small">
+            {t("projects.ceiling", { n: f.class === "experimental" ? 5 : 4 })}{" "}
+            {t("projects.ceilingHelp")}
+          </p>
+          {f.class === "experimental" && (
+            <div class="field">
+              <label class="row">
+                <input
+                  type="checkbox"
+                  checked={f.spend}
+                  onChange={() => setF({ ...f, spend: !f.spend })}
+                />
+                {t("projects.spend")}
+              </label>
+              <span class="muted small">{t("projects.spendHelp")}</span>
+            </div>
+          )}
           <Accounts rows={f.rows} onChange={(rows) => setF({ ...f, rows })} />
           <label class="field">
             PROJECT.md
@@ -405,6 +487,7 @@ function EditProject(props: {
       )}
       {/* Outside the form: sites save on their own, not with the Save button. */}
       {f && <Sites slug={props.slug} />}
+      {f && <GitToken slug={props.slug} />}
     </Modal>
   );
 }

@@ -43,6 +43,11 @@ tools:
     - gsc_claim_check
     - gsc_multi_property_health
   write: [gsc_sitemap_submit, gsc_index_notify, gsc_index_notify_batch]
+  # ADR-0067: submissions reach Google directly.
+  class:
+    gsc_sitemap_submit: live
+    gsc_index_notify: live
+    gsc_index_notify_batch: live
 # In a project run only the client's own sites (project.yaml integrations.search-console) pass;
 # gsc_properties_list lists every client, so it is refused there.
 scope:

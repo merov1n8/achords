@@ -38,13 +38,15 @@ export function startRun(
     pgid?: number;
     /** Phase 4: "api" when the run is billed to an API key. */
     billing?: "subscription" | "api";
+    /** ADR-0066: the run continues the card's CLI session. */
+    resumed?: boolean;
   },
   now = Date.now(),
 ): Run {
   const row = db
     .prepare(
-      `INSERT INTO runs (id, task_id, agent_id, provider, model, pid, pgid, started_at, billing)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO runs (id, task_id, agent_id, provider, model, pid, pgid, started_at, billing,
+         resumed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
@@ -56,6 +58,7 @@ export function startRun(
       input.pgid ?? null,
       now,
       input.billing ?? "subscription",
+      input.resumed ? 1 : 0,
     );
   return toRun(row as Record<string, unknown>);
 }

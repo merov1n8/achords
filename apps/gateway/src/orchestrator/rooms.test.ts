@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createThread,
+  getRoom,
   getTask,
+  listComments,
   listMessages,
   listRooms,
   listThreads,
@@ -38,8 +40,9 @@ describe("agent rooms (ADR-0032)", () => {
       ["boss", ""],
       [
         "dev",
-        "tools: [Read, Edit, Bash]\nshell:\n  allow: [ls]\ndelegation:\n  can_delegate_to: [qa, writer]",
+        "tools: [Read, Edit, Bash]\nshell:\n  allow: [ls]\ndelegation:\n  can_delegate_to: [qa, writer]\n  accepts_from: [lead]",
       ],
+      ["lead", "tools: [Read]\ndelegation:\n  can_delegate_to: [dev]"],
       ["qa", "tools: [Read, Grep, Write]\ndelegation:\n  accepts_from: [dev]"],
       ["writer", "tools: [Read]\ndelegation:\n  accepts_from: [dev]"],
       ["stranger", "tools: [Read]"],
@@ -54,7 +57,7 @@ describe("agent rooms (ADR-0032)", () => {
     db = openCoreDatabase(join(home, "core.db"));
     calls = [];
     behave = () => result();
-    const p: ModelProvider = {
+    provider = {
       id: "cli-claude",
       async run(req) {
         const row = db.prepare("SELECT id FROM tasks WHERE status = 'claimed'").get();
@@ -63,14 +66,20 @@ describe("agent rooms (ADR-0032)", () => {
         return behave(req, task);
       },
     };
-    orch = createOrchestrator({
+    orch = build();
+  });
+  let provider: ModelProvider;
+  const build = (extra: Partial<Parameters<typeof createOrchestrator>[0]> = {}) => {
+    const o = createOrchestrator({
       db,
       home,
-      providers: { "cli-claude": p },
+      providers: { "cli-claude": provider },
       hub: { url: "http://127.0.0.1:1", tokens: createRunTokens(), serverEntry: "/x.ts" },
+      ...extra,
     });
-    orch.syncAgents();
-  });
+    o.syncAgents();
+    return o;
+  };
   afterEach(() => {
     db.close();
     rmSync(home, { recursive: true, force: true });
@@ -179,5 +188,198 @@ describe("agent rooms (ADR-0032)", () => {
     );
     await drain();
     expect(calls[0]?.req.allowedTools).toContain("mcp__achords__open_room");
+  });
+
+  describe("outcomes on the card (ADR-0066 part 4)", () => {
+    const start = (agent = "dev") => {
+      const thread = createThread(db, {});
+      const root = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent, title: "Landing", instructions: "go" },
+      );
+      if (!root.ok) throw new Error(root.reason);
+      return { thread, rootId: root.taskId };
+    };
+    /** dev opens a one-round room with qa, then `decide` runs in its resumed run. */
+    const discuss = (decide: (taskId: string, roomId: string) => RunResult) => {
+      behave = (_req, task) => {
+        if (task.roomId) return result({ text: "qa: short" });
+        if (task.assigneeAgentId !== "dev") return result({ text: "lead done" });
+        const [room] = listRooms(db);
+        if (!room)
+          orch.openRoom(
+            { from: "task", taskId: task.id },
+            { ...opening, participants: ["qa"], rounds: 1 },
+          );
+        return room ? decide(task.id, room.id) : result({ text: "waiting" });
+      };
+    };
+    const hubTools = (i: number) => calls[i]?.req.allowedTools ?? [];
+    const chatText = (threadId: string) =>
+      listMessages(db, threadId)
+        .map((m) => m.content)
+        .join("\n");
+
+    it("with the tool, the outcome is stored and commented on the card; nothing in the chat", async () => {
+      const { thread, rootId } = start();
+      let recorded: unknown;
+      discuss((taskId, roomId) => {
+        recorded = orch.recordRoomOutcome(
+          { from: "task", taskId },
+          {
+            room: roomId,
+            decision: "Short headline.",
+            decidedBy: "dev and qa",
+            openPoints: ["subline"],
+          },
+        );
+        return result({ text: "Landing done." });
+      });
+      await drain();
+      expect(recorded).toEqual({ ok: true });
+      // Only the opener's run after the room gets the tool.
+      expect(calls.map((c) => c.task.assigneeAgentId)).toEqual(["dev", "qa", "dev"]);
+      expect(hubTools(0)).not.toContain("mcp__achords__record_room_outcome");
+      expect(hubTools(2)).toContain("mcp__achords__record_room_outcome");
+      expect(calls[2]?.req.prompt).toContain("record_room_outcome (room ");
+      const [room] = listRooms(db);
+      expect(room?.outcome).toEqual({
+        decision: "Short headline.",
+        decidedBy: "dev and qa",
+        openPoints: ["subline"],
+      });
+      expect(listComments(db, rootId)).toEqual([
+        expect.objectContaining({
+          author: "dev",
+          roomId: room?.id,
+          text: expect.stringContaining("Decision: Short headline.\nDecided by: dev and qa"),
+        }),
+      ]);
+      // Nothing is posted to the chat (or Telegram, which relays the chat).
+      expect(chatText(thread.id)).not.toMatch(/Room outcome|Short headline/);
+    });
+
+    it("refuses outcomes for rooms the caller did not open, or that are still going on", () => {
+      const { rootId } = start();
+      const other = start();
+      const opened = orch.openRoom({ from: "task", taskId: rootId }, opening);
+      if (!opened.ok) throw new Error(opened.reason);
+      const ask = (taskId: string) =>
+        orch.recordRoomOutcome(
+          { from: "task", taskId },
+          { room: opened.roomId, decision: "x", decidedBy: "dev", openPoints: [] },
+        );
+      expect(ask(other.rootId)).toMatchObject({ ok: false, reason: /not one you opened/ });
+      expect(ask(rootId)).toMatchObject({ ok: false, reason: /still going on/ });
+      expect(getRoom(db, opened.roomId)?.closedAt).toBeNull();
+    });
+
+    it("without the tool, the opener's result is the decision", async () => {
+      const { thread, rootId } = start();
+      discuss(() => result({ text: "We go with the short headline." }));
+      await drain();
+      expect(listRooms(db)[0]?.outcome).toEqual({
+        decision: "We go with the short headline.",
+        decidedBy: "dev",
+        openPoints: ["not stated"],
+      });
+      expect(listComments(db, rootId)[0]?.text).toContain("Open points:\n- not stated");
+      expect(chatText(thread.id)).not.toContain("Room outcome");
+    });
+
+    it("a failed room records no decision", async () => {
+      const { rootId } = start();
+      discuss(() => result({ text: "Decided without them." }));
+      const inner = behave;
+      behave = (req, task) =>
+        task.roomId ? result({ ok: false, stopReason: "error", error: "boom" }) : inner(req, task);
+      await drain();
+      expect(listRooms(db)[0]?.outcome?.decision).toBe("no decision: room failed");
+      expect(listComments(db, rootId)).toHaveLength(1);
+      // The opener resumes but the room is closed already: no tool, no second outcome.
+      expect(hubTools(calls.length - 1)).not.toContain("mcp__achords__record_room_outcome");
+    });
+
+    it("a later successor of the card sees the outcome", async () => {
+      const { thread } = start();
+      discuss(() => result({ text: "Short headline." }));
+      await drain();
+      behave = () => result({ text: "follow-up done" });
+      const next = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: "writer", title: "Follow-up", instructions: "polish" },
+      );
+      if (!next.ok) throw new Error(next.reason);
+      await drain();
+      const last = calls.at(-1);
+      expect(last?.task.id).toBe(next.taskId);
+      expect(last?.req.prompt).toContain(
+        "Room outcomes on this card (newest first):\nRoom outcome: Hero copy\nDecision: Short headline.",
+      );
+      expect(last?.req.prompt).not.toContain("Owner's comments");
+    });
+
+    it("a child opener's outcome lands on the root's card and reaches the root's resumed session", async () => {
+      let n = 0;
+      orch = build({ claudeToken: () => ({ CLAUDE_CODE_OAUTH_TOKEN: "tok" }) });
+      const { thread, rootId } = start("lead");
+      const inner = (_req: RunRequest, task: Task) => {
+        if (task.assigneeAgentId === "lead" && !task.parentId && !listRooms(db).length) {
+          orch.delegate(
+            { from: "task", taskId: task.id },
+            { agent: "dev", title: "Hero", instructions: "x" },
+          );
+          return result({ text: "waiting" });
+        }
+        return result({ text: "Short headline." });
+      };
+      discuss(() => result({ text: "Short headline." }));
+      const dev = behave;
+      behave = (req, task) => {
+        n++;
+        const r = task.assigneeAgentId === "dev" || task.roomId ? dev(req, task) : inner(req, task);
+        return { ...r, sessionId: req.session?.resume ?? `s-${n}` };
+      };
+      await drain();
+      expect(calls.map((c) => c.task.assigneeAgentId)).toEqual([
+        "lead",
+        "dev",
+        "qa",
+        "dev",
+        "lead",
+      ]);
+      const child = calls[1]?.task.id as string;
+      expect(listComments(db, child)).toEqual([]);
+      expect(listComments(db, rootId)).toEqual([expect.objectContaining({ author: "dev" })]);
+      const wake = calls.at(-1)?.req;
+      expect(wake?.session).toEqual({ resume: "s-1" });
+      expect(wake?.prompt).toContain("New room outcomes on this card (newest first):");
+      expect(chatText(thread.id)).not.toContain("Room outcome");
+    });
+
+    it("a card run sees at most 5 outcomes, newest first", async () => {
+      const { thread, rootId } = start();
+      behave = () => result();
+      await drain();
+      for (let i = 1; i <= 6; i++) {
+        db.prepare(
+          "INSERT INTO task_comments (task_id, text, author, room_id, created_at) VALUES (?, ?, 'dev', ?, ?)",
+        ).run(rootId, `Room outcome: topic ${i}`, `r${i}`, i);
+      }
+      const next = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: "writer", title: "Follow-up", instructions: "polish" },
+      );
+      if (!next.ok) throw new Error(next.reason);
+      await drain();
+      const prompt = calls.at(-1)?.req.prompt ?? "";
+      expect(prompt.match(/Room outcome: topic \d/g)).toEqual([
+        "Room outcome: topic 6",
+        "Room outcome: topic 5",
+        "Room outcome: topic 4",
+        "Room outcome: topic 3",
+        "Room outcome: topic 2",
+      ]);
+    });
   });
 });

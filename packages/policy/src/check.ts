@@ -78,9 +78,49 @@ const SHELL_META = /[;&|`$<>(){}\n\r\\*?[\]!~]/;
 
 const tokens = (cmd: string) => cmd.trim().split(/\s+/).filter(Boolean);
 
+const FORCE_FLAG = /^(-f|--force|--force-with-lease(=.*)?|--mirror)$/;
+// A cluster of short options (`-uf`) and a `+` refspec force as well.
+const FORCE_SHORT = /^-[a-zA-Z]*f[a-zA-Z]*$/;
+
+/**
+ * The arguments after `push` of every `git … push` in a command line (split at shell operators;
+ * git's own `-C <dir>` and `-c <key=value>` before the subcommand are skipped).
+ */
+export function gitPushArgs(command: string): string[][] {
+  return command.split(/&&|\|\||[;|\n]/).flatMap((segment) => {
+    const argv = tokens(segment);
+    let i = argv.findIndex((a) => a === "git" || a.endsWith("/git"));
+    if (i < 0) return [];
+    for (i++; i < argv.length; i++) {
+      const a = argv[i] as string;
+      if (a === "-C" || a === "-c") i++;
+      else if (!a.startsWith("-")) break;
+    }
+    return argv[i] === "push" ? [argv.slice(i + 1)] : [];
+  });
+}
+
+/**
+ * ADR-0067: force push and history rewrite are refused at every level, under every approval.
+ * Returns the reason, or undefined.
+ */
+export function historyRewrite(command: string): string | undefined {
+  const argv = tokens(command);
+  const git = argv.indexOf("git");
+  const sub = git < 0 ? undefined : argv[git + 1];
+  if (sub === "filter-branch" || sub === "filter-repo") return `git ${sub} rewrites history`;
+  const force = (a: string) => FORCE_FLAG.test(a) || FORCE_SHORT.test(a) || a.startsWith("+");
+  if (gitPushArgs(command).some((args) => args.some(force))) {
+    return "force push is refused at every level";
+  }
+  return undefined;
+}
+
 /** Allow-listed commands run directly (extra arguments allowed); everything else needs approval. */
 export function checkShell(m: Manifest, command: string): ShellDecision {
   if (!m.shell) return { decision: "deny", reason: "agent has no shell access" };
+  const rewrite = historyRewrite(command);
+  if (rewrite) return { decision: "deny", reason: rewrite };
   if (SHELL_META.test(command)) {
     return { decision: "approval", reason: "shell metacharacters need approval" };
   }

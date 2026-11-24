@@ -45,6 +45,14 @@ export function RunDetails(props: { summary: ThreadSummary; onStop: () => void }
               out: formatTokens(s.tokensOut),
             })}
           </span>
+          {s.resumedIn + s.resumedCached > 0 && (
+            <span class="s">
+              {t("chat.resumedRead", {
+                in: formatTokens(s.resumedIn + s.resumedCached),
+                cached: formatTokens(s.resumedCached),
+              })}
+            </span>
+          )}
         </div>
         <div class="card kpi">
           <span class="k">{t("chat.cost")}</span>
@@ -74,6 +82,24 @@ export function RunDetails(props: { summary: ThreadSummary; onStop: () => void }
           ))}
         </ul>
       </div>
+      {(s.parentQuestions?.length ?? 0) > 0 && (
+        <div class="card kpi participants">
+          <div class="k">{t("chat.parentQuestions")}</div>
+          <ul class="comments">
+            {s.parentQuestions?.map((q) => (
+              <li key={q.task}>
+                <div class="muted small">
+                  {t("chat.parentAsked", { agent: q.name, title: q.title })}
+                </div>
+                <div class="content">{q.question}</div>
+                <div class={`content ${q.answer === null ? "muted small" : ""}`}>
+                  {q.answer === null ? t("chat.parentOpen") : `→ ${q.answer}`}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {hasOpenWork(s) && (
         <button type="button" class="btn danger stop-run" onClick={props.onStop}>
           {t("chat.stop")}

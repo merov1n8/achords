@@ -1,9 +1,16 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createThread, getTask, listMessages, openCoreDatabase } from "@achords/core";
+import {
+  createThread,
+  getCardSession,
+  getTask,
+  listMessages,
+  openCoreDatabase,
+  sessionDir,
+} from "@achords/core";
 import { runContainerPrefix } from "@achords/platform";
-import { loadCatalog } from "@achords/policy";
+import { GIT_SHELL_ENV, loadCatalog } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Prepared } from "../container.ts";
@@ -152,7 +159,11 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     });
     expect(call?.sharedExists).toBe(true);
     expect(existsSync(shared)).toBe(false); // removed after the run
-    expect(call?.req.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oauth-token-value" });
+    expect(call?.req.env).toEqual({
+      ...GIT_SHELL_ENV,
+      CLAUDE_CODE_OAUTH_TOKEN: "oauth-token-value",
+      CLAUDE_CONFIG_DIR: sessionDir(home, taskId, "web"),
+    });
     expect(call?.req.appendSystemPrompt).toMatch(/isolated Linux container/);
   });
 
@@ -203,6 +214,36 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     expect(JSON.stringify(call?.mcp)).not.toContain("sk-secret");
   });
 
+  it("mounts the card's session folder as the CLI config and resumes the session (ADR-0066)", async () => {
+    agent('network: {allow: ["*"]}');
+    const { orch, taskId, threadId } = start({
+      providers: {
+        "cli-claude": {
+          id: "cli-claude",
+          run: async (req) => {
+            calls.push({ req });
+            if (calls.length === 1) orch.askOwner({ from: "task", taskId }, "Which site?");
+            return { ...result(), sessionId: req.session?.resume ?? "s-1" };
+          },
+        },
+      },
+    });
+    await orch.workOnce();
+    const dir = sessionDir(home, taskId, "web");
+    expect(getCardSession(db, { card: taskId, agent: "web", project: "" })).toMatchObject({
+      sessionId: "s-1",
+      trust: "open-web",
+    });
+    await orch.handleMessage(threadId, "example.com", "web");
+    await orch.workOnce();
+    const second = calls[1]?.req;
+    expect(second?.session).toEqual({ resume: "s-1" });
+    expect(second?.env?.CLAUDE_CONFIG_DIR).toBe(dir);
+    expect(second?.container?.mounts).toContainEqual({ path: dir, readonly: false });
+    // Nothing else of the host's config: only this card's folder for this agent.
+    expect(second?.container?.mounts.map((m) => m.path)).not.toContain(join(home, "sessions"));
+  });
+
   it("shares the run's skill folders read-only (ADR-0053), never another agent's", async () => {
     agent('network: {allow: ["*"]}');
     for (const scope of ["shared", "agents/web", "agents/other"]) {
@@ -227,7 +268,7 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
     await orch.workOnce();
     expect(calls[0]?.req.container).toBeUndefined();
     expect(calls[0]?.mcp?.achords?.command).toBe(process.execPath);
-    expect(calls[0]?.req.env).toBeUndefined();
+    expect(calls[0]?.req.env).toEqual(GIT_SHELL_ENV);
     agent("network: {allow: [example.com]}");
     const second = start();
     await second.orch.workOnce();
@@ -259,7 +300,11 @@ describe("agent runs in an Apple container (ADR-0051)", () => {
       billing: () => ({ mode: "api", env: { ANTHROPIC_API_KEY: "sk-ant" } }),
     });
     await api.orch.workOnce();
-    expect(calls[0]?.req.env).toEqual({ ANTHROPIC_API_KEY: "sk-ant" });
+    expect(calls[0]?.req.env).toEqual({
+      ...GIT_SHELL_ENV,
+      ANTHROPIC_API_KEY: "sk-ant",
+      CLAUDE_CONFIG_DIR: sessionDir(home, api.taskId, "web"),
+    });
     expect(calls[0]?.req.container).toBeDefined();
   });
 

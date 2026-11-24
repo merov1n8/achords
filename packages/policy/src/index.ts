@@ -3,6 +3,18 @@ export const PACKAGE_NAME = "@achords/policy";
 
 export { agentSummary } from "./agent-doc.ts";
 export {
+  alwaysAskCommand,
+  applyGrants,
+  deletesOutside,
+  expandPath,
+  type Grant,
+  inFolders,
+  keyFolder,
+  PERMISSION_KINDS,
+  type PermissionKind,
+  refusedCommand,
+} from "./approvals.ts";
+export {
   accountRef,
   accountRefs,
   allowedIntegrationTools,
@@ -25,8 +37,29 @@ export {
   siteCredentials,
   siteSlug,
   siteStatus,
+  TOOL_CLASSES,
+  type ToolClass,
+  toolClass,
 } from "./catalog.ts";
 export * from "./check.ts";
+export {
+  type CompiledIntegration,
+  type CompiledLevel,
+  type CompileInput,
+  compileLevel,
+  GIT_SECRET,
+  gitConfigReads,
+  HOME_KEYS,
+  HOME_TOOLCHAINS,
+  hostSandboxSettings,
+  hostShellEnv,
+  levelConflicts,
+  REGISTRY_HOSTS,
+  type RunMode,
+  type SandboxKind,
+  SHELL_DENY,
+  symlinkTargets,
+} from "./compile.ts";
 export {
   AGENT_LIST_FIELDS,
   type AgentFields,
@@ -41,22 +74,55 @@ export {
   updateManifestModels,
   updateManifestName,
 } from "./edit.ts";
+export { GIT_REPO, GIT_SHELL_ENV, gitTokenId, pushTarget, validBranch } from "./git.ts";
 export {
+  ceilingOf,
+  type EffectiveLevel,
+  effectiveLevel,
+  type LevelOverride,
+  type LevelReason,
+  levelSchema,
+  loadOverrides,
+  MAX_LEVEL,
+  overrideRefusal,
+  saveOverrides,
+} from "./levels.ts";
+export { isSecured, LIVE_HINT, type LiveGuard, liveGuard, liveRefusal } from "./live.ts";
+export {
+  legacyBesideLevel,
   loadAgents,
   loadManifest,
   type Manifest,
   manifestSchema,
   parseManifest,
 } from "./manifest.ts";
-export { allowRules, siteOf, webFetchSettings } from "./permissions.ts";
+export {
+  type AgentPlan,
+  isLiteralCommand,
+  legacyRights,
+  levelRights,
+  planAgentMigration,
+  type Rights,
+  STARTING_LEVELS,
+  unityBinaries,
+  WITHOUT_LEVEL,
+  withinRights,
+} from "./migrate.ts";
+export { allowRules, openWeb, siteOf, webFetchSettings } from "./permissions.ts";
 export { costOf, loadPricing, type Pricing } from "./pricing.ts";
 export {
+  type AccountEntry,
+  type AccountListsInput,
   createProject,
+  type Env,
+  entryValues,
+  loadOwnAccountEntries,
   loadOwnAccounts,
   loadProjects,
   OWN,
   ownProject,
   type Project,
+  type ProjectClass,
   removeProject,
   saveOwnAccounts,
   updateProject,

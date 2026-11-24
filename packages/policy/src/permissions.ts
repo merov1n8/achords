@@ -82,3 +82,15 @@ export function webFetchSettings(network: string[]): string | undefined {
     hooks: { PreToolUse: [{ matcher: "WebFetch", hooks: [{ type: "command", command }] }] },
   });
 }
+
+/**
+ * Whether a run reads the open web (ADR-0066), the one definition for skills, memory and the
+ * publishing guard: the effective run allows any site, has WebSearch, or has full access. A
+ * WebFetch limited to named hosts (the project's own sites, ADR-0057) is not open web.
+ */
+export function openWeb(
+  run: { tools: string[]; network: { allow: string[] } },
+  elevated: boolean,
+): boolean {
+  return elevated || run.network.allow.includes("*") || run.tools.includes("WebSearch");
+}

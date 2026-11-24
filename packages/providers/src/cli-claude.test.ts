@@ -136,6 +136,12 @@ describe("cli-claude adapter", () => {
     ]);
   });
 
+  it("signals every stream event (ADR-0066 stall watcher)", async () => {
+    let events = 0;
+    await provider("todo").run(req({ onActivity: () => events++ }));
+    expect(events).toBeGreaterThan(2);
+  });
+
   it("reports usage, cost, session and subscription windows", async () => {
     const res = await provider().run(req());
     expect(res.usage).toEqual({
@@ -152,10 +158,42 @@ describe("cli-claude adapter", () => {
     ]);
   });
 
+  it("keeps the session and resumes it only when asked (ADR-0066)", async () => {
+    const id = "00000000-0000-0000-0000-000000000001";
+    await provider().run(req());
+    expect(JSON.parse(readFileSync(record, "utf8")).argv).toContain("--no-session-persistence");
+    await provider().run(req({ session: {} }));
+    const fresh = JSON.parse(readFileSync(record, "utf8")).argv as string[];
+    expect(fresh).not.toContain("--no-session-persistence");
+    expect(fresh).not.toContain("--resume");
+    const ok = await cliClaude({
+      command: [process.execPath, FAKE],
+      env: { FAKE_CLAUDE_RECORD: record, FAKE_CLAUDE_KNOWN: id },
+    }).run(req({ session: { resume: id } }));
+    expect(ok).toMatchObject({ ok: true, sessionId: id });
+    expect(JSON.parse(readFileSync(record, "utf8")).argv).toEqual(
+      expect.arrayContaining(["--resume", id]),
+    );
+  });
+
+  it("reports a resume the CLI rejects, so the caller can start afresh (ADR-0066)", async () => {
+    const res = await provider().run(req({ session: { resume: "gone" } }));
+    expect(res).toMatchObject({ ok: false, stopReason: "error", resumeRejected: true });
+    expect((await provider("crash").run(req())).resumeRejected).toBeUndefined();
+  });
+
   it("injects broker env only into the child process", async () => {
     await provider().run(req({ env: { ACHORDS_TEST_SECRET: "s3cret-value" } }));
     expect(JSON.parse(readFileSync(record, "utf8")).injected).toBe("s3cret-value");
     expect(process.env.ACHORDS_TEST_SECRET).toBeUndefined();
+  });
+
+  it("keeps the CLI's token and API key out of its Bash, hooks and MCP servers", async () => {
+    await provider().run(req({ env: { CLAUDE_CODE_OAUTH_TOKEN: "tok" } }));
+    expect(JSON.parse(readFileSync(record, "utf8")).scrub).toBe("1");
+    // Not even a run's own setting turns it off.
+    await provider().run(req({ env: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0" } }));
+    expect(JSON.parse(readFileSync(record, "utf8")).scrub).toBe("1");
   });
 
   it("uses an API key only in API mode, never a stray one on a subscription (Phase 4)", async () => {
@@ -269,6 +307,8 @@ describe("cli-claude adapter", () => {
         "type=bind,source=/srv/docs,target=/srv/docs,readonly",
         "-e",
         "ANTHROPIC_API_KEY",
+        "-e",
+        "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
         "-w",
         dir,
       ]);
@@ -289,8 +329,14 @@ describe("cli-claude adapter", () => {
         delete process.env.ACHORDS_TEST_HOST_ONLY;
       }
       const [argv] = recorded();
-      expect(argv?.filter((_, i) => argv[i - 1] === "-e")).toEqual(["ACHORDS_TEST_SECRET"]);
-      expect(JSON.parse(readFileSync(record, "utf8")).injected).toBe("tok");
+      expect(argv?.filter((_, i) => argv[i - 1] === "-e")).toEqual([
+        "ACHORDS_TEST_SECRET",
+        "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
+      ]);
+      expect(JSON.parse(readFileSync(record, "utf8"))).toMatchObject({
+        injected: "tok",
+        scrub: "1",
+      });
     });
 
     it("stops the container by name on cancel", async () => {

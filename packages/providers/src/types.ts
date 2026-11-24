@@ -41,10 +41,17 @@ export interface RunRequest {
    * arguments stay identical; only the listed folders exist inside, at the same paths.
    */
   container?: ContainerSpec;
+  /**
+   * ADR-0066: keep the CLI session (the config folder comes in `env` as CLAUDE_CONFIG_DIR) and
+   * continue `resume` when set. Without it the run leaves no session behind.
+   */
+  session?: { resume?: string };
   /** Called with the child PID (= its process group id) so it can be recorded for `achords kill`. */
   onSpawn?: (pid: number) => void;
   /** The agent's own checklist changed (done of total, the step in progress). */
   onProgress?: (p: RunProgress) => void;
+  /** ADR-0066: the run sent a stream event (the stall watcher's sign of life). */
+  onActivity?: () => void;
 }
 
 export interface RunProgress {
@@ -80,6 +87,8 @@ export interface RunResult {
   usage: Usage;
   windows: UsageWindow[];
   sessionId?: string;
+  /** The CLI did not find the session to resume (ADR-0066): run again with a fresh prompt. */
+  resumeRejected?: boolean;
   structured?: unknown;
   durationMs: number;
 }

@@ -31,6 +31,8 @@ export const workflowSchema = z
             approve: z.literal("owner").optional(),
             // ADR-0065: a finished card enters this column only with a passing report_checks.
             needs_checks: z.boolean().optional(),
+            // ADR-0066: the owner dropping a card here starts its assignee's run.
+            start: z.literal("assignee").optional(),
           })
           .strict(),
       )
@@ -68,6 +70,7 @@ transitions:
   - { from: review, to: done, by: role:qa, not: assignee }
   - { from: done, to: deployed, by: owner }
 on_enter:
+  in_progress: { start: assignee }   # the owner dropping a card here starts its agent
   review: { assign: role:qa }   # a QA agent gets it; with none, the owner reviews
 `;
 

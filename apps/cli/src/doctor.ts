@@ -8,6 +8,7 @@ import { detectPlatform, recommendModels } from "@achords/platform";
 import {
   type IntegrationStatus,
   integrationStatus,
+  legacyBesideLevel,
   loadAgents,
   loadCatalog,
   loadProjects,
@@ -43,6 +44,8 @@ export interface DoctorEnv {
   ollamaModels: () => Promise<string[] | undefined>;
   /** Integrations from the catalog (ADR-0034), checked against the service's PATH and vault. */
   integrations?: () => IntegrationStatus[];
+  /** Agents with a level that still set fields the level replaces (ADR-0067), with those fields. */
+  legacyBesideLevel?: () => string[];
 }
 
 /** One check per integration an agent uses: program, credentials, project setup. */
@@ -286,6 +289,16 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
       });
     }
   }
+  // A warning, not an error: the level wins and the old fields are ignored (ADR-0067).
+  const legacy = env.legacyBesideLevel?.() ?? [];
+  if (legacy.length) {
+    add({
+      name: t("cli.doctor.levels"),
+      level: "warn",
+      detail: t("cli.doctor.levelsLegacy", { agents: legacy.join("; ") }),
+      fix: t("cli.doctor.levelsFix"),
+    });
+  }
   // Optional (ADR-0014): only voice notes need it.
   const whisper = env.which("whisper-cli");
   add(
@@ -363,6 +376,18 @@ export function systemDoctorEnv(
         (id) => ids.has(id),
         (bin) => path.split(":").some((dir) => dir && existsSync(join(dir, bin))),
       );
+    },
+    legacyBesideLevel: () => {
+      const dir = join(paths.home, "agents");
+      if (!existsSync(dir)) return [];
+      try {
+        return [...loadAgents(dir).values()]
+          .map((m) => [m.id, legacyBesideLevel(m)] as const)
+          .filter(([, fields]) => fields.length)
+          .map(([id, fields]) => `${id} (${fields.join(", ")})`);
+      } catch {
+        return []; // an agent that does not load is reported by the integrations check
+      }
     },
     ramGb: detectPlatform().ramGb,
     hasWhisperModel: existsSync(paths.whisperModel),

@@ -7,6 +7,8 @@ import {
   addChecklistItem,
   addComment,
   attachmentsDir,
+  cardKey,
+  chatCards,
   createMonitor,
   createPairingCode,
   createSchedule,
@@ -18,6 +20,7 @@ import {
   deleteMonitor,
   deleteSchedule,
   deleteThread,
+  endCardSessions,
   getMonitor,
   getRoom,
   getSchedule,
@@ -47,11 +50,14 @@ import {
   removeChecklistItem,
   revokeSession,
   type ScheduleInput,
+  STALL_MINUTES_KEY,
+  STALL_PERCENT_KEY,
   saveImage,
   setSetting,
   setThreadProject,
   spendBy,
   spendSince,
+  stallSettings,
   stopThread,
   threadSummary,
   updateChecklistItem,
@@ -63,28 +69,43 @@ import {
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
+  type AccountEntry,
+  type AccountListsInput,
   AGENT_SKILLS,
   type AgentFields,
   agentSkillScope,
   type Catalog,
   type CatalogEntry,
+  ceilingOf,
+  compileLevel,
   createAgentFiles,
   createProject,
   deleteSkill,
+  type Env,
+  effectiveLevel,
+  entryValues,
+  GIT_REPO,
+  gitTokenId,
   type IntegrationStatus,
+  isLocalModel,
   isSkillName,
   isSkillScope,
   isSkillWorkspace,
+  levelConflicts,
   listSkills,
   loadAgents,
   loadManifest,
-  loadOwnAccounts,
+  loadOverrides,
+  loadOwnAccountEntries,
   loadProjects,
+  MAX_LEVEL,
   OWN,
   ownerSecrets,
+  type ProjectClass,
   parseSkillText,
   readSkill,
   removeProject,
+  saveOverrides,
   saveOwnAccounts,
   secretRefs,
   setIntegrationAgents,
@@ -95,6 +116,7 @@ import {
   updateManifestModels,
   updateManifestName,
   updateProject,
+  visibleSkills,
   writeSkill,
 } from "@achords/policy";
 import { createGoogleSignins, parseClientJson, type Vault } from "@achords/secrets";
@@ -111,8 +133,6 @@ import { serveStatic } from "./static.ts";
 // listens on: another gateway on 127.0.0.1 (a test, a second instance) cannot overwrite it.
 const cookieName = (req: IncomingMessage) => `achords_session_${req.socket.localPort}`;
 const COOKIE_MAX_AGE_S = 90 * 24 * 3600;
-const GIT_REPO =
-  /^(https:\/\/[a-z0-9.-]+(:\d+)?(\/[\w.-]+){2,}\/?|git@[a-z0-9.-]+:[\w.-]+(\/[\w.-]+)+)$/i;
 /** The owner's remote address for the web UI (e.g. this Mac's Tailscale name). */
 const REMOTE_HOST_KEY = "web.remote_host";
 const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/;
@@ -137,6 +157,9 @@ export interface ApiDeps {
     | "delegate"
     | "handoff"
     | "askOwner"
+    | "askParent"
+    | "answerChild"
+    | "recordRoomOutcome"
     | "spawnWorker"
     | "proposeAgent"
     | "decideProposal"
@@ -148,6 +171,7 @@ export interface ApiDeps {
     | "openRoom"
     | "requestAccess"
     | "requestCommand"
+    | "requestPermission"
     | "reportChecks"
     | "requestPublish"
     | "testIntegration"
@@ -157,6 +181,7 @@ export interface ApiDeps {
     | "skillPropose"
     | "createCard"
     | "startCard"
+    | "pushBranch"
   >;
   /** Agent-run capability tokens for /api/agent/* (the hub MCP server, ADR-0029). */
   runTokens?: RunTokens;
@@ -430,6 +455,10 @@ export function createApiHandler(deps: ApiDeps) {
         if (!updateThread(db, params[0] as string, patch)) {
           throw new HttpError(404, "no such chat");
         }
+        // ADR-0066: an archived chat's cards keep no agent sessions.
+        if (patch.archived && deps.home) {
+          endCardSessions(db, deps.home, chatCards(db, params[0] as string));
+        }
         return getThread(db, params[0] as string);
       },
     ],
@@ -438,7 +467,9 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/threads\/([\w-]{1,64})$/,
       ({ params }) => {
         const id = params[0] as string;
+        const cards = chatCards(db, id);
         if (!deleteThread(db, id)) throw new HttpError(404, "no such chat");
+        if (deps.home) endCardSessions(db, deps.home, cards);
         // Telegram wrote into this one: its next message starts a fresh chat.
         if (getSetting(db, "telegram.thread_id") === id) setSetting(db, "telegram.thread_id", "");
         log(`chat deleted in the web UI: ${id}`);
@@ -593,6 +624,26 @@ export function createApiHandler(deps: ApiDeps) {
         return { hours };
       },
     ],
+    // Stall watcher thresholds (ADR-0066 part 1).
+    ["GET", /^\/api\/monitors\/stalls$/, () => stallSettings(db)],
+    [
+      "PUT",
+      /^\/api\/monitors\/stalls$/,
+      async ({ body }) => {
+        const b = await body();
+        const minutes = Number(b.minutes);
+        const percent = Number(b.percent);
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+          throw new HttpError(400, "minutes: a whole number from 1 to 1440");
+        }
+        if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+          throw new HttpError(400, "percent: a whole number from 1 to 100");
+        }
+        setSetting(db, STALL_MINUTES_KEY, String(minutes));
+        setSetting(db, STALL_PERCENT_KEY, String(percent));
+        return { minutes, percent };
+      },
+    ],
     [
       "POST",
       /^\/api\/monitors$/,
@@ -690,6 +741,7 @@ export function createApiHandler(deps: ApiDeps) {
             slug: str(b.slug, "slug", 64),
             name: str(b.name, "name", 100),
             workspace: str(b.workspace, "workspace", 64),
+            ...(b.class !== undefined ? { class: projectClass(b.class) } : {}),
           });
           log(`project created in the web UI: ${p.slug}`);
           send(res, 201, { slug: p.slug, dir: p.dir, filesDir: p.filesDir });
@@ -714,6 +766,12 @@ export function createApiHandler(deps: ApiDeps) {
           filesDir: p.filesDir,
           doc: p.doc,
           integrations: p.integrations,
+          // ADR-0067: the same lists with each entry's live/staging tag, and the class (null =
+          // not chosen yet, counts as secured) with its ceiling.
+          entries: p.integrationEntries,
+          class: p.class ?? null,
+          ceiling: ceilingOf(p.class),
+          spend_without_asking: p.spend_without_asking === true,
         };
       },
     ],
@@ -757,6 +815,10 @@ export function createApiHandler(deps: ApiDeps) {
               ? { doc: typeof b.doc === "string" ? b.doc.slice(0, 50_000) : "" }
               : {}),
             ...(b.integrations !== undefined ? { integrations: accountLists(b.integrations) } : {}),
+            ...(b.class !== undefined ? { class: projectClass(b.class) } : {}),
+            ...(b.spend_without_asking !== undefined
+              ? { spend_without_asking: b.spend_without_asking === true }
+              : {}),
           }),
         );
         return { slug: p.slug, name: p.name, workspace: p.workspace };
@@ -871,6 +933,8 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/tasks\/([\w-]{1,64})$/,
       ({ params }) => {
         const id = params[0] as string;
+        // The session key is the card's root (ADR-0066); read it before the row goes.
+        const held = getTask(db, id);
         const out = deleteCard(db, id);
         if (!out.ok) {
           if (out.reason === "no such task") throw new HttpError(404, "no such task");
@@ -881,6 +945,7 @@ export function createApiHandler(deps: ApiDeps) {
               : "This is a step inside a card; delete the whole card instead.",
           );
         }
+        if (deps.home && held) endCardSessions(db, deps.home, [cardKey(held)]);
         log(`kanban: owner deleted task ${id} (${out.deleted} task(s) with its steps)`);
         return out;
       },
@@ -1012,7 +1077,7 @@ export function createApiHandler(deps: ApiDeps) {
       async ({ body }) => {
         const data = str((await body()).data, "data", 64);
         if (
-          !/^((proposal|move|access|publish|skill):(approve|reject)|cmd:(task|always|reject)):[\w-]{1,36}$/.test(
+          !/^((proposal|move|publish|skill):(approve|reject)|access:(once|approve|reject)|cmd:(once|task|always|reject)|perm:(once|card|always|reject)):[\w-]{1,36}$/.test(
             data,
           )
         ) {
@@ -1367,13 +1432,14 @@ export function createApiHandler(deps: ApiDeps) {
       },
     ],
     // The owner's own accounts (ADR-0042): for work without a client project.
-    ["GET", /^\/api\/accounts$/, () => ({ integrations: loadOwnAccounts(homeOrThrow()) })],
+    ["GET", /^\/api\/accounts$/, () => ownAccountsView()],
     [
       "PUT",
       /^\/api\/accounts$/,
       async ({ body }) => {
         const lists = accountLists((await body()).integrations);
-        return { integrations: attempt(() => saveOwnAccounts(homeOrThrow(), lists)) };
+        attempt(() => saveOwnAccounts(homeOrThrow(), lists));
+        return ownAccountsView();
       },
     ],
     // Sites of a project with their own credentials (ADR-0047), e.g. WordPress; "own" is the
@@ -1396,6 +1462,39 @@ export function createApiHandler(deps: ApiDeps) {
         if (urls.includes(url)) throw new HttpError(409, `${url} is already listed`);
         attempt(() => saveAccounts(slug, { ...lists, [channel]: [...urls, url] }));
         send(res, 201, sitesView(slug, entry));
+      },
+    ],
+    // ADR-0067: the project's push token for its repositories (level 5), set through /api/vault.
+    [
+      "GET",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})\/git-token$/,
+      ({ params }) => {
+        const slug = params[0] as string;
+        const repositories = (entriesOf(slug).repository ?? []).map((e) => e.value);
+        const id = gitTokenId(slug);
+        return { id, set: vault().status(id).set, repositories };
+      },
+    ],
+    // ADR-0067: a site's live/staging tag.
+    [
+      "PUT",
+      /^\/api\/projects\/([a-z0-9][a-z0-9-]{0,63})\/sites\/([a-z0-9][a-z0-9-]{0,63})\/([^/]+)$/,
+      async ({ params, body }) => {
+        const slug = params[0] as string;
+        const entry = siteEntry(params[1] as string);
+        const url = decodeURIComponent(params[2] as string);
+        const env = envOf((await body()).env, "env");
+        const lists = entriesOf(slug);
+        const channel = entry.sites?.channel as string;
+        const list = lists[channel] ?? [];
+        if (!list.some((e) => e.value === url)) throw new HttpError(404, `${url} is not listed`);
+        attempt(() =>
+          saveAccounts(slug, {
+            ...lists,
+            [channel]: list.map((e) => (e.value === url ? { ...e, env } : e)),
+          }),
+        );
+        return sitesView(slug, entry);
       },
     ],
     [
@@ -1442,6 +1541,7 @@ export function createApiHandler(deps: ApiDeps) {
           models: m.models,
           // The same fields as the create form, for editing.
           roles: m.roles,
+          mcp: m.mcp,
           tools: m.tools,
           fs: m.fs,
           ...(m.shell ? { shell: m.shell } : {}),
@@ -1450,6 +1550,7 @@ export function createApiHandler(deps: ApiDeps) {
           delegation: m.delegation,
           ...(m.budget?.per_run_usd ? { budget: { per_run_usd: m.budget.per_run_usd } } : {}),
           ...(m.effort ? { effort: m.effort } : {}),
+          ...(m.level !== undefined ? levelInfo(m) : {}),
           doc: existsSync(docPath) ? readFileSync(docPath, "utf8") : "",
           // Aliases always run the newest model of a family; local models as pulled.
           suggestions: [
@@ -1530,6 +1631,41 @@ export function createApiHandler(deps: ApiDeps) {
         deps.orchestrator.syncAgents(); // name/workspace show in the list right away
         log(`agent edited in the web UI: ${id}`);
         return { ok: true };
+      },
+    ],
+    // ADR-0067: this agent's level overrides per project; the others in the file are kept.
+    [
+      "PUT",
+      /^\/api\/agents\/([a-z0-9][a-z0-9-]{0,63})\/overrides$/,
+      async ({ params, body }) => {
+        const id = params[0] as string;
+        manifestPath(id); // 404 for an unknown agent
+        const home = homeOrThrow();
+        const b = await body();
+        if (!Array.isArray(b.overrides)) throw new HttpError(400, "overrides: must be a list");
+        const projects = deps.projectsDir ? loadProjects(deps.projectsDir) : new Map();
+        const mine = (b.overrides as unknown[]).map((o) => {
+          const x = o && typeof o === "object" ? (o as Record<string, unknown>) : {};
+          const project = str(x.project, "project", 64);
+          if (project !== OWN && !projects.has(project)) {
+            throw new HttpError(400, `no project ${project}`);
+          }
+          return { ...x, agent: id };
+        });
+        const agents = loadAgents(deps.agentsDir ?? "");
+        const saved = attempt(() =>
+          saveOverrides(home, [...loadOverrides(home).filter((o) => o.agent !== id), ...mine], {
+            base: (a) => agents.get(a)?.level,
+            projectClass: (slug) =>
+              slug === OWN ? "experimental" : (projects.get(slug)?.class as ProjectClass),
+          }),
+        );
+        log(`level overrides of ${id} edited in the web UI`);
+        return {
+          overrides: saved
+            .filter((o) => o.agent === id)
+            .map(({ project, level, requires_skills }) => ({ project, level, requires_skills })),
+        };
       },
     ],
     [
@@ -1653,19 +1789,46 @@ export function createApiHandler(deps: ApiDeps) {
     return out;
   };
 
-  /** Project accounts from the web editor: channel id → list of strings (ADR-0036). */
-  const accountLists = (v: unknown): Record<string, string[]> => {
+  const envOf = (v: unknown, field: string): Env => {
+    if (v !== "live" && v !== "staging") throw new HttpError(400, `${field}: live or staging`);
+    return v;
+  };
+  const projectClass = (v: unknown): ProjectClass => {
+    if (v !== "secured" && v !== "experimental") {
+      throw new HttpError(400, "class: secured or experimental");
+    }
+    return v;
+  };
+  /**
+   * Project accounts from the web editor: channel id → list (ADR-0036). An entry is a plain
+   * string (keeps the live/staging tag it had, new ones are live) or `{value, env}` (ADR-0067).
+   */
+  const accountLists = (v: unknown): AccountListsInput => {
     if (!v || typeof v !== "object" || Array.isArray(v)) {
       throw new HttpError(400, "integrations: must be an object of lists");
     }
     const lists = Object.fromEntries(
-      Object.entries(v as Record<string, unknown>).map(([key, list]) => [
-        key,
-        strList(list, `integrations.${key}`),
-      ]),
+      Object.entries(v as Record<string, unknown>).map(([key, list]) => {
+        const field = `integrations.${key}`;
+        if (!Array.isArray(list) || list.length > 200) {
+          throw new HttpError(400, `${field}: must be a list`);
+        }
+        return [
+          key,
+          list.map((e): string | AccountEntry => {
+            if (typeof e === "string") return strList([e], field)[0] as string;
+            const x = e && typeof e === "object" ? (e as Record<string, unknown>) : {};
+            return {
+              value: str(x.value, `${field}.value`, 200),
+              env: envOf(x.env, `${field}.env`),
+            };
+          }),
+        ];
+      }),
     );
     // Git repositories: an https or ssh address of a repository (GitHub, GitLab, self-hosted).
-    for (const r of lists.repository ?? []) {
+    for (const e of lists.repository ?? []) {
+      const r = typeof e === "string" ? e : e.value;
       if (r.trim() && !GIT_REPO.test(r.trim())) {
         throw new HttpError(
           400,
@@ -1685,24 +1848,35 @@ export function createApiHandler(deps: ApiDeps) {
     if (!entry?.sites) throw new HttpError(404, `integration ${id} has no sites`);
     return entry;
   };
-  /** Account lists of a project, or of the owner's own accounts ("own"). */
-  const accountsOf = (slug: string): Record<string, string[]> => {
-    if (slug === OWN) return loadOwnAccounts(homeOrThrow());
+  /** Account lists of a project, or of the owner's own accounts ("own"), with their tags. */
+  const entriesOf = (slug: string): Record<string, AccountEntry[]> => {
+    if (slug === OWN) return loadOwnAccountEntries(homeOrThrow());
     const p = loadProjects(projectsDirOrThrow()).get(slug);
     if (!p) throw new HttpError(404, "no such project");
-    return p.integrations;
+    return p.integrationEntries;
   };
-  const saveAccounts = (slug: string, lists: Record<string, string[]>) =>
+  const accountsOf = (slug: string): Record<string, string[]> => entryValues(entriesOf(slug));
+  const saveAccounts = (slug: string, lists: AccountListsInput) =>
     slug === OWN
       ? saveOwnAccounts(homeOrThrow(), lists)
       : updateProject(projectsDirOrThrow(), slug, { integrations: lists });
+  const ownAccountsView = () => {
+    const entries = loadOwnAccountEntries(homeOrThrow());
+    return { integrations: entryValues(entries), entries };
+  };
   const sitesView = (slug: string, entry: CatalogEntry) => {
     const channel = entry.sites?.channel as string;
-    const urls = accountsOf(slug)[channel] ?? [];
+    const list = entriesOf(slug)[channel] ?? [];
+    const sites = siteStatus(
+      entry,
+      slug,
+      list.map((e) => e.value),
+      (id) => vault().status(id).set,
+    );
     return {
       integration: entry.id,
       channel,
-      sites: siteStatus(entry, slug, urls, (id) => vault().status(id).set),
+      sites: sites.map((x, i) => ({ ...x, env: list[i]?.env ?? "live" })),
     };
   };
   /** A site address as stored: http(s), no login, query or fragment, no trailing slash. */
@@ -1761,12 +1935,17 @@ export function createApiHandler(deps: ApiDeps) {
         default: str(models.default, "models.default", 200),
         allowed: list(models.allowed, "models.allowed"),
       },
-      tools: list(b.tools, "tools"),
+      // ADR-0067: with a level the lists below are refused (updateAgent, createAgentFiles), so
+      // only what the form sent is passed on.
+      ...(b.level !== undefined ? { level: levelOf(b.level) } : {}),
+      ...(b.tools !== undefined ? { tools: list(b.tools, "tools") } : {}),
       fs: { read: list(fs.read, "fs.read"), write: list(fs.write, "fs.write") },
       ...(b.shell !== undefined
         ? { shell: { allow: list(obj(b.shell).allow, "shell.allow") } }
         : {}),
-      network: { allow: list(obj(b.network).allow, "network.allow") },
+      ...(b.network !== undefined
+        ? { network: { allow: list(obj(b.network).allow, "network.allow") } }
+        : {}),
       ...(typeof b.container === "boolean" ? { container: b.container } : {}),
       delegation: {
         can_delegate_to: list(obj(b.delegation).can_delegate_to, "delegation.can_delegate_to"),
@@ -1776,6 +1955,76 @@ export function createApiHandler(deps: ApiDeps) {
       ...(b.effort
         ? { effort: str(b.effort, "effort", 10) as NonNullable<AgentFields["effort"]> }
         : {}),
+    };
+  };
+  const levelOf = (v: unknown): number => {
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > MAX_LEVEL) {
+      throw new HttpError(400, `level: a whole number from 0 to ${MAX_LEVEL}`);
+    }
+    return v;
+  };
+  /**
+   * ADR-0067: the agent's level, its effective level per project and why (no project = the
+   * owner's own work, experimental), and remit setups that cannot work as compiled.
+   */
+  const levelInfo = (m: ReturnType<typeof loadManifest>) => {
+    const base = m.level as number;
+    const overrides = deps.home ? loadOverrides(deps.home) : [];
+    const enabledSkills = deps.home
+      ? visibleSkills(join(deps.home, "skills"), m.workspace, m.id).map((x) => x.name)
+      : [];
+    const projects = deps.projectsDir ? [...loadProjects(deps.projectsDir).values()] : [];
+    const where = [
+      ...projects.map((p) => ({ slug: p.slug, name: p.name, class: p.class })),
+      { slug: OWN, name: "Own accounts", class: "experimental" as const },
+    ];
+    const catalog = deps.catalog?.();
+    return {
+      level: base,
+      ...(m.unsandboxed ? { unsandboxed: m.unsandboxed } : {}),
+      ...(m.keys_beside_host_shell ? { keys_beside_host_shell: true } : {}),
+      overrides: overrides
+        .filter((o) => o.agent === m.id)
+        .map(({ project, level, requires_skills }) => ({ project, level, requires_skills })),
+      effectiveLevels: where.map((p) => {
+        const eff = effectiveLevel({
+          base,
+          override: overrides.find((o) => o.agent === m.id && o.project === p.slug),
+          projectClass: p.class,
+          enabledSkills,
+        });
+        return {
+          project: p.slug,
+          name: p.name,
+          class: p.class ?? null,
+          ...eff,
+          ...(catalog ? compiledBelow(m, eff.level, p.class, catalog) : {}),
+        };
+      }),
+      conflicts: catalog ? levelConflicts(m, catalog) : [],
+    };
+  };
+  /**
+   * What a run with the default model actually gets when it is below the effective level: a
+   * level 4 shell without a sandbox runs as 3, a local model at most at 3 (ADR-0067). The
+   * gateway always has the container runner; whether the Mac can start one shows at run time.
+   */
+  const compiledBelow = (
+    m: ReturnType<typeof loadManifest>,
+    level: number,
+    cls: ProjectClass | undefined,
+    catalog: Catalog,
+  ) => {
+    const c = compileLevel(m, {
+      level,
+      project: { class: cls },
+      catalog,
+      run: { model: m.models.default, containerAvailable: true },
+    });
+    if (c.refusal || c.level >= level) return {};
+    return {
+      level: c.level,
+      reason: isLocalModel(m.models.default) ? "local-model" : "no-sandbox",
     };
   };
   const manifestPath = (id: string) => {
@@ -1872,6 +2121,27 @@ export function createApiHandler(deps: ApiDeps) {
           : undefined;
         if (!caller) throw new HttpError(401, "invalid run token");
         const tool = path.slice("/api/agent/".length);
+        // ADR-0067 level 5: the gateway pushes the branch itself (the run holds no credential).
+        if (method === "POST" && tool === "push_branch") {
+          if (!caller.tools.includes(tool)) {
+            throw new HttpError(403, `tool ${tool} not granted to this run`);
+          }
+          const b = await readJson(req, 8192);
+          const remoteUrl =
+            b.remote_url === undefined || b.remote_url === ""
+              ? undefined
+              : str(b.remote_url, "remote_url", 500);
+          const out = await deps.orchestrator.pushBranch(
+            { from: "task", taskId: caller.taskId },
+            {
+              folder: str(b.folder, "folder", 1000),
+              branch: str(b.branch, "branch", 200),
+              ...(remoteUrl ? { remoteUrl } : {}),
+            },
+          );
+          send(res, 200, out);
+          return;
+        }
         // Publishing (ADR-0037): from the launcher, with a token granting publish:<integration>.
         if (method === "POST" && (tool === "publish" || tool === "publish_log")) {
           // A page or post can be long; the owner sees it before it runs.
@@ -1936,12 +2206,16 @@ export function createApiHandler(deps: ApiDeps) {
           "delegate",
           "handoff",
           "ask_owner",
+          "ask_parent",
+          "answer_child",
+          "record_room_outcome",
           "spawn_worker",
           "propose_agent",
           "move_task",
           "open_room",
           "request_access",
           "request_command",
+          "request_permission",
           "report_checks",
         ];
         if (method !== "POST" || !AGENT_TOOLS.includes(tool)) throw new HttpError(404, "not found");
@@ -1994,7 +2268,27 @@ export function createApiHandler(deps: ApiDeps) {
                               command: str(b.command, "command", 300),
                               reason: str(b.reason, "reason", 2000),
                             })
-                          : o.askOwner(from, str(b.question, "question", 2000));
+                          : tool === "request_permission"
+                            ? o.requestPermission(from, {
+                                kind: str(b.kind, "kind", 16),
+                                target: str(b.target, "target", 300),
+                                reason: str(b.reason, "reason", 2000),
+                              })
+                            : tool === "ask_parent"
+                              ? o.askParent(from, str(b.question, "question", 2000))
+                              : tool === "answer_child"
+                                ? o.answerChild(from, {
+                                    taskId: str(b.task_id, "task_id", 64),
+                                    answer: str(b.answer, "answer", 5000),
+                                  })
+                                : tool === "record_room_outcome"
+                                  ? o.recordRoomOutcome(from, {
+                                      room: str(b.room, "room", 64),
+                                      decision: str(b.decision, "decision", 5000),
+                                      decidedBy: str(b.decided_by, "decided_by", 200),
+                                      openPoints: strList(b.open_points, "open_points"),
+                                    })
+                                  : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

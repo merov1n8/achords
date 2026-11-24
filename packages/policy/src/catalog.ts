@@ -16,6 +16,10 @@ const APP = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 // literal is the run's working folder (also writable by the agent).
 const value = z.string();
 
+// ADR-0067: what a tool does, which decides the level it needs.
+export const TOOL_CLASSES = ["read", "draft", "reversible", "live", "spend"] as const;
+export type ToolClass = (typeof TOOL_CLASSES)[number];
+
 /** One integration (ADR-0034): an MCP server, its credentials and the tools agents may use. */
 export const catalogEntrySchema = z
   .object({
@@ -47,9 +51,11 @@ export const catalogEntrySchema = z
       .object({
         read: z.array(z.string().regex(TOOL)).default([]),
         write: z.array(z.string().regex(TOOL)).default([]),
+        // Tool → class (ADR-0067). Unlisted: `read` for read tools, `live` for write tools.
+        class: z.record(z.string().regex(TOOL), z.enum(TOOL_CLASSES)).default({}),
       })
       .strict()
-      .default({ read: [], write: [] }),
+      .default({ read: [], write: [], class: {} }),
     // Connection test (web Integrations page): one cheap read call; "{target}" in an argument is
     // the project's first own target (its property, site or page).
     test: z
@@ -153,6 +159,15 @@ export const catalogEntrySchema = z
         });
       }
     }
+    for (const tool of Object.keys(e.tools.class)) {
+      if (!e.tools.read.includes(tool) && !e.tools.write.includes(tool)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["tools", "class", tool],
+          message: "not a listed read or write tool",
+        });
+      }
+    }
     for (const [key, v] of Object.entries(e.env)) check(v, ["env", key]);
     for (const [key, fields] of Object.entries(e.files)) {
       for (const [field, v] of Object.entries(fields)) check(v, ["files", key, field]);
@@ -180,6 +195,10 @@ export function loadCatalog(seedDir: string, ownerDir: string): Catalog {
   readDir(ownerDir, catalog);
   return catalog;
 }
+
+/** A tool's class (ADR-0067); a write tool without one counts as `live`. */
+export const toolClass = (entry: CatalogEntry, tool: string): ToolClass =>
+  entry.tools.class[tool] ?? (entry.tools.read.includes(tool) ? "read" : "live");
 
 /** `{account:<channel>}`: a non-secret value from the project's accounts (first entry). */
 export function accountRef(value: string): string | undefined {
@@ -431,7 +450,7 @@ export function siteSlug(url: string): string {
 }
 
 // Vault ids are at most 64 characters; a longer one is cut and keeps a hash of the whole id.
-const fitId = (id: string) =>
+export const fitId = (id: string) =>
   id.length <= 64
     ? id
     : `${id.slice(0, 55).replace(/-+$/, "")}-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { CallScope } from "@achords/policy";
+import type { CallScope, LiveGuard } from "@achords/policy";
 
 export interface RunIdentity {
   taskId: string;
@@ -41,12 +41,21 @@ export interface McpLaunch {
   files: Record<string, Record<string, string>>;
   /** Project scope (ADR-0036): the launcher refuses calls outside the client's own values. */
   scope?: CallScope;
+  /** ADR-0067: on a secured project the launcher refuses writes to live targets, for any caller. */
+  live?: LiveGuard;
   /**
    * Publishing (ADR-0037): write tools of this integration. In `review` mode the launcher turns
    * a call into a publish request for the owner; in `auto` it runs it and reports it. The token
    * is a run token granting `publish:<integration>`.
    */
-  publish?: { integration: string; mode: "review" | "auto"; tools: string[]; token: string };
+  publish?: {
+    integration: string;
+    mode: "review" | "auto";
+    tools: string[];
+    // ADR-0067: tools that always ask the owner, whatever the mode (live and spend below level 5).
+    review?: string[];
+    token: string;
+  };
   /** ADR-0038: results carry third-party content; the launcher marks them as data. */
   untrusted?: string;
   /** Working folder of the server process (the run's folder). */

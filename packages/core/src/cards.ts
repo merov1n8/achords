@@ -14,6 +14,10 @@ export interface ChecklistItem {
 export interface TaskComment {
   id: number;
   text: string;
+  /** null: the owner's own comment; else the agent that recorded a room outcome (ADR-0066). */
+  author: string | null;
+  /** The room whose outcome this comment is. */
+  roomId: string | null;
   createdAt: number;
 }
 
@@ -28,6 +32,8 @@ const toItem = (r: Record<string, unknown>): ChecklistItem => ({
 const toComment = (r: Record<string, unknown>): TaskComment => ({
   id: Number(r.id),
   text: r.text as string,
+  author: (r.author as string | null) ?? null,
+  roomId: (r.room_id as string | null) ?? null,
   createdAt: Number(r.created_at),
 });
 

@@ -10,7 +10,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  answerOwnerQuestion,
   createThread,
+  getSetting,
   getTask,
   listMessages,
   openCoreDatabase,
@@ -390,7 +392,7 @@ describe("integrations in runs (ADR-0034)", () => {
     const idOf = (threadId: string) =>
       listMessages(db, threadId).at(-1)?.actions?.[0]?.data.split(":")[2] as string;
 
-    it("asks with three buttons; this task allows exactly that command for the chain", async () => {
+    it("asks with once, this card, always and reject; this card allows exactly that command for the chain", async () => {
       agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
       ask("git fetch origin audit");
       const { thread, taskId } = start("dev");
@@ -399,7 +401,13 @@ describe("integrations in runs (ADR-0034)", () => {
       expect(listMessages(db, thread.id).at(-1)?.content).toMatch(
         /dev asks to run a command \(Merge the audit\):\ngit fetch origin audit\nWhy: audit/,
       );
-      expect(lastActions(thread.id)).toEqual(["cmd:task", "cmd:always", "cmd:reject"]);
+      // ADR-0067 step 4 naming: "This task" is now "For this card" (same 4 h chain grant).
+      expect(lastActions(thread.id)).toEqual(["cmd:once", "cmd:task", "cmd:always", "cmd:reject"]);
+      expect(
+        listMessages(db, thread.id)
+          .at(-1)
+          ?.actions?.map((a) => a.label),
+      ).toEqual(["1️⃣ Once", "🗂️ For this card", "♾️ Always", "❌ Reject"]);
       expect(await orch.workOnce()).toBe(false); // waits for the owner
       const id = idOf(thread.id);
       expect(orch.runAction(`cmd:task:${id}`).message).toMatch(/until \d\d:\d\d: git fetch/);
@@ -442,9 +450,32 @@ describe("integrations in runs (ADR-0034)", () => {
       ask("git push origin audit");
       const { thread } = start("dev");
       await drain();
-      expect(lastActions(thread.id)).toEqual(["cmd:task", "cmd:reject"]);
+      expect(lastActions(thread.id)).toEqual(["cmd:once", "cmd:task", "cmd:reject"]);
       expect(orch.runAction(`cmd:always:${idOf(thread.id)}`).ok).toBe(false);
       expect(readFileSync(join(home, "agents", "dev", "agent.yaml"), "utf8")).not.toMatch(/push/);
+    });
+
+    it("once allows the exact command for the next run only", async () => {
+      agent("dev", 'shell:\n  allow: ["git status"]', "[Read, Bash]");
+      let runs = 0;
+      onRun = (task) => {
+        runs++;
+        if (runs === 1) {
+          orch.requestCommand({ from: "task", taskId: task.id }, { command: "make", reason: "x" });
+        }
+        // The resumed run asks a question, so the task runs a third time.
+        if (runs === 2) orch.askOwner({ from: "task", taskId: task.id }, "which target?");
+      };
+      const { thread } = start("dev");
+      await drain();
+      expect(orch.runAction(`cmd:once:${idOf(thread.id)}`).message).toMatch(/once.*make/);
+      await drain();
+      expect(seen[1]?.req.allowedTools).toContain("Bash(make)");
+      expect(seen[1]?.req.prompt).toMatch(/allowed exactly `make` once/);
+      answerOwnerQuestion(db, thread.id, "all");
+      await drain();
+      expect(seen[2]?.req.allowedTools).not.toContain("Bash(make)");
+      expect(readFileSync(join(home, "agents", "dev", "agent.yaml"), "utf8")).not.toMatch(/make/);
     });
 
     it("refuses chained commands, allowed ones and agents without a shell", async () => {
@@ -503,6 +534,7 @@ describe("integrations in runs (ADR-0034)", () => {
       const msg = listMessages(db, thread.id).at(-1);
       expect(msg?.content).toMatch(/maker asks for full access \(Glass effect\): video/);
       expect(msg?.actions?.map((a) => a.data)).toEqual([
+        `access:once:${taskId}`,
         `access:approve:${taskId}`,
         `access:reject:${taskId}`,
       ]);
@@ -521,6 +553,25 @@ describe("integrations in runs (ADR-0034)", () => {
       expect(second?.req.allowedTools?.some((t) => t.startsWith("mcp__wp__"))).toBe(false);
       expect(JSON.parse(second?.config ?? "{}").mcpServers.wp).toBeUndefined();
       expect(getTask(db, taskId)?.status).toBe("done");
+    });
+
+    it("once opens only the next run, without a chain grant", async () => {
+      let runs = 0;
+      onRun = (task) => {
+        runs++;
+        if (runs === 1) orch.requestAccess({ from: "task", taskId: task.id }, "video");
+        if (runs === 2) orch.askOwner({ from: "task", taskId: task.id }, "which scene?");
+      };
+      const { thread, taskId } = start("maker");
+      await drain();
+      expect(orch.runAction(`access:once:${taskId}`).message).toMatch(/next run only/);
+      expect(getSetting(db, `elevation:${taskId}`)).toBeUndefined();
+      await drain();
+      expect(seen[1]?.req.allowedTools).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+      expect(seen[1]?.req.prompt).toMatch(/full access for this run/);
+      answerOwnerQuestion(db, thread.id, "the first");
+      await drain();
+      expect(seen[2]?.req.allowedTools).not.toContain("WebSearch");
     });
 
     it("a refusal resumes the task without access", async () => {
@@ -610,6 +661,11 @@ describe("integrations in runs (ADR-0034)", () => {
       };
       return launches;
     };
+    // wp writes with per-client credentials, so on a secured project the live rule (ADR-0067,
+    // tested below) would refuse them; the publishing mechanics are shown on an experimental one.
+    beforeEach(() => {
+      appendFileSync(join(home, "projects", "acme", "project.yaml"), "class: experimental\n");
+    });
 
     it("review: write tools go through the launcher to the owner, who approves the exact call", async () => {
       const launches = capture();
@@ -689,6 +745,152 @@ describe("integrations in runs (ADR-0034)", () => {
     });
   });
 
+  describe("the secured-live rule (ADR-0067)", () => {
+    const WRITES = ["save_draft", "hide_post", "publish_post", "boost_post"];
+    const LIVE = "https://live.example";
+    const TAGGED = "https://tagged.example";
+    const STAGING = "https://staging.example";
+    const accounts = `integrations:\n  social:\n    - ${LIVE}\n    - { url: ${TAGGED}, env: live }\n    - { url: ${STAGING}, env: staging }\n`;
+    const capture = () => {
+      const launches: McpLaunch[] = [];
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launches.push(launch);
+        return original(launch);
+      };
+      return launches;
+    };
+    beforeEach(() => {
+      // One write tool per class, scoped per site (ADR-0036).
+      writeFileSync(
+        join(home, "catalog", "social.yaml"),
+        `id: social\nname: Social\ncommand: npx\nargs: ["social@1.0.0"]\nenv:\n  KEY: "vault:social-key"\ntools:\n  read: [list_posts]\n  write: [${WRITES.join(", ")}]\n  class:\n    save_draft: draft\n    hide_post: reversible\n    boost_post: spend\nscope:\n  args: [site]\n`,
+      );
+      // acme: class not chosen yet (counts as secured).
+      appendFileSync(join(home, "projects", "acme", "project.yaml"), accounts);
+      for (const [slug, cls] of [
+        ["sec", "secured"],
+        ["lab", "experimental"],
+      ] as const) {
+        createProject(join(home, "projects"), {
+          slug,
+          name: slug,
+          workspace: "web-clients",
+          class: cls,
+        });
+        appendFileSync(join(home, "projects", slug, "project.yaml"), accounts);
+      }
+      for (let level = 0; level <= 5; level++) {
+        agent(`l${level}`, `level: ${level}\nmcp: [social]\npublish_mode:\n  default: auto`);
+      }
+      agent("legacy", "mcp: [social]\npublish_mode:\n  default: auto");
+      orch.syncAgents();
+    });
+
+    /** A held publish of `agentId` on a task of `project`, as the launcher would have sent it. */
+    const held = async (agentId: string, project: string, tool: string, site?: string) => {
+      const task = await give("legacy", project);
+      setSetting(
+        db,
+        `publish_req:p-${agentId}-${tool}`,
+        JSON.stringify({
+          taskId: task.id,
+          agentId,
+          integration: "social",
+          tool,
+          args: site ? { site, text: "Hi" } : { text: "Hi" },
+        }),
+      );
+      return { task, action: `publish:approve:p-${agentId}-${tool}` };
+    };
+
+    it("owner approval never lifts it: live and untagged targets refuse every write class, any agent", async () => {
+      for (const project of ["acme", "sec"]) {
+        for (const agentId of ["l0", "l1", "l2", "l3", "l4", "l5", "legacy"]) {
+          for (const tool of WRITES) {
+            for (const site of [LIVE, TAGGED]) {
+              const { action } = await held(agentId, project, tool, site);
+              const r = orch.runAction(action);
+              expect(r.ok).toBe(false);
+              expect(r.message).toMatch(/live target of a secured project/);
+              expect(r.message).toMatch(/staging.*package/);
+            }
+          }
+        }
+      }
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called).toEqual([]);
+    });
+
+    it("still refused with an override raising the level and with full access granted", async () => {
+      writeFileSync(join(home, "overrides.yaml"), "- { agent: l3, project: sec, level: 5 }\n");
+      const { task, action } = await held("l3", "sec", "publish_post", LIVE);
+      setSetting(db, `elevation:${task.rootId ?? task.id}`, String(Date.now() + 3_600_000));
+      expect(orch.runAction(action)).toMatchObject({ ok: false });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called).toEqual([]);
+    });
+
+    it("every run on a secured project carries the rule; staging is writable from level 3", async () => {
+      const launches = capture();
+      for (const agentId of ["l3", "l4", "l5", "legacy"]) await give(agentId, "sec");
+      for (const l of launches) {
+        expect(l.live).toEqual({ tools: WRITES, args: ["site"], staging: [STAGING] });
+      }
+      expect(launches).toHaveLength(4);
+      // The level 3 run gets the draft tool directly; a held staging publish runs when approved.
+      expect(seen[0]?.req.allowedTools).toContain("mcp__social__save_draft");
+      const { action } = await held("l3", "sec", "publish_post", STAGING);
+      expect(orch.runAction(action).ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called.map((c) => c.args)).toEqual([{ site: STAGING, text: "Hi" }]);
+      expect(called[0]?.launch.live?.staging).toEqual([STAGING]);
+    });
+
+    it("the agent is told up front, and its live publish request is refused before it is held", async () => {
+      let request: unknown;
+      onRun = (task) => {
+        request = orch.requestPublish(
+          { from: "task", taskId: task.id },
+          { integration: "social", tool: "publish_post", args: { site: LIVE } },
+        );
+      };
+      const task = await give("legacy", "acme");
+      expect(request).toMatchObject({ ok: false, reason: expect.stringMatching(/live target/) });
+      expect(listMessages(db, task.threadId as string).some((m) => m.actions?.length)).toBe(false);
+      const prompt = seen[0]?.req.prompt ?? "";
+      expect(prompt).toMatch(/Project acme is secured: live targets are read-only/);
+      expect(prompt).toContain(`Writable (staging): social: ${STAGING}.`);
+      expect(prompt).toContain(`Read-only (live): social: ${LIVE}; social: ${TAGGED}.`);
+      expect(prompt).toMatch(/delivered as a package \(a diff or export plus a checklist\)/);
+    });
+
+    it("experimental projects and own accounts: writes follow the level", async () => {
+      const launches = capture();
+      await give("l5", "lab");
+      expect(launches[0]?.live).toBeUndefined();
+      expect(seen[0]?.req.prompt).not.toMatch(/is secured/);
+      const { action } = await held("l5", "lab", "publish_post", LIVE);
+      expect(orch.runAction(action).ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(called).toHaveLength(1);
+    });
+
+    it("a write whose target cannot be told is refused on a secured project", async () => {
+      // No site argument on a project with several sites.
+      const { action } = await held("l5", "sec", "save_draft");
+      expect(orch.runAction(action).message).toMatch(/does not say which target/);
+      // Per-client credentials without a named account (wp): the target is the client's.
+      const task = await give("marketer", "acme");
+      const r = orch.requestPublish(
+        { from: "task", taskId: task.id },
+        { integration: "wp", tool: "create_post", args: { title: "T" } },
+      );
+      expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/does not say/) });
+      expect(called).toEqual([]);
+    });
+  });
+
   it("takes plain settings like a site address from the project's accounts", async () => {
     const launches: McpLaunch[] = [];
     const original = tickets.issue.bind(tickets);
@@ -727,6 +929,30 @@ describe("integrations in runs (ADR-0034)", () => {
       expect(launches[0]?.publish?.mode).toBe("review");
       await give("autopub", "acme");
       expect(launches[1]?.publish?.mode).toBe("auto");
+    });
+
+    it("the project's own sites are not the open web; any site is (ADR-0066)", async () => {
+      appendFileSync(
+        join(home, "projects", "acme", "project.yaml"),
+        'integrations:\n  website: ["https://acme.example"]\n',
+      );
+      agent(
+        "anysite",
+        'mcp: [wp]\npublish_mode:\n  default: auto\nnetwork:\n  allow: ["*"]\ncontainer: false',
+        "[Read, WebFetch]",
+      );
+      orch.syncAgents();
+      const launches: McpLaunch[] = [];
+      const original = tickets.issue.bind(tickets);
+      tickets.issue = (launch) => {
+        launches.push(launch);
+        return original(launch);
+      };
+      await give("autopub", "acme");
+      expect(seen.at(-1)?.req.allowedTools).toContain("WebFetch(domain:acme.example)");
+      expect(launches[0]?.publish?.mode).toBe("auto");
+      await give("anysite", "acme");
+      expect(launches[1]?.publish?.mode).toBe("review");
     });
   });
 
