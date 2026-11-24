@@ -133,6 +133,14 @@ export function checkMove(
   return { ok: false, reason: `not allowed by the workflow: ${task.column} → ${to}` };
 }
 
+/**
+ * Where an answered question's card goes (question mode): the column after `finish` ("done" in
+ * the default workflow), or `finish` itself when nothing follows it.
+ */
+export function doneColumn(wf: Workflow): string {
+  return wf.columns[wf.columns.indexOf(wf.finish) + 1] ?? wf.finish;
+}
+
 /** Read-only view for the web: for each column, from where and by whom it may be entered. */
 export function permissionMatrix(wf: Workflow) {
   return wf.columns.map((to) => ({

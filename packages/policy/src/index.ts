@@ -171,6 +171,7 @@ export {
 export {
   checkMove,
   DEFAULT_WORKFLOW_YAML,
+  doneColumn,
   loadWorkflow,
   type MoveCheck,
   type Mover,

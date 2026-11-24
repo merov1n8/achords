@@ -66,6 +66,8 @@ export interface Task {
   runMode: "accounts" | "web" | null;
   /** The owner's own name for the card; null = the card shows its chat's title (cardTitleOf). */
   ownCardTitle: string | null;
+  /** Question mode: the owner only asked; the run only reads and its card skips review. */
+  questionMode: boolean;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
@@ -79,6 +81,7 @@ const toTask = (r: Record<string, unknown>): Task => ({
   handoff: r.handoff ? (JSON.parse(String(r.handoff)) as Task["handoff"]) : null,
   runMode: (r.run_mode as Task["runMode"] | undefined) ?? null,
   ownCardTitle: (r.card_title as string | null | undefined) ?? null,
+  questionMode: Number(r.question_mode ?? 0) === 1,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),
@@ -130,15 +133,17 @@ export function enqueue(
     project?: string;
     /** Not claimable until started (a card the owner made by hand). */
     parked?: boolean;
+    /** Question mode: read-only run, no review (the owner only asked something). */
+    questionMode?: boolean;
   },
   now = Date.now(),
 ): Task {
   const row = db
     .prepare(
       `INSERT INTO tasks (id, thread_id, parent_id, title, description, priority,
-         assignee_agent_id, max_attempts, sensitivity, budget_usd, project, parked, created_at,
-         updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+         assignee_agent_id, max_attempts, sensitivity, budget_usd, project, parked, question_mode,
+         created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       randomUUID(),
@@ -153,6 +158,7 @@ export function enqueue(
       input.budgetUsd ?? null,
       input.project ?? null,
       input.parked ? 1 : 0,
+      input.questionMode ? 1 : 0,
       now,
       now,
     );

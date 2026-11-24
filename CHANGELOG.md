@@ -7,6 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Question mode: when you only ask an agent something, it answers read-only (no file changes,
+  shell, drafts, delegation or handoff, whatever its level) and its card goes straight to done,
+  without checks or review. The boss decides this from your message; start a message with `?:`
+  or `Q:` (also after `@agent`) to force it. A question in a chat whose card is still being
+  worked on leaves that card where it is and only answers in the chat.
 - When a card has been sent back from review too often and waits for you, its message has two
   buttons (web and Telegram): "Continue with the review's findings" restarts its agent with the
   last review, as a normal send-back would (your decision does not count toward the limit), and

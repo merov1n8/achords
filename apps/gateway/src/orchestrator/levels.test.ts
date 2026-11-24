@@ -267,6 +267,41 @@ describe("permission levels in runs (ADR-0067)", () => {
     expect(launches).toHaveLength(1);
   });
 
+  it("question mode: whatever the level, the run reads only (no shell, drafts, publishing or handoff)", async () => {
+    const ask = async (agentId: string) => {
+      const thread = createThread(db, { project: "acme" });
+      const r = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: agentId, title: "Why?", instructions: "explain" },
+        { question: true },
+      );
+      if (!r.ok) throw new Error(r.reason);
+      for (let i = 0; i < 5 && (await orch.workOnce()); i++);
+      return getTask(db, r.taskId) as Task;
+    };
+    const op = await ask("operator");
+    expect(op.status).toBe("done");
+    const opRun = seen[0];
+    expect(opRun?.req.tools).toEqual(["Read", "Glob", "Grep", "TodoWrite"]);
+    expect(opRun?.req.allowedTools).toContain("mcp__social__list_posts");
+    expect(
+      opRun?.req.allowedTools.filter(
+        (t) => t.startsWith("mcp__social__") && t !== "mcp__social__list_posts",
+      ),
+    ).toEqual([]);
+    expect(launches[0]?.publish).toBeUndefined();
+    expect(hubTools(opRun?.config)).toEqual(["ask_owner", "skill_read"]);
+    expect(opRun?.req.prompt).not.toMatch(/work mode/);
+    expect(opRun?.req.prompt).toMatch(/This is a question/);
+    await ask("builder");
+    const b = seen[1];
+    expect(b?.req.tools).not.toContain("Bash");
+    expect(b?.req.tools).not.toContain("Edit");
+    expect(b?.req.allowedTools).not.toContain("Bash");
+    expect(b?.req.allowedTools).not.toContain("mcp__blender__import_asset");
+    expect(b?.req.allowedTools).toContain("mcp__blender__get_scene_info");
+  });
+
   it("an agent without a split cannot hand off to itself", async () => {
     let out: unknown;
     onRun = (t) => {

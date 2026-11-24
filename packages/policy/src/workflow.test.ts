@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { checkMove, DEFAULT_WORKFLOW_YAML, parseWorkflow, permissionMatrix } from "./workflow.ts";
+import {
+  checkMove,
+  DEFAULT_WORKFLOW_YAML,
+  doneColumn,
+  parseWorkflow,
+  permissionMatrix,
+} from "./workflow.ts";
 
 const wf = parseWorkflow(DEFAULT_WORKFLOW_YAML, "default");
 const task = { assignee: "dev", column: "in_progress" };
@@ -115,5 +121,16 @@ describe("permissionMatrix", () => {
       to: "done",
       rules: [{ from: "review", by: "role:qa", not: "assignee" }],
     });
+  });
+});
+
+describe("doneColumn", () => {
+  it("is the column after finish, or finish when it is the last one", () => {
+    expect(doneColumn(wf)).toBe("done");
+    const last = parseWorkflow(
+      "columns: [todo, doing, review]\nstart: doing\nfinish: review\ntransitions: []\n",
+      "w",
+    );
+    expect(doneColumn(last)).toBe("review");
   });
 });
