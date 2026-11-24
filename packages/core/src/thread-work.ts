@@ -45,7 +45,7 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
   const rows = db
     .prepare(
       `SELECT x.*, a.name FROM (
-         SELECT t.status, t.waiting_children, t.waiting_owner, t.parked, t.created_at,
+         SELECT t.status, t.waiting_children, t.waiting_owner, t.waiting_parent, t.parked, t.created_at,
            t.rowid AS seq, COALESCE(t.assignee_agent_id, (SELECT r.agent_id FROM runs r
              WHERE r.task_id = t.id ORDER BY r.started_at DESC LIMIT 1)) AS agent
          FROM tasks t WHERE t.id IN (${THREAD_TASKS})
@@ -60,7 +60,9 @@ export function threadSummary(db: Db, threadId: string): ThreadSummary {
         ? "running"
         : r.status !== "queued" || Number(r.parked) === 1
           ? "idle"
-          : Number(r.waiting_children) > 0 || Number(r.waiting_owner) === 1
+          : Number(r.waiting_children) > 0 ||
+              Number(r.waiting_owner) === 1 ||
+              Number(r.waiting_parent) > 0
             ? "waiting"
             : "queued";
     const agent = String(r.agent);

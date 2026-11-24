@@ -155,7 +155,7 @@ Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, AD
     - the session is gone or the CLI rejects it;
     - the model or provider differs (including a fallback, ADR-0058);
     - the run's trust differs from the session's (see guards).
-  - **End.** The record and the folder are deleted when the card is done (finish column), archived or deleted.
+  - **End.** The record and the folder are deleted when the card is done, archived or deleted. Done means the card has moved past its finish column (in the default workflow: from review to done), or has reached finish when no column follows it. A card sent back from review is not done, so its rework resumes the session. The session key is the card's root task, which successors from rework and handoff share.
   - **Guards:**
     - **Trust.** A session that read the open web (elevation, `network.allow: ["*"]` or WebSearch in the effective run) is never resumed in a run with keyed integrations or without open web. Otherwise open-web content would reach credentials through the transcript, which ADR-0035 and ADR-0055 forbid.
     - **Sensitivity.** A `local-only` session is never resumed by another model.

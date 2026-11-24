@@ -143,6 +143,26 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
     expect(getTask(db, calls[1]?.task.id ?? "")?.column).toBeNull();
   });
 
+  it("neither the card's own run nor its review gets ask_parent (ADR-0066)", async () => {
+    setup([
+      ["dev", "roles: [dev]"],
+      ["qa", "roles: [qa]"],
+    ]);
+    const { id } = give();
+    let asked: unknown;
+    behave = (_req, task) => {
+      if (task.assigneeAgentId === "qa") {
+        asked = orch.askParent({ from: "task", taskId: task.id }, "Is this enough?");
+        orch.moveTask({ from: "task", taskId: task.id }, { taskId: id, to: "done" });
+      }
+      return result();
+    };
+    await drain();
+    expect(calls.map((c) => c.task.assigneeAgentId)).toEqual(["dev", "qa"]);
+    for (const c of calls) expect(c.req.allowedTools).not.toContain("mcp__achords__ask_parent");
+    expect(asked).toMatchObject({ ok: false });
+  });
+
   it("a review's verdict is posted in the chat; a card sent back restarts its agent with the findings (ADR-0062)", async () => {
     setup([
       ["dev", "roles: [dev]"],

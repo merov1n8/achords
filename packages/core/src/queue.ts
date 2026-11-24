@@ -19,6 +19,12 @@ export interface Task {
   waitingOwner: boolean;
   ownerQuestion: string | null;
   ownerAnswer: string | null;
+  /** An open question to the parent task (ask_parent, ADR-0066); the task waits for the answer. */
+  waitingParent: boolean;
+  parentQuestion: string | null;
+  parentAnswer: string | null;
+  /** How many questions this task asked its parent. */
+  parentQuestions: number;
   /** Set on ephemeral worker tasks: the restricted permissions they run with. */
   workerSpec: { tools: string[]; paths: string[] } | null;
   threadId: string | null;
@@ -71,6 +77,10 @@ const toTask = (r: Record<string, unknown>): Task => ({
   waitingOwner: Number(r.waiting_owner) === 1,
   ownerQuestion: r.owner_question as string | null,
   ownerAnswer: r.owner_answer as string | null,
+  waitingParent: Number(r.waiting_parent) > 0,
+  parentQuestion: (r.parent_question as string | null) ?? null,
+  parentAnswer: (r.parent_answer as string | null) ?? null,
+  parentQuestions: Number(r.parent_questions ?? 0),
   workerSpec: r.worker_spec ? (JSON.parse(String(r.worker_spec)) as Task["workerSpec"]) : null,
   threadId: r.thread_id as string | null,
   parentId: r.parent_id as string | null,
@@ -186,10 +196,13 @@ export function claim(
         `UPDATE tasks SET status = 'claimed', claimed_by = ?, lease_until = ?,
            attempts = attempts + 1, updated_at = ?
          WHERE id = (
-           SELECT id FROM tasks WHERE status = 'queued' AND waiting_children = 0 AND waiting_owner = 0
-             AND parked = 0
-             AND (not_before IS NULL OR not_before <= ?)
-           ORDER BY priority DESC, created_at, rowid LIMIT 1
+           SELECT p.id FROM tasks p WHERE p.status = 'queued' AND p.waiting_owner = 0
+             AND p.waiting_parent = 0 AND p.parked = 0
+             AND (p.not_before IS NULL OR p.not_before <= ?)
+             -- A child's new question to its parent wakes the parent despite open children.
+             AND (p.waiting_children = 0 OR EXISTS (SELECT 1 FROM tasks c WHERE c.parent_id = p.id
+               AND c.waiting_parent = 1 AND c.status = 'queued'))
+           ORDER BY p.priority DESC, p.created_at, p.rowid LIMIT 1
          )
          RETURNING *`,
       )

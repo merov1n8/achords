@@ -153,6 +153,42 @@ describe("one CLI session per agent and card (ADR-0066)", () => {
     expect(existsSync(sessionDir(home, taskId))).toBe(false);
   });
 
+  it("a parent question reaches both resumed sessions: the question to the parent, the answer to the child", async () => {
+    agent("lead", ["delegation:\n  can_delegate_to: [coder]\n  accepts_from: []"]);
+    agent("coder", ["delegation:\n  can_delegate_to: []\n  accepts_from: [lead]"]);
+    start();
+    behave = (req, task) => {
+      const resume = req.session?.resume ?? `s-${n}`;
+      if (task.assigneeAgentId === "coder") {
+        if (!task.parentAnswer) orch.askParent({ from: "task", taskId: task.id }, "Which font?");
+        return result({ sessionId: resume });
+      }
+      const open = /\(task #([\w-]+)\) asks:/.exec(req.prompt);
+      if (open) {
+        orch.answerChild(
+          { from: "task", taskId: task.id },
+          { taskId: open[1] as string, answer: "Inter." },
+        );
+      } else if (calls.length === 1) {
+        orch.delegate(
+          { from: "task", taskId: task.id },
+          { agent: "coder", title: "Type", instructions: "set the type" },
+        );
+      }
+      return result({ sessionId: resume });
+    };
+    card("lead");
+    await drain();
+    expect(calls.map((c) => c.agent)).toEqual(["lead", "coder", "lead", "coder", "lead"]);
+    const [, , wake, answered] = calls.map((c) => c.req);
+    expect(wake?.session).toEqual({ resume: "s-1" });
+    expect(wake?.prompt).toMatch(/^# Continue: Build the page/);
+    expect(wake?.prompt).toMatch(/coder \(task #[\w-]+\) asks: Which font\?/);
+    expect(answered?.session).toEqual({ resume: "s-2" });
+    expect(answered?.prompt).toMatch(/^# Continue: Type/);
+    expect(answered?.prompt).toMatch(/You asked lead: Which font\?\nAnswer: Inter\./);
+  });
+
   it("rework sent back from review resumes the agent's session; done ends it (ADR-0062)", async () => {
     agent("coder", ["roles: [dev]"]);
     agent("qa", ["roles: [qa]"]);

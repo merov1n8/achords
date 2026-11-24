@@ -154,6 +154,14 @@ describe("HTTP API", () => {
             questions.push({ from, question });
             return { ok: true };
           },
+          askParent: (from, question) => {
+            questions.push({ from, question: `parent: ${question}` });
+            return { ok: true };
+          },
+          answerChild: (from, request) => {
+            questions.push({ from, question: `answer ${request.taskId}: ${request.answer}` });
+            return { ok: true };
+          },
           requestAccess: (from, reason) => {
             questions.push({ from, question: `access: ${reason}` });
             return { ok: true };
@@ -930,6 +938,38 @@ describe("HTTP API", () => {
       (await post(`Bearer ${run.token}`, { agent: "writer", title: "a", instructions: "b" }))
         .status,
     ).toBe(401);
+  });
+
+  it("agent endpoints ask_parent and answer_child take the caller from the run token (ADR-0066)", async () => {
+    const post = (token: string, path: string, body: unknown) =>
+      fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    const child = tokens.issue("task-c", "writer", ["ask_parent"]).token;
+    const asked = await post(child, "/api/agent/ask_parent", {
+      question: "Which tone?",
+      taskId: "x",
+    });
+    expect(await asked.json()).toEqual({ ok: true });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-c" },
+      question: "parent: Which tone?",
+    });
+    expect(
+      (await post(child, "/api/agent/answer_child", { task_id: "y", answer: "z" })).status,
+    ).toBe(403);
+    const parent = tokens.issue("task-p", "lead", ["answer_child"]).token;
+    const answered = await post(parent, "/api/agent/answer_child", {
+      task_id: "task-c",
+      answer: "Friendly.",
+    });
+    expect(await answered.json()).toEqual({ ok: true });
+    expect(questions.at(-1)).toEqual({
+      from: { from: "task", taskId: "task-p" },
+      question: "answer task-c: Friendly.",
+    });
   });
 
   it("agent endpoint: ask_owner, and only tools granted to the run", async () => {

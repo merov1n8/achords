@@ -140,6 +140,8 @@ export interface ApiDeps {
     | "delegate"
     | "handoff"
     | "askOwner"
+    | "askParent"
+    | "answerChild"
     | "spawnWorker"
     | "proposeAgent"
     | "decideProposal"
@@ -1948,6 +1950,8 @@ export function createApiHandler(deps: ApiDeps) {
           "delegate",
           "handoff",
           "ask_owner",
+          "ask_parent",
+          "answer_child",
           "spawn_worker",
           "propose_agent",
           "move_task",
@@ -2006,7 +2010,14 @@ export function createApiHandler(deps: ApiDeps) {
                               command: str(b.command, "command", 300),
                               reason: str(b.reason, "reason", 2000),
                             })
-                          : o.askOwner(from, str(b.question, "question", 2000));
+                          : tool === "ask_parent"
+                            ? o.askParent(from, str(b.question, "question", 2000))
+                            : tool === "answer_child"
+                              ? o.answerChild(from, {
+                                  taskId: str(b.task_id, "task_id", 64),
+                                  answer: str(b.answer, "answer", 5000),
+                                })
+                              : o.askOwner(from, str(b.question, "question", 2000));
         send(res, 200, out);
         return;
       }

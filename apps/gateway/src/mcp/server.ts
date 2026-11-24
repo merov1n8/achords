@@ -53,6 +53,25 @@ const TOOLS = [
     done: "Question sent to the owner. End your turn now; you will be resumed with the answer.",
   },
   {
+    name: "ask_parent",
+    description:
+      "Ask the agent that delegated this task to you a question you cannot answer yourself (a missing decision or detail of its instructions). Your task resumes with its answer. At most 3 per task; after that, ask the owner or decide.",
+    input: z.object({ question: text.describe("One short, specific question") }),
+    endpoint: "/api/agent/ask_parent",
+    done: "Question sent to your delegator. End your turn now; you will be resumed with the answer.",
+  },
+  {
+    name: "answer_child",
+    description:
+      "Answer the question a task you delegated asked you (shown in your prompt with its task id). It resumes with your answer.",
+    input: z.object({
+      task_id: text.describe("The asking task's id"),
+      answer: text.describe("Your answer"),
+    }),
+    endpoint: "/api/agent/answer_child",
+    done: "Answer sent. Answer any other open question, then end your turn; you resume when your delegated tasks finish.",
+  },
+  {
     name: "spawn_worker",
     description:
       "Start a short-lived helper for a self-contained subtask, with a subset of YOUR OWN tools and write paths (anything beyond them is refused). Max 3 per task; helpers cannot delegate or spawn. You resume with its result.",

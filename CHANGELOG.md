@@ -118,6 +118,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- A delegated agent can ask the agent that gave it the work (ADR-0066): `ask_parent` wakes the
+  delegating agent with the question even while it waits for its delegated tasks, it answers with
+  `answer_child` (or asks you first), and the asking agent continues with the answer. At most
+  three questions per task; questions add no tasks but their runs count against the chain's
+  budget. Your own chat replies never answer them, and work that is the chat's own (not
+  delegated) or a review still asks only you.
 - An agent keeps its working memory on a card (ADR-0066): its next run on the same card (after
   delegated work comes back, or after you answer its question) continues its own
   Claude session and gets only what is new. Sessions live in `sessions/<card>/<agent>/` under the

@@ -14,14 +14,18 @@ import { join } from "node:path";
 import {
   addSpend,
   answerOwnerQuestion,
+  answerParentQuestion,
   appendMessage,
   askOwner as askOwnerQuestion,
+  askParent as askParentQuestion,
   attachmentsDir,
   type Channel,
   cardHolder,
   cardKey,
   carryCardSessions,
   childFinished,
+  childQuestions,
+  childQuestionsSeen,
   claim,
   clearActions,
   clearResumeNote,
@@ -337,6 +341,19 @@ export interface Orchestrator {
     question: string,
   ): { ok: true } | { ok: false; reason: string };
   /**
+   * A delegated task asks its parent (ADR-0066): the child waits, the parent is woken with the
+   * question despite its open children. At most MAX_PARENT_QUESTIONS per task.
+   */
+  askParent(
+    from: { from: "task"; taskId: string },
+    question: string,
+  ): { ok: true } | { ok: false; reason: string };
+  /** The parent answers a child's question; the child resumes with the answer. */
+  answerChild(
+    from: { from: "task"; taskId: string },
+    request: { taskId: string; answer: string },
+  ): { ok: true } | { ok: false; reason: string };
+  /**
    * An agent asks for full access (ADR-0035): posted with Approve / Reject buttons; the task
    * waits like for a question.
    */
@@ -472,6 +489,8 @@ export const MAX_HANDOFF_HOPS = 6;
 export const MAX_LINE_TASKS = 20;
 export const MAX_WORKERS_PER_TASK = 3;
 export const MAX_ROOM_PARTICIPANTS = 3;
+/** ADR-0066: questions one delegated task may ask its parent. */
+export const MAX_PARENT_QUESTIONS = 3;
 // Quota warnings to the owner, once per window and level (step 6).
 const USAGE_WARN_LEVELS = [0.8, 0.95];
 // The owner's live bar shows % done from this checklist (Claude Code's TodoWrite tool).
@@ -493,6 +512,12 @@ export const ELEVATION_MS = 4 * 60 * 60_000;
 const NO_ALWAYS = /^(git\s+push|gh)(\s|$)/;
 const WORKER_REFUSAL = "workers cannot spawn workers or delegate (depth 1)";
 const HANDED_OFF = "you already handed this work off; end your turn now";
+/** ADR-0066: a task with a parent task may ask it; never a workflow review, worker or turn. */
+const mayAskParent = (task: Task) =>
+  task.parentId !== null &&
+  !task.workerSpec &&
+  !task.roomId &&
+  task.agentChain.at(-1) !== "workflow";
 // ADR-0051: what the agent finds inside its container.
 const CONTAINER_NOTE =
   "This run executes in an isolated Linux container: only your own folders exist there, at the same paths. Apps, files and services elsewhere on the owner's Mac are not reachable.";
@@ -1702,6 +1727,33 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return { ok: true };
     },
 
+    askParent(from, question) {
+      const task = getTask(db, from.taskId);
+      if (task?.handoff) return { ok: false, reason: HANDED_OFF };
+      const parent = task?.parentId ? getTask(db, task.parentId) : undefined;
+      if (!task || !parent || !mayAskParent(task) || parent.status !== "queued") {
+        return { ok: false, reason: "this task has no delegator waiting for it; ask the owner" };
+      }
+      if (task.waitingParent) return { ok: false, reason: "one question at a time" };
+      if (task.parentQuestions >= MAX_PARENT_QUESTIONS) {
+        return {
+          ok: false,
+          reason: `at most ${MAX_PARENT_QUESTIONS} questions to your delegator: ask the owner or decide`,
+        };
+      }
+      askParentQuestion(db, task.id, question);
+      return { ok: true };
+    },
+
+    answerChild(from, request) {
+      const child = getTask(db, request.taskId);
+      if (!child || child.parentId !== from.taskId || !child.waitingParent) {
+        return { ok: false, reason: `task ${request.taskId} has no open question to you` };
+      }
+      answerParentQuestion(db, child.id, request.answer);
+      return { ok: true };
+    },
+
     async testIntegration(id, slug, site) {
       const entry = deps.integrations?.catalog().get(id);
       if (!deps.integrations?.call || !entry)
@@ -1974,7 +2026,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (task.workerSpec) return { ok: false, reason: WORKER_REFUSAL };
       if (task.roomId) return { ok: false, reason: "a discussion turn cannot hand off" };
       if (task.handoff) return { ok: false, reason: "only one handoff per run" };
-      if (task.waitingChildren > 0 || task.waitingOwner) {
+      if (task.waitingChildren > 0 || task.waitingOwner || task.waitingParent) {
         return { ok: false, reason: "this task has unfinished delegated work or an open question" };
       }
       const target = all.get(request.agent);
@@ -2429,6 +2481,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let geminiRun = false;
     // ADR-0066: the prompt for a resumed session, given its last turn.
     let whatsNew: (since: number) => string = () => "";
+    // ADR-0066: children's open questions shown to this run (answer_child), marked seen after.
+    let asking: Task[] = [];
     try {
       const all = agents();
       manifest = task.assigneeAgentId ? all.get(task.assigneeAgentId) : undefined;
@@ -2620,13 +2674,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             `\n\nDiscussion "${r.topic}" with ${r.participants.join(", ")}:\n${transcript(r.id)}\nWrite the decision and finish the task.`,
         )
         .join("");
-      const results = children.length
-        ? `\n\nResults from delegated tasks:\n${children
-            .map(
-              (c) =>
-                `- ${c.title} (${c.assigneeAgentId}, ${c.status}): ${c.result ?? c.error ?? ""}`,
-            )
-            .join("\n")}\nUse these results and finish the task.`
+      // A child's question wakes the parent before all children finish: only finished ones report.
+      const finished = children.filter((c) => c.status !== "queued" && c.status !== "claimed");
+      const resultsOf = (list: Task[]) =>
+        list.length
+          ? `\n\nResults from delegated tasks:\n${list
+              .map(
+                (c) =>
+                  `- ${c.title} (${c.assigneeAgentId}, ${c.status}): ${c.result ?? c.error ?? ""}`,
+              )
+              .join(
+                "\n",
+              )}\n${finished.length < children.length ? "Other delegated tasks are still running." : "Use these results and finish the task."}`
+          : "";
+      const results = resultsOf(finished);
+      asking = childQuestions(db, task.id);
+      const questions = asking.length
+        ? `\n\n${asking.map((c) => `${c.assigneeAgentId} (task #${c.id}) asks: ${c.parentQuestion}`).join("\n")}\nAnswer each with answer_child (task id and answer), then end your turn: you resume when your delegated tasks finish. You may ask the owner first if only they can answer.`
         : "";
       const previous = task.continuesFrom ? getTask(db, task.continuesFrom) : undefined;
       const handedOver = !previous
@@ -2637,6 +2701,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const answer =
         task.ownerQuestion && task.ownerAnswer
           ? `\n\nYou asked the owner: ${task.ownerQuestion}\nOwner's answer: ${task.ownerAnswer}\nContinue the task with this answer.`
+          : "";
+      // The parent's agent: after a handoff the chain ends with the previous step, not the parent.
+      const parentAgent =
+        (task.parentId && getTask(db, task.parentId)?.assigneeAgentId) || "your delegator";
+      const parentAnswer =
+        task.parentQuestion && task.parentAnswer && !task.waitingParent
+          ? `\n\nYou asked ${parentAgent}: ${task.parentQuestion}\nAnswer: ${task.parentAnswer}\nContinue the task with this answer.`
           : "";
       const team =
         delegates.length && deps.hub
@@ -2735,7 +2806,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const prompt =
         room && turn
           ? `${memories}${project ? projectBlock(project) : ""}# Discussion: ${room.topic}\n\nOpened by ${room.openerAgentId}. Round ${turn.round} of ${room.rounds}; you are ${manifest.id}.\n\nTranscript so far:\n${transcript(room.id)}\n\nGive your view in a few sentences. Build on what the others said and disagree when you have a reason; do not repeat the transcript.`
-          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${discussions}${answer}${resume}${runNotes}`.trim();
+          : `${memories}${project ? projectBlock(project) : ""}${chatBlock}# Task: ${task.title}\n\n${task.description ?? ""}${handedOver}${ownerNotes}${team}${results}${questions}${discussions}${answer}${parentAnswer}${resume}${runNotes}`.trim();
       // ADR-0066: a resumed session holds everything up to its last turn, so its prompt is what
       // came since: children's results, the owner's answer, a review, the owner's follow-up.
       // Only a run that succeeded left its turn in the session (failed runs store none).
@@ -2762,20 +2833,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           ...checklist.filter(newer).map((i) => `- [${i.done ? "x" : " "}] ${i.text}`),
           ...comments.filter(newer).map((c) => `- ${c.text}`),
         ];
-        const fresh = children.filter(newer);
+        const fresh = finished.filter(newer);
         const head = again
           ? `# Continue: ${task.title}`
           : `# Next task on this card: ${task.title}\n\n${task.description ?? ""}${previous && previous.assigneeAgentId !== self ? handedOver : ""}${owner.length ? `\n\nThe owner wrote:\n${owner.join("\n\n")}` : ""}`;
-        return `${head}${notes.length ? `\n\nNew on this card's checklist and comments:\n${notes.join("\n")}` : ""}${
-          fresh.length
-            ? `\n\nResults from delegated tasks:\n${fresh
-                .map(
-                  (c) =>
-                    `- ${c.title} (${c.assigneeAgentId}, ${c.status}): ${c.result ?? c.error ?? ""}`,
-                )
-                .join("\n")}\nUse these results and finish the task.`
-            : ""
-        }${discussions}${answer}${resume}${runNotes}`.trim();
+        return `${head}${notes.length ? `\n\nNew on this card's checklist and comments:\n${notes.join("\n")}` : ""}${resultsOf(fresh)}${questions}${discussions}${answer}${parentAnswer}${resume}${runNotes}`.trim();
       };
       if (task.roomId && !turn) throw new Error("the discussion has ended");
       built = toRequest(manifest, prompt, RUN_TIMEOUT_MS, task.sensitivity);
@@ -2874,6 +2936,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (deps.hub && !task.workerSpec && !task.roomId && !geminiRun) {
       const hubTools = [
         "ask_owner",
+        ...(mayAskParent(task) ? ["ask_parent"] : []),
+        ...(asking.length ? ["answer_child"] : []),
         "propose_agent",
         "move_task",
         "request_access",
@@ -3088,9 +3152,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         }
       } else if (
         res.ok &&
-        ((getTask(db, task.id)?.waitingChildren ?? 0) > 0 || getTask(db, task.id)?.waitingOwner)
+        ((getTask(db, task.id)?.waitingChildren ?? 0) > 0 ||
+          getTask(db, task.id)?.waitingOwner ||
+          getTask(db, task.id)?.waitingParent)
       ) {
-        // It delegated or asked the owner during this run: resume when that is answered.
+        // It delegated or asked the owner or its parent during this run: resume when answered.
+        // Questions it saw and left open no longer wake it, unless it asked the owner about them.
+        if (!getTask(db, task.id)?.waitingOwner)
+          childQuestionsSeen(
+            db,
+            asking.map((c) => c.id),
+          );
         waitForChildren(db, task.id, WORKER_ID);
       } else if (res.ok && task.roomId) {
         // A discussion turn: record it, hand the word to the next speaker, else back to the opener.

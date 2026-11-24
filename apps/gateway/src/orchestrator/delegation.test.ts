@@ -9,11 +9,18 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createThread, getTask, listMessages, openCoreDatabase, type Task } from "@achords/core";
+import {
+  createThread,
+  getTask,
+  lineTaskCount,
+  listMessages,
+  openCoreDatabase,
+  type Task,
+} from "@achords/core";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRunTokens } from "../mcp/tokens.ts";
-import { createOrchestrator, type Orchestrator } from "./orchestrator.ts";
+import { createOrchestrator, MAX_PARENT_QUESTIONS, type Orchestrator } from "./orchestrator.ts";
 
 const result = (over: Partial<RunResult> = {}): RunResult => ({
   ok: true,
@@ -76,19 +83,27 @@ describe("inter-agent delegation (ADR-0029)", () => {
   });
 
   /** Fake provider: finds which agent runs from the claimed task and applies its behaviour. */
-  const start = () => {
+  const start = (hub = false) => {
     const run = async (req: RunRequest) => {
       const task = db
         .prepare("SELECT id FROM tasks WHERE status = 'claimed' ORDER BY updated_at DESC LIMIT 1")
         .get();
       const t = getTask(db, String(task?.id)) as Task;
-      const agent = t.assigneeAgentId as string;
+      // No claimed task: the boss answers the owner.
+      const agent = t?.assigneeAgentId ?? "boss";
       calls.push({ agent, req });
       return (await behave[agent]?.(req, t)) ?? result({ text: `${agent} done` });
     };
     const cloud: ModelProvider = { id: "cli-claude", run };
     const local: ModelProvider = { id: "local", run };
-    orch = createOrchestrator({ db, home, providers: { "cli-claude": cloud, local } });
+    orch = createOrchestrator({
+      db,
+      home,
+      providers: { "cli-claude": cloud, local },
+      ...(hub
+        ? { hub: { url: "http://127.0.0.1:7420", tokens: createRunTokens(), serverEntry: "/x.ts" } }
+        : {}),
+    });
     orch.syncAgents();
   };
 
@@ -571,6 +586,215 @@ describe("inter-agent delegation (ADR-0029)", () => {
       const { task } = root("solo");
       const r = handoff(task, "boss");
       expect(r.ok).toBe(false);
+    });
+  });
+  describe("ask_parent (ADR-0066)", () => {
+    const tools = (agent: string, i = 0) =>
+      calls.filter((c) => c.agent === agent)[i]?.req.allowedTools ?? [];
+    const prompts = (agent: string) =>
+      calls.filter((c) => c.agent === agent).map((c) => c.req.prompt);
+    /** a delegates b (and optionally c) on its first run. */
+    const delegateFirst = (also: string[] = []) => {
+      const first = (req: RunRequest, t: Task): RunResult => {
+        if (calls.filter((c) => c.agent === "a").length === 1) {
+          for (const agent of ["b", ...also]) {
+            orch.delegate(
+              { from: "task", taskId: t.id },
+              { agent, title: `step ${agent}`, instructions: "x" },
+            );
+          }
+          return result({ text: "delegated" });
+        }
+        return result({
+          text: req.prompt.includes("Results from delegated tasks") ? "a final" : "a",
+        });
+      };
+      behave.a = first;
+      return first;
+    };
+
+    it("the child asks; the parent is woken despite its children, answers, and the child continues", async () => {
+      writeAgents(home, { a: { to: ["b", "c"] }, b: { from: ["a"] }, c: { from: ["a"] } });
+      start(true);
+      const base = delegateFirst(["c"]);
+      behave.a = (req, t) => {
+        const open = /b \(task #([\w-]+)\) asks: Which tone\?/.exec(req.prompt);
+        if (open) {
+          expect(t.waitingChildren).toBe(2); // woken although b and c are not finished
+          expect(
+            orch.answerChild(
+              { from: "task", taskId: t.id },
+              { taskId: open[1] as string, answer: "Friendly." },
+            ),
+          ).toEqual({ ok: true });
+          return result({ text: "answered" });
+        }
+        return base(req, t);
+      };
+      behave.b = (req, t) => {
+        if (!t.parentAnswer) {
+          expect(orch.askParent({ from: "task", taskId: t.id }, "Which tone?")).toEqual({
+            ok: true,
+          });
+          return result({ text: "asked" });
+        }
+        return result({
+          text: `copy, ${req.prompt.includes("Answer: Friendly.") ? "friendly" : "?"}`,
+        });
+      };
+      const { task } = root("a");
+      await drain(30);
+      expect(calls.map((c) => c.agent)).toEqual(["a", "b", "a", "b", "c", "a"]);
+      expect(tools("a", 0)).not.toContain("mcp__achords__ask_parent"); // the root asks the owner
+      expect(tools("a", 0)).not.toContain("mcp__achords__answer_child");
+      expect(tools("b", 0)).toContain("mcp__achords__ask_parent");
+      expect(tools("a", 1)).toContain("mcp__achords__answer_child");
+      // The wake shows the question, not unfinished children as results.
+      expect(prompts("a")[1]).not.toMatch(/Results from delegated tasks/);
+      expect(prompts("b")[1]).toMatch(/You asked a: Which tone\?\nAnswer: Friendly\./);
+      expect(getTask(db, task.id)).toMatchObject({ status: "done", result: "a final" });
+      expect(prompts("a")[2]).toMatch(/copy, friendly/);
+    });
+
+    it("the fourth question is refused", async () => {
+      writeAgents(home, { a: { to: ["b"] }, b: { from: ["a"] } });
+      start();
+      const base = delegateFirst();
+      behave.a = (req, t) => {
+        const open = /\(task #([\w-]+)\) asks: (q\d)/.exec(req.prompt);
+        if (!open) return base(req, t);
+        orch.answerChild(
+          { from: "task", taskId: t.id },
+          { taskId: open[1] as string, answer: `a${open[2]}` },
+        );
+        return result();
+      };
+      const asked: string[] = [];
+      behave.b = (_req, t) => {
+        const r = orch.askParent({ from: "task", taskId: t.id }, `q${t.parentQuestions + 1}`);
+        asked.push(r.ok ? "ok" : r.reason);
+        return result({ text: "b" });
+      };
+      root("a");
+      await drain(30);
+      expect(MAX_PARENT_QUESTIONS).toBe(3);
+      expect(asked.slice(0, 3)).toEqual(["ok", "ok", "ok"]);
+      expect(asked[3]).toMatch(/at most 3 .*ask the owner or decide/);
+      expect(asked).toHaveLength(4);
+    });
+
+    it("questions do not count toward the 20 tasks, but their runs are booked to the root's budget", async () => {
+      writeAgents(home, { a: { to: ["b"] }, b: { from: ["a"] } });
+      start();
+      const base = delegateFirst();
+      const paid = { ...result().usage, costUsd: 0.25 };
+      behave.a = (req, t) => {
+        const open = /\(task #([\w-]+)\) asks:/.exec(req.prompt);
+        if (open) {
+          orch.answerChild(
+            { from: "task", taskId: t.id },
+            { taskId: open[1] as string, answer: "yes" },
+          );
+          return result({ usage: paid });
+        }
+        return { ...base(req, t), usage: paid };
+      };
+      behave.b = (_req, t) => {
+        if (!t.parentAnswer) orch.askParent({ from: "task", taskId: t.id }, "ok?");
+        return result({ usage: paid });
+      };
+      const { task } = root("a", { budgetUsd: 10 });
+      await drain(30);
+      // a, b (asks), a (wakes), b (continues), a (finishes).
+      expect(calls).toHaveLength(5);
+      expect(lineTaskCount(db, task.id)).toBe(2);
+      expect(getTask(db, task.id)?.spentUsd).toBeCloseTo(1.25);
+    });
+
+    it("the owner's reply does not answer a parent question; an unanswered wake leaves it open", async () => {
+      writeAgents(home, { a: { to: ["b"] }, b: { from: ["a"] } });
+      start();
+      delegateFirst();
+      behave.b = (_req, t) => {
+        if (!t.parentAnswer) orch.askParent({ from: "task", taskId: t.id }, "Which tone?");
+        return result({ text: "b" });
+      };
+      const { thread } = root("a");
+      await drain(30);
+      // a delegated, b asked, a was woken once and ended without answering: nothing else runs.
+      expect(calls.map((c) => c.agent)).toEqual(["a", "b", "a"]);
+      const row = db.prepare("SELECT id FROM tasks WHERE assignee_agent_id = 'b'").get();
+      const child = getTask(db, String(row?.id)) as Task;
+      expect(child).toMatchObject({ waitingParent: true, parentQuestion: "Which tone?" });
+      expect(await orch.handleMessage(thread.id, "Friendly.", "web")).not.toBe("routed");
+      expect(getTask(db, child.id)).toMatchObject({ waitingParent: true, parentAnswer: null });
+    });
+
+    it("the parent can ask the owner while the child waits", async () => {
+      writeAgents(home, { a: { to: ["b"] }, b: { from: ["a"] } });
+      start();
+      const base = delegateFirst();
+      behave.a = (req, t) => {
+        const open = /\(task #([\w-]+)\) asks:/.exec(req.prompt);
+        if (!open) return base(req, t);
+        if (!t.ownerAnswer) {
+          orch.askOwner({ from: "task", taskId: t.id }, "Which tone does b need?");
+          return result({ text: "asked the owner" });
+        }
+        orch.answerChild(
+          { from: "task", taskId: t.id },
+          { taskId: open[1] as string, answer: t.ownerAnswer },
+        );
+        return result({ text: "answered" });
+      };
+      behave.b = (req, t) => {
+        if (!t.parentAnswer) {
+          orch.askParent({ from: "task", taskId: t.id }, "Which tone?");
+          return result({ text: "asked" });
+        }
+        return result({ text: req.prompt.includes("Answer: Formal.") ? "formal copy" : "?" });
+      };
+      const { thread, task } = root("a");
+      await drain(30);
+      expect(calls.map((c) => c.agent)).toEqual(["a", "b", "a"]);
+      expect(await orch.handleMessage(thread.id, "Formal.", "web")).toBe("routed");
+      await drain(30);
+      expect(calls.map((c) => c.agent)).toEqual(["a", "b", "a", "a", "b", "a"]);
+      // Woken again by the owner's answer, with the child's question still open.
+      expect(prompts("a")[2]).toMatch(/asks: Which tone\?[\s\S]*Owner's answer: Formal\./);
+      expect(prompts("a")[3]).toMatch(/formal copy/);
+      expect(getTask(db, task.id)?.status).toBe("done");
+    });
+
+    it("a handoff is refused while a question is open, and asking after a handoff too", async () => {
+      writeAgents(home, { a: { to: ["b"] }, b: { to: ["c"], from: ["a"] }, c: { from: ["b"] } });
+      start();
+      delegateFirst();
+      const out: string[] = [];
+      behave.b = (_req, t) => {
+        if (t.parentAnswer) return result();
+        orch.askParent({ from: "task", taskId: t.id }, "Which tone?");
+        const h = orch.handoff(
+          { from: "task", taskId: t.id },
+          { agent: "c", title: "c", instructions: "x" },
+        );
+        out.push(h.ok ? "handed off" : h.reason);
+        return result();
+      };
+      root("a");
+      await drain(30);
+      expect(out[0]).toMatch(/open question/);
+      // The other way round: after a handoff the run must end, not ask.
+      const c = db.prepare("SELECT id FROM tasks WHERE assignee_agent_id = 'b'").get();
+      const b = getTask(db, String(c?.id)) as Task;
+      db.prepare("UPDATE tasks SET handoff = ? WHERE id = ?").run(
+        JSON.stringify({ agent: "c", title: "c", instructions: "x" }),
+        b.id,
+      );
+      expect(orch.askParent({ from: "task", taskId: b.id }, "again?")).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/handed this work off/),
+      });
     });
   });
 });
