@@ -62,6 +62,8 @@ describe("model fallback on a usage limit (ADR-0058)", () => {
     const task = enqueue(db, { title: "Review", threadId: thread.id, assigneeAgentId: "reviewer" });
     for (let i = 0; i < 3 && (await orch.workOnce()); i++);
     expect(calls.map((c) => c.model)).toEqual(["astra", "sol"]);
+    // Codex's sandbox denies the home: git must not need ~/.gitconfig.
+    expect(calls[0]?.env?.GIT_CONFIG_GLOBAL).toBe("/dev/null");
     expect(getTask(db, task.id)).toMatchObject({ status: "done", result: "done on sol" });
     expect(
       listMessages(db, thread.id)
