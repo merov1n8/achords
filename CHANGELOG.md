@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Chat messages show the speaking agent as a tag at the start of the header, with a small kind
+  tag (Done, Review, Question, Command) instead of repeating the name in the text; skill
+  proposals carry a "New skill" or "Skill update" tag.
 - Unsent text in a chat's message box is kept per chat in the browser: switching to another chat
   or page and back brings it back (drafts older than 30 days are dropped).
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
