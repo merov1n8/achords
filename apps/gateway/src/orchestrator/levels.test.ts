@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   answerOwnerQuestion,
@@ -122,6 +122,12 @@ describe("permission levels in runs (ADR-0067)", () => {
         },
         call: async () => ({ ok: true, text: "ok" }),
       },
+      gitIdentity: () => ({
+        GIT_AUTHOR_NAME: "Owner",
+        GIT_COMMITTER_NAME: "Owner",
+        GIT_AUTHOR_EMAIL: "owner@example.com",
+        GIT_COMMITTER_EMAIL: "owner@example.com",
+      }),
       gitPush: async (input) => {
         pushes.push(input);
         return { ok: true, text: `pushed ${input.branch}` };
@@ -378,8 +384,28 @@ describe("permission levels in runs (ADR-0067)", () => {
     expect(settings.sandbox.filesystem.allowWrite).toEqual(
       expect.arrayContaining([expect.stringMatching(/\/tmp\/achords-levels-cache$/)]),
     );
-    expect(settings.sandbox.filesystem.denyRead[0]).toMatch(/achords-levels-/);
+    // Nothing of the user's home or achords' home but the run's folders (and toolchains).
+    expect(settings.sandbox.filesystem.denyRead.slice(0, 2)).toEqual([
+      homedir(),
+      expect.stringMatching(/achords-levels-/),
+    ]);
+    expect(settings.sandbox.filesystem.denyRead).toContain(join(homedir(), ".npmrc"));
     expect(settings.permissions.deny).toContain("Bash(git push:*)");
+    // Package caches in a folder of this run, writable, removed afterwards; user config blanked.
+    const cache = settings.sandbox.filesystem.allowWrite.find((p: string) =>
+      /\/run\/cache-[\w-]+$/.test(p),
+    );
+    expect(cache).toBeDefined();
+    expect(settings.sandbox.filesystem.allowRead).toContain(cache);
+    expect(req?.env).toMatchObject({
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      npm_config_userconfig: "/dev/null",
+      npm_config_cache: join(cache, "npm"),
+      PIP_CACHE_DIR: join(cache, "pip"),
+      GIT_AUTHOR_NAME: "Owner",
+      GIT_COMMITTER_EMAIL: "owner@example.com",
+    });
+    expect(existsSync(cache)).toBe(false);
     // No request_command: there is no list to ask for.
     expect(hubTools(seen[0]?.config)).not.toContain("request_command");
   });
@@ -430,7 +456,7 @@ describe("permission levels in runs (ADR-0067)", () => {
     );
     const settings = JSON.parse(req?.settings ?? "{}");
     expect(settings.sandbox.enabled).toBe(true);
-    expect(settings.sandbox.filesystem.denyRead[0]).toMatch(/achords-levels-/);
+    expect(settings.sandbox.filesystem.denyRead[1]).toMatch(/achords-levels-/);
     // Still never next to the open web.
     expect(req?.tools).not.toContain("WebFetch");
     expect(
@@ -550,7 +576,7 @@ describe("permission levels in runs (ADR-0067)", () => {
       // The run itself never holds the token or a way to ask for it.
       const run = JSON.stringify({ req, config: seen[0]?.config });
       expect(run).not.toContain("ghp_");
-      expect(run).not.toMatch(/ACHORDS_GIT_TOKEN|git-credential|git_credential/);
+      expect(run).not.toMatch(/ACHORDS_GIT_TOKEN|api\/agent\/git-credential|git_credential/);
       expect(JSON.stringify(out)).not.toContain("ghp_");
       expectHardened(req);
       const settings = JSON.parse(req?.settings ?? "{}");

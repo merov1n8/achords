@@ -127,6 +127,7 @@ import {
   type Grant,
   grantedIntegrations,
   hostSandboxSettings,
+  hostShellEnv,
   inFolders,
   isLocalModel,
   isSecured,
@@ -350,6 +351,11 @@ export interface OrchestratorDeps {
    * ADR-0067 level 5: pushes one branch in the gateway's own process (`git-push.ts`). Without it
    * no run gets push_branch.
    */
+  /**
+   * The owner's git author identity (GIT_AUTHOR_NAME/EMAIL, GIT_COMMITTER_NAME/EMAIL) for host
+   * shells, which cannot read ~/.gitconfig.
+   */
+  gitIdentity?: () => Record<string, string>;
   gitPush?: (input: {
     folder: string;
     branch: string;
@@ -775,10 +781,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const free = shellBox && m.tools.includes("Bash") ? shellBox : undefined;
     // Inside the VM the container is the sandbox: any command, never push or history rewrite.
     if (free === "container") allowedTools.push("Bash");
+    // A host shell reads nothing of the user's home: package caches go to a folder of this run.
+    const cache = free === "host" ? join(real(home), "run", `cache-${randomUUID()}`) : undefined;
+    if (cache) mkdirSync(cache, { recursive: true, mode: 0o700 });
     const box =
       free === "host"
         ? hostSandboxSettings({
-            write: [...new Set([real(cwd), ...write])],
+            write: [...new Set([real(cwd), ...write, ...(cache ? [cache] : [])])],
             own: [...read, ...write],
             network: m.network.allow,
             unsandboxed: m.unsandboxed ?? [],
@@ -810,10 +819,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ...(m.budget.per_run_usd ? { maxBudgetUsd: m.budget.per_run_usd } : {}),
       ...(m.effort ? { effort: m.effort } : {}),
       // ADR-0067: git in any shell of the run never reaches the host's credentials.
-      env: { ...GIT_SHELL_ENV, ...pay?.env },
+      env: {
+        ...GIT_SHELL_ENV,
+        ...(cache ? { ...hostShellEnv(cache), ...deps.gitIdentity?.() } : {}),
+        ...pay?.env,
+      },
       ...(pay ? { billing: pay.mode } : {}),
     };
-    return { provider, req };
+    return { provider, req, ...(cache ? { scratch: cache } : {}) };
   };
 
   /** Pure policy check for one delegation step; returns the refusal reason, if any. */
@@ -3972,9 +3985,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
     // API budget used up (Phase 4): the work waits, it does not fail.
     const overBudget = built.req.billing === "api" ? deps.budget?.(built.provider.id) : undefined;
+    // A host shell's cache folder lives as long as the run.
+    const dropScratch = () => {
+      if (built.scratch) rmSync(built.scratch, { recursive: true, force: true });
+    };
     if (overBudget) {
       hubRun?.revoke();
       if (hubRun) rmSync(hubRun.file, { recursive: true, force: true });
+      dropScratch();
       defer(db, task.id, WORKER_ID, overBudget, BUDGET_DEFER_MS);
       return;
     }
@@ -3982,6 +4000,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (getTask(db, task.id)?.status !== "claimed") {
       hubRun?.revoke();
       if (hubRun) rmSync(hubRun.file, { force: true });
+      dropScratch();
       return;
     }
     const run = startRun(db, {
@@ -4177,6 +4196,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       clearInterval(keepAlive);
       hubRun?.revoke();
       if (hubRun) rmSync(hubRun.file, { recursive: true, force: true });
+      dropScratch();
     }
   }
 }

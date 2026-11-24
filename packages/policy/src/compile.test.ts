@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Catalog, type CatalogEntry, catalogEntrySchema } from "./catalog.ts";
 import { historyRewrite } from "./check.ts";
@@ -5,6 +8,7 @@ import {
   type CompileInput,
   compileLevel,
   hostSandboxSettings,
+  hostShellEnv,
   levelConflicts,
   REGISTRY_HOSTS,
 } from "./compile.ts";
@@ -390,19 +394,97 @@ describe("host sandbox settings (ADR-0067 level 4)", () => {
     expect(settings.sandbox.network.allowedDomains).not.toContain("*");
   });
 
-  it("denies reading achords' home (except the run's folders) and credential folders", () => {
-    expect(settings.sandbox.filesystem.denyRead).toEqual([
-      "/home/u/.achords",
-      "/home/u/.ssh",
-      "/home/u/.aws",
-      "/home/u/.config/gh",
-      "/home/u/.gnupg",
-      "/home/u/Library/Keychains",
-    ]);
-    expect(settings.sandbox.filesystem.allowRead).toEqual([
+  it("denies reading the user's home and achords' home, except the run's folders", () => {
+    const { denyRead, allowRead } = settings.sandbox.filesystem;
+    expect(denyRead.slice(0, 2)).toEqual(["/home/u", "/home/u/.achords"]);
+    // Credential files and folders by name as well.
+    for (const key of [
+      ".ssh",
+      ".aws",
+      ".config",
+      ".gnupg",
+      "Library/Keychains",
+      ".git-credentials",
+      ".gitconfig",
+      ".netrc",
+      ".npmrc",
+      ".pypirc",
+      ".docker",
+      ".kube",
+      ".cargo/credentials.toml",
+      ".claude",
+    ]) {
+      expect(denyRead, key).toContain(`/home/u/${key}`);
+    }
+    // Folders outside both homes need no re-allow (/srv/ref).
+    expect(allowRead).toEqual([
       "/home/u/.achords/agents/maker/work",
       "/home/u/.achords/skills/shared",
+      "/home/u/.cache/tool",
     ]);
+  });
+
+  it("re-allows the toolchains present, never a credential folder or a whole home", () => {
+    const user = mkdtempSync(join(tmpdir(), "achords-home-"));
+    try {
+      for (const d of [
+        ".nvm",
+        ".cargo/bin",
+        ".rustup",
+        "Library/Developer",
+        ".config/x",
+        ".local/opt/node-v24/bin",
+      ]) {
+        mkdirSync(join(user, d), { recursive: true });
+      }
+      writeFileSync(join(user, ".pyenv"), "a file, not a folder");
+      const out = hostSandboxSettings({
+        write: [join(user, "work")],
+        own: [
+          join(user, "work"),
+          user,
+          join(user, ".config/x"),
+          join(user, ".ssh"),
+          join(user, "h"),
+        ],
+        network: [],
+        unsandboxed: [],
+        achordsHome: join(user, "h"),
+        userHome: user,
+        path: [join(user, ".local/opt/node-v24/bin"), join(user, ".cargo/bin"), "/usr/bin"],
+      }) as { sandbox: { filesystem: { denyRead: string[]; allowRead: string[] } } };
+      expect(out.sandbox.filesystem.allowRead.sort()).toEqual(
+        [
+          ".cargo/bin",
+          ".local/opt/node-v24",
+          ".local/opt/node-v24/bin",
+          ".nvm",
+          ".rustup",
+          "Library/Developer",
+          "work",
+        ]
+          .map((p) => join(user, p))
+          .sort(),
+      );
+      expect(out.sandbox.filesystem.denyRead).toContain(join(user, ".cargo/credentials.toml"));
+    } finally {
+      rmSync(user, { recursive: true, force: true });
+    }
+  });
+
+  it("puts a host shell's package caches in the run's folder and blanks the user config files", () => {
+    expect(hostShellEnv("/r/cache")).toEqual({
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      XDG_CONFIG_HOME: "/r/cache/config",
+      npm_config_userconfig: "/dev/null",
+      npm_config_cache: "/r/cache/npm",
+      npm_config_store_dir: "/r/cache/pnpm",
+      YARN_CACHE_FOLDER: "/r/cache/yarn",
+      BUN_INSTALL_CACHE_DIR: "/r/cache/bun",
+      PIP_CONFIG_FILE: "/dev/null",
+      PIP_CACHE_DIR: "/r/cache/pip",
+      NUGET_PACKAGES: "/r/cache/nuget",
+    });
   });
 
   it("excludes only the remit's unsandboxed executables, and refuses push and history rewrite", () => {

@@ -95,7 +95,31 @@ const log = (msg: string) => console.log(`${new Date().toISOString()} gateway: $
  * Runs until SIGTERM/SIGINT or until the STOP marker appears. Every "won't run" path exits 0:
  * the launchd job uses KeepAlive.SuccessfulExit=false, so only crashes are respawned.
  */
+/**
+ * The owner's git author identity for host shells (ADR-0067), which cannot read ~/.gitconfig:
+ * only user.name and user.email, read once by the gateway.
+ */
+function ownerGitIdentity(): Record<string, string> {
+  const get = (key: string) => {
+    try {
+      return execFileSync("git", ["config", "--global", "--get", key], {
+        encoding: "utf8",
+        timeout: 5000,
+      }).trim();
+    } catch {
+      return "";
+    }
+  };
+  const name = get("user.name");
+  const email = get("user.email");
+  return {
+    ...(name ? { GIT_AUTHOR_NAME: name, GIT_COMMITTER_NAME: name } : {}),
+    ...(email ? { GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_EMAIL: email } : {}),
+  };
+}
+
 export function runGateway(home: string): Promise<number> {
+  let identity: Record<string, string> | undefined;
   const paths = homePaths(home);
   mkdirSync(paths.runDir, { recursive: true, mode: 0o700 });
 
@@ -315,6 +339,7 @@ export function runGateway(home: string): Promise<number> {
     budget,
     // ADR-0067 level 5: push_branch runs git here, in a folder only the gateway reads.
     gitPush: (input) => pushBranch({ ...input, tmpRoot: join(home, "run") }),
+    gitIdentity: () => (identity ??= ownerGitIdentity()),
     // Price list for CLIs that report tokens only; read per run, so edits apply at once.
     price: (model, usage) => costOf(loadPricing(home), model, usage),
     db,

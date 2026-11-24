@@ -1,8 +1,9 @@
 // ADR-0067 step 2: an agent's effective level compiled into the fields a run already uses
 // (tools, shell, network, container, mcp and the tool lists per integration). Agents without a
 // `level` never come here: their lists apply as written.
+import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type Catalog, type CatalogEntry, publishMode, secretRefs, toolClass } from "./catalog.ts";
 import { isLocalModel } from "./check.ts";
 import type { Manifest } from "./manifest.ts";
@@ -278,25 +279,122 @@ export const SHELL_DENY = [
 ];
 
 /**
+ * Folders under the user's home a host shell may read (ADR-0067): toolchains builds need, only
+ * those present. Directories of programs, never of credentials.
+ */
+export const HOME_TOOLCHAINS = [
+  ".local/bin",
+  ".local/share/fnm",
+  ".local/share/mise",
+  ".nvm",
+  ".volta",
+  ".bun/bin",
+  ".pyenv",
+  ".rbenv",
+  ".asdf",
+  ".cargo/bin",
+  ".rustup",
+  ".dotnet",
+  ".swiftpm",
+  "Library/Developer",
+];
+
+/**
+ * Credential files and folders under the user's home, denied by name as well as with the home
+ * itself: a run folder or toolchain that is or contains one of them is never re-allowed.
+ */
+export const HOME_KEYS = [
+  ".ssh",
+  ".aws",
+  ".azure",
+  ".config",
+  ".gnupg",
+  "Library/Keychains",
+  ".git-credentials",
+  ".gitconfig",
+  ".netrc",
+  ".npmrc",
+  ".yarnrc",
+  ".yarnrc.yml",
+  ".pypirc",
+  ".docker",
+  ".kube",
+  ".gem",
+  ".cargo/credentials",
+  ".cargo/credentials.toml",
+  ".nuget",
+  ".gradle",
+  ".m2",
+  ".terraform.d",
+  ".vault-token",
+  ".claude",
+  ".claude.json",
+  ".codex",
+  ".gemini",
+];
+
+/**
+ * Environment of a host-sandbox shell (ADR-0067): package caches in the run's own writable
+ * `cache` folder, and user config files that are now unreadable replaced by nothing (git dies on
+ * an unreadable ~/.gitconfig; npm and pip would read tokens from theirs). CARGO_HOME stays: it
+ * also holds the rustup proxies on PATH.
+ */
+export function hostShellEnv(cache: string): Record<string, string> {
+  return {
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    XDG_CONFIG_HOME: join(cache, "config"),
+    npm_config_userconfig: "/dev/null",
+    npm_config_cache: join(cache, "npm"),
+    npm_config_store_dir: join(cache, "pnpm"),
+    YARN_CACHE_FOLDER: join(cache, "yarn"),
+    BUN_INSTALL_CACHE_DIR: join(cache, "bun"),
+    PIP_CONFIG_FILE: "/dev/null",
+    PIP_CACHE_DIR: join(cache, "pip"),
+    NUGET_PACKAGES: join(cache, "nuget"),
+  };
+}
+
+/**
  * The claude CLI's own sandbox for a level 4 shell on the host (`--settings`): commands write only
- * to the run's folders, reach only registries and the run's hosts, and cannot read achords' home
- * (except the run's own folders there) or the user's credential folders. Only the remit's
- * `unsandboxed` executables leave it.
+ * to the run's folders, reach only registries and the run's hosts, and read nothing of the user's
+ * home or achords' home but the run's own folders and the toolchains present; credential files
+ * stay denied by name. Only the remit's `unsandboxed` executables leave it.
  */
 export function hostSandboxSettings(input: {
-  /** The run's work folders (absolute). */
+  /** The run's work folders (absolute), its cache folder included. */
   write: string[];
-  /** Everything the run may read under $ACHORDS_HOME (its folders, skills, chat images). */
+  /** Everything the run may read (its folders, skills, chat images). */
   own: string[];
   /** The run's allowed hosts (`network.allow`, "*" left out). */
   network: string[];
   unsandboxed: string[];
   achordsHome: string;
   userHome?: string;
+  /** The run's PATH (default: the gateway's): its folders under the home are toolchains too. */
+  path?: string[];
 }): Record<string, unknown> {
   const user = input.userHome ?? homedir();
   const hosts = input.network.filter((h) => h !== "*").map((h) => h.split("/")[0] as string);
-  const under = (p: string) => p === input.achordsHome || p.startsWith(`${input.achordsHome}/`);
+  const inside = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
+  const keys = HOME_KEYS.map((p) => join(user, p));
+  const denied = [user, input.achordsHome];
+  // A PATH folder `…/<install>/bin` brings its install folder (node's lib/node_modules), but
+  // never a folder right below the home (`~/.local`, `~/.cargo`).
+  const onPath = (input.path ?? (process.env.PATH ?? "").split(":"))
+    .filter((p) => p.startsWith(`${user}/`))
+    .flatMap((p) => {
+      const parent = dirname(p);
+      const deep = parent.slice(user.length + 1).includes("/");
+      return p.endsWith("/bin") && deep ? [p, parent] : [p];
+    });
+  const toolchains = [...HOME_TOOLCHAINS.map((p) => join(user, p)), ...onPath].filter(
+    (p) => existsSync(p) && statSync(p).isDirectory(),
+  );
+  // Re-allowed only below a denied root, and never a folder that is or holds a denied one.
+  const readable = (p: string) =>
+    denied.some((root) => inside(p, root)) &&
+    ![...denied, ...keys].some((d) => inside(d, p)) &&
+    !keys.some((k) => inside(p, k));
   return {
     sandbox: {
       enabled: true,
@@ -311,13 +409,8 @@ export function hostSandboxSettings(input: {
       },
       filesystem: {
         allowWrite: [...new Set(input.write)],
-        denyRead: [
-          input.achordsHome,
-          ...[".ssh", ".aws", ".config/gh", ".gnupg", "Library/Keychains"].map((p) =>
-            join(user, p),
-          ),
-        ],
-        allowRead: [...new Set(input.own.filter(under))],
+        denyRead: [...new Set([...denied, ...keys])],
+        allowRead: [...new Set([...input.own, ...input.write, ...toolchains].filter(readable))],
       },
     },
     permissions: {
