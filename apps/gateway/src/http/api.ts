@@ -59,6 +59,7 @@ import {
   spendSince,
   stallSettings,
   stopThread,
+  type Task,
   threadSummary,
   updateChecklistItem,
   updateMonitor,
@@ -66,6 +67,7 @@ import {
   updateTask,
   updateThread,
   validateSession,
+  withCardTitles,
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
@@ -545,7 +547,7 @@ export function createApiHandler(deps: ApiDeps) {
         return out;
       },
     ],
-    ["GET", /^\/api\/tasks$/, () => listTasks(db)],
+    ["GET", /^\/api\/tasks$/, () => withCardTitles(db, listTasks(db))],
     // Scheduler (ADR-0033): what runs when; the gateway tick starts them.
     ["GET", /^\/api\/schedules$/, () => listSchedules(db)],
     [
@@ -879,7 +881,7 @@ export function createApiHandler(deps: ApiDeps) {
         });
         if (!out.ok) throw new HttpError(400, out.reason);
         log(`kanban: owner created task ${out.taskId}${b.start ? " and started it" : ""}`);
-        send(res, 201, getTask(db, out.taskId));
+        send(res, 201, withCardTitles(db, [getTask(db, out.taskId) as Task])[0]);
       },
     ],
     [
@@ -903,7 +905,11 @@ export function createApiHandler(deps: ApiDeps) {
         const id = params[0] as string;
         const task = getTask(db, id);
         if (!task) throw new HttpError(404, "no such task");
-        return { ...task, checklist: listChecklist(db, id), comments: listComments(db, id) };
+        return {
+          ...withCardTitles(db, [task])[0],
+          checklist: listChecklist(db, id),
+          comments: listComments(db, id),
+        };
       },
     ],
     [
@@ -921,11 +927,20 @@ export function createApiHandler(deps: ApiDeps) {
                     : str(b.description, "description", MESSAGE_LIMIT),
               }
             : {}),
+          // The owner's name for the card; the task's own title stays (agents' prompts use it).
+          ...(b.cardTitle !== undefined
+            ? {
+                cardTitle:
+                  b.cardTitle === null || (typeof b.cardTitle === "string" && !b.cardTitle.trim())
+                    ? null
+                    : str(b.cardTitle, "cardTitle", 200).trim(),
+              }
+            : {}),
         };
         const task = updateTask(db, params[0] as string, patch);
         if (!task) throw new HttpError(404, "no such task");
         log(`kanban: owner edited task ${task.id} (${Object.keys(patch).join(", ") || "nothing"})`);
-        return task;
+        return withCardTitles(db, [task])[0];
       },
     ],
     [

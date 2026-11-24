@@ -38,6 +38,10 @@ export interface Message {
 export interface Task {
   id: string;
   title: string;
+  /** What the card shows: the owner's name for it, else its chat's title, else `title`. */
+  cardTitle: string;
+  /** The owner's own name for the card; null = the chat's title. */
+  ownCardTitle: string | null;
   status: "queued" | "claimed" | "done" | "failed" | "cancelled";
   assigneeAgentId: string | null;
   threadId: string | null;

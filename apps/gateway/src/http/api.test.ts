@@ -1362,6 +1362,32 @@ describe("HTTP API", () => {
     expect((await call("/api/tasks/nope")).status).toBe(404);
   });
 
+  it("kanban: a card shows its chat's title until the owner names it; the task title stays", async () => {
+    const { call } = await pair();
+    const th = createThread(db, { title: "Hotel page" });
+    const card = enqueue(db, { title: "boss-written title", threadId: th.id });
+    const path = `/api/tasks/${card.id}`;
+    const json = (r: Response) => r.json() as Promise<Record<string, unknown>>;
+    const listed = async () =>
+      ((await (await call("/api/tasks")).json()) as Record<string, unknown>[]).find(
+        (x) => x.id === card.id,
+      );
+
+    expect(await listed()).toMatchObject({ cardTitle: "Hotel page", title: "boss-written title" });
+    expect(await json(await call(path))).toMatchObject({ cardTitle: "Hotel page" });
+    const named = await call(path, { method: "PATCH", body: '{"cardTitle":" Partner hotels "}' });
+    expect(await json(named)).toMatchObject({
+      cardTitle: "Partner hotels",
+      ownCardTitle: "Partner hotels",
+      title: "boss-written title",
+    });
+    expect(await listed()).toMatchObject({ cardTitle: "Partner hotels" });
+    const long = JSON.stringify({ cardTitle: "x".repeat(201) });
+    expect((await call(path, { method: "PATCH", body: long })).status).toBe(400);
+    const cleared = await call(path, { method: "PATCH", body: '{"cardTitle":""}' });
+    expect(await json(cleared)).toMatchObject({ cardTitle: "Hotel page", ownCardTitle: null });
+  });
+
   it("kanban: the owner creates a card by hand and starts it later", async () => {
     const { call, cookie } = await pair();
     cards.length = 0;

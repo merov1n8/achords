@@ -606,6 +606,8 @@
   "kanban.allWorkspaces": "All",
   "kanban.assignee": "Assigned to",
   "card.title": "Title",
+  "card.titleChatName": "Leave empty to show the chat's name",
+  "card.currentTask": "Current task: {title}",
   "card.description": "Description",
   "card.column": "Column",
   "card.checklist": "Sub-items",

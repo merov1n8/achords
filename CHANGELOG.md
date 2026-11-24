@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
+  task's title; renaming the card in its detail view sticks across follow-up tasks, and an empty
+  name goes back to the chat's name. The current task's title is shown below the field.
 - The chat's run details list a run's refused tool calls (tool, input and why: not granted, needs
   approval or blocked by the sandbox), and the gateway log has one line per refused call.
 - Permission levels now decide what an agent may do (ADR-0067), for agents that have a `level`

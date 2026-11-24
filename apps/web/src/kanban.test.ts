@@ -13,6 +13,8 @@ import type { Task } from "./types.ts";
 const task = (id: string, over: Partial<Task> = {}): Task => ({
   id,
   title: id,
+  cardTitle: id,
+  ownCardTitle: null,
   status: "done",
   assigneeAgentId: "dev",
   threadId: null,
