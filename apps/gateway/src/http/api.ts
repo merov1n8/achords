@@ -168,6 +168,7 @@ export interface ApiDeps {
     | "decideProposal"
     | "moveTask"
     | "ownerMove"
+    | "noteRunning"
     | "runAction"
     | "workflow"
     | "syncAgents"
@@ -1010,7 +1011,14 @@ export function createApiHandler(deps: ApiDeps) {
       /^\/api\/tasks\/([\w-]{1,64})\/comments$/,
       async ({ params, body }) => {
         const id = params[0] as string;
-        const comment = addComment(db, id, str((await body()).text, "text", 5000));
+        const text = str((await body()).text, "text", 5000);
+        // ADR-0069: on a card whose work is running, the comment is a note to that work.
+        const note = deps.orchestrator.noteRunning(id, text);
+        if (note) {
+          log(`kanban: owner sent a note to the work running on task ${id}`);
+          return note;
+        }
+        const comment = addComment(db, id, text);
         if (!comment) throw new HttpError(404, "no such task");
         log(`kanban: owner commented on task ${id}`);
         return comment;

@@ -8,7 +8,27 @@ import { usePoll } from "../poll.ts";
 import type { Agent, Task } from "../types.ts";
 
 type Item = { id: number; text: string; done: boolean };
-type Comment = { id: number; text: string; author: string | null; createdAt: number };
+type Comment = {
+  id: number;
+  text: string;
+  author: string | null;
+  createdAt: number;
+  /** ADR-0069: a note to running work, an approved request's result, or a dropped note. */
+  kind?: "comment" | "note" | "request_result" | "dropped";
+  deliveredAt?: number | null;
+};
+
+/** The short state of a note or request result, or "" for a plain comment. */
+const noteState = (cm: Comment): string =>
+  cm.kind === "note"
+    ? cm.deliveredAt
+      ? t("card.noteDelivered", { when: ago(cm.deliveredAt) })
+      : t("card.noteWaiting")
+    : cm.kind === "request_result"
+      ? t("card.requestResult")
+      : cm.kind === "dropped"
+        ? t("card.noteDropped")
+        : "";
 type Detail = Task & { description: string | null; checklist: Item[]; comments: Comment[] };
 
 /** Card details: name the card, edit the description, sub-items, own comments, move, start, delete. */
@@ -246,6 +266,7 @@ export function CardModal(props: {
                   <span class="grow">
                     {cm.author ? `${cm.author} · ` : ""}
                     {ago(cm.createdAt)}
+                    {noteState(cm) ? ` · ${noteState(cm)}` : ""}
                   </span>
                   <button
                     type="button"

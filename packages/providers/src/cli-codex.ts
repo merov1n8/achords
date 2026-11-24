@@ -185,6 +185,17 @@ export function codexArgs(
     "-c",
     `shell_environment_policy.exclude=${toml(["ACHORDS_*", ...Object.keys(mcp.env)])}`,
     ...mcp.args,
+    // ADR-0069: our own inbox hook only (the user's config is ignored above), so its trust
+    // prompt is skipped.
+    ...(req.inboxHook
+      ? [
+          "--dangerously-bypass-hook-trust",
+          "-c",
+          `hooks.PostToolUse=${toml([{ matcher: "*", hooks: [{ type: "command", command: req.inboxHook.post }] }])}`,
+          "-c",
+          `hooks.Stop=${toml([{ hooks: [{ type: "command", command: req.inboxHook.stop }] }])}`,
+        ]
+      : []),
     "-o",
     files.last,
   ];

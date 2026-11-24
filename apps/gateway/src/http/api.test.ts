@@ -143,6 +143,20 @@ describe("HTTP API", () => {
             moves.push({ from, request });
             return { ok: true };
           },
+          // ADR-0069: a card "running-card" has work running; any other has none.
+          noteRunning: (cardId, text) =>
+            cardId === "running-card"
+              ? {
+                  id: 1,
+                  text,
+                  author: null,
+                  roomId: null,
+                  kind: "note",
+                  forTask: "run-task",
+                  deliveredAt: null,
+                  createdAt: 1,
+                }
+              : undefined,
           ownerMove: (_taskId, from, to) =>
             from === "stale"
               ? { ok: false, reason: "the card was moved meanwhile" }
@@ -1368,6 +1382,16 @@ describe("HTTP API", () => {
     );
     expect((await call(`${path}/comments/${other.id}`, { method: "DELETE" })).status).toBe(200);
     expect((await call(`${path}/comments/${other.id}`, { method: "DELETE" })).status).toBe(404);
+    expect(other).toMatchObject({ kind: "comment" });
+    // ADR-0069: on a card with running work, a comment is a note to that work.
+    expect(
+      await json(
+        await call("/api/tasks/running-card/comments", {
+          method: "POST",
+          body: '{"text":"use main"}',
+        }),
+      ),
+    ).toMatchObject({ kind: "note", text: "use main", forTask: "run-task" });
 
     const detail = await json(await call(path));
     expect(detail).toMatchObject({
