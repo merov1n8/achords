@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { replyState, withCount } from "./alerts.ts";
+import { attention, replyState, withCount } from "./alerts.ts";
 
 const th = (id: string, lastAgentSeq: number | null) => ({ id, lastAgentSeq });
 
@@ -47,5 +47,23 @@ describe("reply alerts", () => {
   it("after a reload the saved marks still count what came meanwhile", () => {
     const r = replyState([th("a", 8)], { seen: { a: 5 } }, undefined, false);
     expect(r).toMatchObject({ unread: 1, chime: false, max: 8 });
+  });
+
+  it("a chat asks for attention while a reply is unread, with a badge when it waits for the owner", () => {
+    const chat = (lastAgentSeq: number | null, waitingOwner = false) => ({
+      id: "a",
+      lastAgentSeq,
+      waitingOwner,
+    });
+    expect(attention(chat(5), { a: 3 }, undefined)).toBe("unread");
+    expect(attention(chat(5, true), { a: 3 }, undefined)).toBe("waiting");
+    // Opening it marks it read: an open question alone does not bring the badge back...
+    expect(attention(chat(5, true), { a: 5 }, undefined)).toBeUndefined();
+    expect(attention(chat(5, true), { a: 3 }, "a")).toBeUndefined();
+    // ...a new question or approval (a new agent message) does.
+    expect(attention(chat(6, true), { a: 5 }, undefined)).toBe("waiting");
+    // Never looked at, or no reply yet: nothing to mark.
+    expect(attention(chat(5, true), undefined, undefined)).toBeUndefined();
+    expect(attention(chat(null), { a: 0 }, undefined)).toBeUndefined();
   });
 });

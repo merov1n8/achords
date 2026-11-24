@@ -68,6 +68,7 @@ import {
   updateThread,
   validateSession,
   withCardTitles,
+  withOwnerWaits,
 } from "@achords/core";
 import { t } from "@achords/i18n";
 import {
@@ -547,7 +548,7 @@ export function createApiHandler(deps: ApiDeps) {
         return out;
       },
     ],
-    ["GET", /^\/api\/tasks$/, () => withCardTitles(db, listTasks(db))],
+    ["GET", /^\/api\/tasks$/, () => withOwnerWaits(db, withCardTitles(db, listTasks(db)))],
     // Scheduler (ADR-0033): what runs when; the gateway tick starts them.
     ["GET", /^\/api\/schedules$/, () => listSchedules(db)],
     [

@@ -1,4 +1,4 @@
-import { GripVertical, ListChecks, Plus } from "lucide-preact";
+import { GripVertical, ListChecks, MessageSquare, Plus } from "lucide-preact";
 import { useRef, useState } from "preact/hooks";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
@@ -246,7 +246,8 @@ export function Kanban() {
               // biome-ignore lint/a11y/useSemanticElements: a draggable card, not a button
               <div
                 key={task.id}
-                class={`card kcard ${keyMove?.task.id === task.id ? "picked" : ""}`}
+                class={`card kcard ${keyMove?.task.id === task.id ? "picked" : ""} ${task.waitsForOwner ? "waiting" : ""}`}
+                title={task.waitsForOwner ? t("common.waitingOwner") : undefined}
                 tabIndex={0}
                 role="button"
                 aria-roledescription="draggable card"
@@ -273,6 +274,19 @@ export function Kanban() {
                   )}
                   {ago(task.updatedAt)}
                   {children > 0 && <span>· {t("kanban.subtasks", { n: children })}</span>}
+                  {task.threadId && (
+                    // Its own link: no drag and no card modal from here.
+                    <a
+                      class="kcard-chat"
+                      href={`/chat/${task.threadId}`}
+                      aria-label={t("card.openChat")}
+                      title={t("card.openChat")}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <MessageSquare class="icon" />
+                    </a>
+                  )}
                 </div>
                 {task.error && task.status !== "done" && <div class="error">{task.error}</div>}
               </div>

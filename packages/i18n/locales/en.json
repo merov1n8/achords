@@ -629,6 +629,7 @@
   "card.deleteTitle": "Delete card?",
   "card.deleteConfirm": "\"{title}\" and all its steps will be deleted. Its chat stays. This cannot be undone.",
   "card.openChat": "Open chat",
+  "common.waitingOwner": "Waiting for your answer",
   "kanban.newCard": "New card",
   "kanban.notStarted": "Not started",
   "kanban.created": "Created \"{title}\".",

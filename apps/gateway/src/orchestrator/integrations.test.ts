@@ -616,7 +616,15 @@ describe("integrations in runs (ADR-0034)", () => {
     );
     // The path is enforced by a hook: only /api/ on shop.acme.example.
     expect(seen[0]?.req.settings).toContain("https://shop.acme.example/api/*");
-    expect(seen[1]?.req.settings).toBeUndefined();
+    // Beside the co-author hook of every claude run, with the CLI's attribution off.
+    const settings = JSON.parse(seen[0]?.req.settings ?? "{}");
+    expect(settings.attribution).toEqual({ commit: "", pr: "", sessionUrl: false });
+    expect(settings.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)).toEqual([
+      "WebFetch",
+      "Bash",
+    ]);
+    expect(seen[0]?.req.appendSystemPrompt).toContain("Never add Co-Authored-By");
+    expect(seen[1]?.req.settings).not.toContain("WebFetch");
     expect(seen[1]?.req.allowedTools?.some((r) => r.startsWith("WebFetch"))).toBe(false);
   });
 

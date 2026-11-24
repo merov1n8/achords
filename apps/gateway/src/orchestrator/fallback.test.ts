@@ -64,6 +64,14 @@ describe("model fallback on a usage limit (ADR-0058)", () => {
     expect(calls.map((c) => c.model)).toEqual(["astra", "sol"]);
     // Codex's sandbox denies the home: git must not need ~/.gitconfig.
     expect(calls[0]?.env?.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+    // git itself strips Co-Authored-By trailers in codex runs; the helper list stays empty.
+    expect(calls[0]?.env).toMatchObject({
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "credential.helper",
+      GIT_CONFIG_VALUE_0: "",
+      GIT_CONFIG_KEY_1: "core.hooksPath",
+      GIT_CONFIG_VALUE_1: expect.stringMatching(/\/apps\/gateway\/git-hooks$/),
+    });
     expect(getTask(db, task.id)).toMatchObject({ status: "done", result: "done on sol" });
     expect(
       listMessages(db, thread.id)

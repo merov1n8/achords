@@ -32,6 +32,21 @@ export function replyState(
   return { seen, max, unread, chime: prev?.max !== undefined && max > prev.max };
 }
 
+/**
+ * How a chat in the list asks for attention: "unread" while an agent reply is unread, "waiting"
+ * when that chat also waits for the owner's answer. Opening the chat marks it read, so both
+ * clear until something new arrives. A chat never looked at counts as read, as in replyState.
+ */
+export function attention(
+  th: { id: string; lastAgentSeq: number | null; waitingOwner: boolean },
+  seen: Seen | undefined,
+  openId: string | undefined,
+): "waiting" | "unread" | undefined {
+  const last = seen?.[th.id];
+  if (th.id === openId || last === undefined || (th.lastAgentSeq ?? 0) <= last) return undefined;
+  return th.waitingOwner ? "waiting" : "unread";
+}
+
 /** A name with its unread count, the same wherever the count shows: "Chat (2)", or just "Chat". */
 export const withCount = (label: string, unread: number) =>
   unread > 0 ? `${label} (${unread})` : label;
@@ -68,7 +83,7 @@ export function chime(): void {
 }
 
 const SEEN_KEY = "achords.seenReplies";
-const loadSeen = (): Seen | undefined => {
+export const loadSeen = (): Seen | undefined => {
   try {
     const raw = localStorage.getItem(SEEN_KEY);
     return raw ? (JSON.parse(raw) as Seen) : undefined;

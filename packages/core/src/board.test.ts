@@ -6,12 +6,14 @@ import {
   placeCard,
   takeOverCard,
   withCardTitles,
+  withOwnerWaits,
 } from "./board.ts";
 import { addChecklistItem, addComment, listChecklist, listComments, updateTask } from "./cards.ts";
 import { openCoreDatabase, openDatabase } from "./db/database.ts";
 import { migrate, migrationsFromDir } from "./db/migrate.ts";
+import { answerOwnerQuestion, askOwner } from "./delegation.ts";
 import { enqueue, getTask, type Task } from "./queue.ts";
-import { createThread, updateThread } from "./threads.ts";
+import { appendMessage, clearActions, createThread, updateThread } from "./threads.ts";
 
 const setup = () => {
   const db = openCoreDatabase(":memory:");
@@ -74,6 +76,42 @@ describe("kanban board", () => {
     expect(getTask(db, inChat.id)?.title).toBe("boss title");
     updateTask(db, inChat.id, { cardTitle: null });
     expect(titles()[0]?.cardTitle).toBe("Hotels");
+  });
+
+  it("a card waits for the owner while its chain asks a question or its chat shows approval buttons", () => {
+    const { db } = setup();
+    const th = createThread(db, { title: "Hotel page" });
+    const card = enqueue(db, { title: "build", threadId: th.id });
+    // A delegated step of the card, made outside the chat (older rows have no thread).
+    const child = enqueue(db, { title: "check", parentId: card.id });
+    db.prepare("UPDATE tasks SET root_id = ? WHERE id = ?").run(card.id, child.id);
+    const parked = enqueue(db, { title: "later", parked: true });
+    for (const id of [card.id, parked.id]) placeCard(db, id, "todo", "system");
+    const waits = () =>
+      withOwnerWaits(
+        db,
+        [card.id, child.id, parked.id].map((id) => getTask(db, id) as Task),
+      ).map((x) => x.waitsForOwner);
+    expect(waits()).toEqual([false, false, false]);
+    askOwner(db, child.id, "which colour?");
+    // The child has no card of its own; its card shows it.
+    expect(waits()).toEqual([true, false, false]);
+    db.prepare("UPDATE tasks SET waiting_owner = 0 WHERE id = ?").run(child.id);
+    expect(waits()).toEqual([false, false, false]);
+    appendMessage(db, {
+      threadId: th.id,
+      role: "agent",
+      channel: "system",
+      content: "publish?",
+      actions: [{ label: "Approve", data: "publish:approve:abc" }],
+    });
+    expect(waits()).toEqual([true, false, false]);
+    clearActions(db, "publish:", "abc");
+    expect(waits()).toEqual([false, false, false]);
+    askOwner(db, card.id, "ok?");
+    expect(waits()[0]).toBe(true);
+    answerOwnerQuestion(db, th.id, "yes");
+    expect(waits()[0]).toBe(false);
   });
 
   it("a task has no card until it is placed; placing logs a move", () => {

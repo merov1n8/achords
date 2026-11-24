@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   answerParentQuestion,
+  askOwner,
   askParent,
   createPairingCode,
   createThread,
@@ -25,6 +26,7 @@ import {
   getThread,
   listMessages,
   openCoreDatabase,
+  placeCard,
   recordUsageWindows,
   saveCardSession,
   sessionDir,
@@ -1386,6 +1388,24 @@ describe("HTTP API", () => {
     expect((await call(path, { method: "PATCH", body: long })).status).toBe(400);
     const cleared = await call(path, { method: "PATCH", body: '{"cardTitle":""}' });
     expect(await json(cleared)).toMatchObject({ cardTitle: "Hotel page", ownCardTitle: null });
+  });
+
+  it("lists which chats and cards wait for the owner's answer", async () => {
+    const { call } = await pair();
+    const th = createThread(db, { title: "Hotel page" });
+    const card = enqueue(db, { title: "build", threadId: th.id });
+    placeCard(db, card.id, "todo", "system");
+    const state = async () => ({
+      chat: ((await (await call("/api/threads")).json()) as Record<string, unknown>[]).find(
+        (x) => x.id === th.id,
+      )?.waitingOwner,
+      card: ((await (await call("/api/tasks")).json()) as Record<string, unknown>[]).find(
+        (x) => x.id === card.id,
+      )?.waitsForOwner,
+    });
+    expect(await state()).toEqual({ chat: false, card: false });
+    askOwner(db, card.id, "which colour?");
+    expect(await state()).toEqual({ chat: true, card: true });
   });
 
   it("kanban: the owner creates a card by hand and starts it later", async () => {
