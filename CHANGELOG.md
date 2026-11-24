@@ -35,10 +35,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   former "This task"/Approve, still 4 hours), with Always for commands as before.
 - Force pushes and git history rewrites are refused for every agent.
 - A level 4 shell on this Mac no longer reads your home folder: only its own folders and the
-  developer toolchains found there (node version managers, rustup, .NET, Xcode's folders…) are
-  readable, never `~/.npmrc`, `~/.netrc`, `~/.git-credentials`, `~/.gitconfig`, `~/.docker`,
-  `~/.kube`, `~/.config` or `~/.pypirc`. Package downloads go to a cache folder of the run
-  (removed afterwards), and commits use your git name and email.
+  developer toolchains found there (node version managers, rustup, .NET, Xcode's folders, the
+  install folders of programs linked from `~/.local/bin`…) are readable, never `~/.npmrc`,
+  `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.kube`, `~/.config` or `~/.pypirc`. Your
+  `~/.gitconfig` (and `~/.config/git/config`) is readable only when it holds nothing that looks
+  like a token or password; otherwise git cannot run in that shell. Package downloads go to a
+  cache folder of the run (removed afterwards), and commits use your git name and email.
 - Level 5 agents can push a branch in work mode (ADR-0067) with the tool `push_branch`: achords
   itself pushes it to an HTTPS repository listed in the project, fast-forward only, with the
   push token you set in the project form (or under your own accounts). The token stays in the

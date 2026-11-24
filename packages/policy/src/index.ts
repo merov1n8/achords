@@ -47,6 +47,8 @@ export {
   type CompiledLevel,
   type CompileInput,
   compileLevel,
+  GIT_SECRET,
+  gitConfigReads,
   HOME_KEYS,
   HOME_TOOLCHAINS,
   hostSandboxSettings,
@@ -56,6 +58,7 @@ export {
   type RunMode,
   type SandboxKind,
   SHELL_DENY,
+  symlinkTargets,
 } from "./compile.ts";
 export {
   AGENT_LIST_FIELDS,

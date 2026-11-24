@@ -391,15 +391,13 @@ describe("permission levels in runs (ADR-0067)", () => {
     ]);
     expect(settings.sandbox.filesystem.denyRead).toContain(join(homedir(), ".npmrc"));
     expect(settings.permissions.deny).toContain("Bash(git push:*)");
-    // Package caches in a folder of this run, writable, removed afterwards; user config blanked.
+    // Package caches in a folder of this run, writable, removed afterwards.
     const cache = settings.sandbox.filesystem.allowWrite.find((p: string) =>
       /\/run\/cache-[\w-]+$/.test(p),
     );
     expect(cache).toBeDefined();
     expect(settings.sandbox.filesystem.allowRead).toContain(cache);
     expect(req?.env).toMatchObject({
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      npm_config_userconfig: "/dev/null",
       npm_config_cache: join(cache, "npm"),
       PIP_CACHE_DIR: join(cache, "pip"),
       GIT_AUTHOR_NAME: "Owner",

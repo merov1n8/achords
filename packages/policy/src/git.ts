@@ -91,7 +91,9 @@ export function pushTarget(
 /**
  * Environment for every agent run (any level, any shell): git in the shell never asks the host's
  * credential helpers (a keychain login) or a stored credential, never prompts, and an ssh-agent
- * of the host is out of reach. The `git push` deny rules stay as defence in depth.
+ * of the host is out of reach. The `git push` deny rules stay as defence in depth. The claude
+ * CLI's scrub drops GIT_ASKPASS, SSH_ASKPASS and SSH_AUTH_SOCK before its Bash (claude 2.1.331,
+ * the host's own socket with them); they stay for the other providers.
  */
 export const GIT_SHELL_ENV: Readonly<Record<string, string>> = {
   GIT_CONFIG_COUNT: "1",

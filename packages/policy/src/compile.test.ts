@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,10 +7,13 @@ import { historyRewrite } from "./check.ts";
 import {
   type CompileInput,
   compileLevel,
+  GIT_SECRET,
+  gitConfigReads,
   hostSandboxSettings,
   hostShellEnv,
   levelConflicts,
   REGISTRY_HOSTS,
+  symlinkTargets,
 } from "./compile.ts";
 import { parseManifest } from "./manifest.ts";
 import { allowRules, openWeb } from "./permissions.ts";
@@ -405,7 +408,7 @@ describe("host sandbox settings (ADR-0067 level 4)", () => {
       ".gnupg",
       "Library/Keychains",
       ".git-credentials",
-      ".gitconfig",
+      ".config/git/credentials",
       ".netrc",
       ".npmrc",
       ".pypirc",
@@ -472,16 +475,174 @@ describe("host sandbox settings (ADR-0067 level 4)", () => {
     }
   });
 
-  it("puts a host shell's package caches in the run's folder and blanks the user config files", () => {
+  it("re-allows the install folders of symlinked programs, never a denied one", () => {
+    const user = realpathSync(mkdtempSync(join(tmpdir(), "achords-home-")));
+    try {
+      const at = (p: string) => join(user, p);
+      for (const d of [
+        ".local/bin",
+        ".local/opt/node-v24/bin",
+        ".local/opt/node-v24/lib/node_modules/npm/bin",
+        ".local/share/tool/versions",
+        ".codex/pkg/bin",
+        ".ssh",
+        "h/agents/bin",
+        ".shallow/bin",
+      ]) {
+        mkdirSync(at(d), { recursive: true });
+      }
+      for (const f of [
+        ".local/opt/node-v24/bin/node",
+        ".local/opt/node-v24/lib/node_modules/npm/bin/npm-cli.js",
+        ".local/share/tool/versions/1.0",
+        ".codex/pkg/bin/codex",
+        ".ssh/id_ed25519",
+        "h/agents/bin/x",
+        ".shallow/bin/s",
+      ]) {
+        writeFileSync(at(f), "");
+      }
+      symlinkSync("../lib/node_modules/npm/bin/npm-cli.js", at(".local/opt/node-v24/bin/npm"));
+      symlinkSync(at(".local/opt/node-v24/bin/node"), at(".local/bin/node"));
+      // A relative chain: the first target in a bin folder names the install.
+      symlinkSync("../opt/node-v24/bin/npm", at(".local/bin/npm"));
+      symlinkSync(at(".local/share/tool/versions/1.0"), at(".local/bin/tool"));
+      symlinkSync(at(".codex/pkg/bin/codex"), at(".local/bin/codex"));
+      symlinkSync(at(".ssh/id_ed25519"), at(".local/bin/key"));
+      symlinkSync(at("h/agents/bin/x"), at(".local/bin/x"));
+      symlinkSync(at(".shallow/bin/s"), at(".local/bin/s"));
+      symlinkSync(at("missing/bin/m"), at(".local/bin/broken"));
+      expect(symlinkTargets([at(".local/bin")]).sort()).toEqual(
+        [
+          ".codex/pkg",
+          ".local/opt/node-v24",
+          ".local/share/tool/versions/1.0",
+          ".shallow",
+          ".ssh/id_ed25519",
+          "h/agents",
+        ]
+          .map(at)
+          .sort(),
+      );
+      const out = hostSandboxSettings({
+        write: [at("h/run/work")],
+        own: [at("h/run/work")],
+        network: [],
+        unsandboxed: [],
+        achordsHome: at("h"),
+        userHome: user,
+        path: [],
+      }) as { sandbox: { filesystem: { denyRead: string[]; allowRead: string[] } } };
+      const { allowRead, denyRead } = out.sandbox.filesystem;
+      expect(allowRead).toEqual(
+        expect.arrayContaining([at(".local/opt/node-v24"), at(".local/share/tool/versions/1.0")]),
+      );
+      // Credential folders, achords' home and a folder right below the home stay denied.
+      for (const no of [".codex/pkg", ".ssh/id_ed25519", "h/agents", ".shallow"]) {
+        expect(allowRead, no).not.toContain(at(no));
+      }
+      for (const d of denyRead) {
+        expect(
+          allowRead.some((a) => a === d || d.startsWith(`${a}/`)),
+          d,
+        ).toBe(false);
+      }
+    } finally {
+      rmSync(user, { recursive: true, force: true });
+    }
+  });
+
+  it("flags git config content that may hold a credential", () => {
+    for (const bad of [
+      "[github]\n\ttoken = x",
+      "[credential]\n\thelper = !f() { echo password=x; }; f",
+      "[http]\n\textraHeader = Authorization: Bearer x",
+      '[url "https://me:x@example.com/"]\n\tinsteadOf = https://example.com/',
+      "[npm]\n\t_authToken = x",
+      "[x]\n\tSECRET = 1",
+    ]) {
+      expect(GIT_SECRET.test(bad), bad).toBe(true);
+    }
+    expect(
+      GIT_SECRET.test(
+        '[user]\n\tname = A\n[url "https://github.com/"]\n\tinsteadOf = gh:\n[credential]\n\thelper = osxkeychain',
+      ),
+    ).toBe(false);
+  });
+
+  it("lets a host shell read the global git config only without secrets, with its files", () => {
+    const user = realpathSync(mkdtempSync(join(tmpdir(), "achords-home-")));
+    try {
+      const at = (p: string) => join(user, p);
+      mkdirSync(at(".config/git"), { recursive: true });
+      mkdirSync(at(".ssh"));
+      for (const f of [".gitignore_global", ".stCommitMsg", ".ssh/config"])
+        writeFileSync(at(f), "");
+      writeFileSync(at(".config/git/credentials"), "");
+      writeFileSync(at(".config/git/config"), "[core]\n\tattributesfile = ~/.ssh/config\n");
+      writeFileSync(at("inc.gitconfig"), "[core]\n\texcludesfile = ~/.config/git/credentials\n");
+      writeFileSync(at("leaky.gitconfig"), "[github]\n\ttoken = x\n");
+      writeFileSync(
+        at(".gitconfig"),
+        [
+          "[user]\n\tname = A",
+          "[core]\n\texcludesfile = ~/.gitignore_global",
+          "[commit]\n\ttemplate = ~/.stCommitMsg",
+          "[include]\n\tpath = inc.gitconfig\n\tpath = ~/leaky.gitconfig",
+          "[credential]\n\thelper = osxkeychain",
+        ].join("\n"),
+      );
+      expect(gitConfigReads(user).sort()).toEqual(
+        [
+          ".gitconfig",
+          ".gitignore_global",
+          ".stCommitMsg",
+          "inc.gitconfig",
+          ".config/git/credentials",
+          ".config/git/config",
+          ".ssh/config",
+        ]
+          .map(at)
+          .sort(),
+      );
+      const box = () =>
+        (
+          hostSandboxSettings({
+            write: [],
+            own: [],
+            network: [],
+            unsandboxed: [],
+            achordsHome: at("h"),
+            userHome: user,
+            path: [],
+          }) as { sandbox: { filesystem: { denyRead: string[]; allowRead: string[] } } }
+        ).sandbox.filesystem;
+      const { allowRead, denyRead } = box();
+      expect(allowRead.sort()).toEqual(
+        [".config/git/config", ".gitconfig", ".gitignore_global", ".stCommitMsg", "inc.gitconfig"]
+          .map(at)
+          .sort(),
+      );
+      // Credential files a config names stay denied.
+      expect(denyRead).toEqual(
+        expect.arrayContaining([at(".config/git/credentials"), at(".ssh"), at(".config")]),
+      );
+      // A secret-looking ~/.gitconfig is not readable, nor what it names.
+      writeFileSync(at(".gitconfig"), '[url "https://me:x@example.com/"]\n\tinsteadOf = e:\n');
+      expect(box().allowRead).toEqual([at(".config/git/config")]);
+    } finally {
+      rmSync(user, { recursive: true, force: true });
+    }
+  });
+
+  it("puts a host shell's package caches in the run's folder", () => {
+    // GIT_CONFIG_GLOBAL, XDG_CONFIG_HOME, npm_config_userconfig and PIP_CONFIG_FILE would be
+    // dropped by the CLI's scrub before Bash (claude 2.1.331): the read denies cover them.
     expect(hostShellEnv("/r/cache")).toEqual({
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      XDG_CONFIG_HOME: "/r/cache/config",
-      npm_config_userconfig: "/dev/null",
       npm_config_cache: "/r/cache/npm",
       npm_config_store_dir: "/r/cache/pnpm",
       YARN_CACHE_FOLDER: "/r/cache/yarn",
       BUN_INSTALL_CACHE_DIR: "/r/cache/bun",
-      PIP_CONFIG_FILE: "/dev/null",
       PIP_CACHE_DIR: "/r/cache/pip",
       NUGET_PACKAGES: "/r/cache/nuget",
     });

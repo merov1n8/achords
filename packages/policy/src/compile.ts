@@ -1,9 +1,18 @@
 // ADR-0067 step 2: an agent's effective level compiled into the fields a run already uses
 // (tools, shell, network, container, mcp and the tool lists per integration). Agents without a
 // `level` never come here: their lists apply as written.
-import { existsSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { type Catalog, type CatalogEntry, publishMode, secretRefs, toolClass } from "./catalog.ts";
 import { isLocalModel } from "./check.ts";
 import type { Manifest } from "./manifest.ts";
@@ -311,7 +320,7 @@ export const HOME_KEYS = [
   ".gnupg",
   "Library/Keychains",
   ".git-credentials",
-  ".gitconfig",
+  ".config/git/credentials",
   ".netrc",
   ".npmrc",
   ".yarnrc",
@@ -335,23 +344,97 @@ export const HOME_KEYS = [
 
 /**
  * Environment of a host-sandbox shell (ADR-0067): package caches in the run's own writable
- * `cache` folder, and user config files that are now unreadable replaced by nothing (git dies on
- * an unreadable ~/.gitconfig; npm and pip would read tokens from theirs). CARGO_HOME stays: it
- * also holds the rustup proxies on PATH.
+ * `cache` folder. User config files are not redirected here: the CLI's environment scrub
+ * (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, claude 2.1.331) drops GIT_CONFIG_GLOBAL, XDG_CONFIG_HOME,
+ * npm_config_userconfig and PIP_CONFIG_FILE before Bash, so the sandbox's read denies keep
+ * `~/.npmrc` and the like out, and git reads only a global config without secrets
+ * (`gitConfigReads`). CARGO_HOME stays: it also holds the rustup proxies on PATH.
  */
 export function hostShellEnv(cache: string): Record<string, string> {
   return {
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    XDG_CONFIG_HOME: join(cache, "config"),
-    npm_config_userconfig: "/dev/null",
     npm_config_cache: join(cache, "npm"),
     npm_config_store_dir: join(cache, "pnpm"),
     YARN_CACHE_FOLDER: join(cache, "yarn"),
     BUN_INSTALL_CACHE_DIR: join(cache, "bun"),
-    PIP_CONFIG_FILE: "/dev/null",
     PIP_CACHE_DIR: join(cache, "pip"),
     NUGET_PACKAGES: join(cache, "nuget"),
   };
+}
+
+/** Git config content that may hold a credential (a token, a password, a URL with a user). */
+export const GIT_SECRET = /token|password|passwd|_auth|secret|bearer|https?:\/\/[^/\s]+@/i;
+
+// Keys whose value is a file git opens (an unreadable include stops git; the others warn).
+const GIT_FILE_KEYS =
+  /^(include\.path|includeif\..*\.path|core\.excludesfile|core\.attributesfile|commit\.template)$/i;
+
+/**
+ * The user's global git config files a host shell may read: git stops on an unreadable
+ * `~/.gitconfig` or `~/.config/git/config` and the CLI's scrub drops GIT_CONFIG_GLOBAL. Only
+ * files without secret-looking content (`GIT_SECRET`), with the files they name (includes too,
+ * checked the same way); `credential.helper` is emptied for every run (GIT_SHELL_ENV).
+ */
+export function gitConfigReads(user: string): string[] {
+  const out: string[] = [];
+  const configFile = (f: string) => {
+    if (out.includes(f) || !existsSync(f) || !statSync(f).isFile()) return;
+    if (GIT_SECRET.test(readFileSync(f, "utf8"))) return;
+    out.push(f);
+    let list = "";
+    try {
+      list = execFileSync("git", ["config", "--file", f, "--no-includes", "--null", "--list"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      return;
+    }
+    for (const item of list.split("\0")) {
+      const nl = item.indexOf("\n");
+      const key = item.slice(0, nl);
+      if (nl < 0 || !GIT_FILE_KEYS.test(key)) continue;
+      let p = item.slice(nl + 1);
+      if (p.startsWith("~/")) p = join(user, p.slice(2));
+      else if (!isAbsolute(p)) {
+        if (!key.toLowerCase().startsWith("include")) continue;
+        p = join(dirname(f), p);
+      }
+      if (key.toLowerCase().startsWith("include")) configFile(p);
+      else if (existsSync(p) && statSync(p).isFile()) out.push(p);
+    }
+  };
+  configFile(join(user, ".gitconfig"));
+  configFile(join(user, ".config/git/config"));
+  return out;
+}
+
+/**
+ * Install folders of the symlinked programs in toolchain folders (`~/.local/bin/node` →
+ * `~/.local/opt/node-v24/bin/node` brings `~/.local/opt/node-v24`): the first link target in a
+ * `bin` folder brings that folder's parent; a chain that ends elsewhere brings its last target.
+ */
+export function symlinkTargets(dirs: string[]): string[] {
+  const out = new Set<string>();
+  for (const dir of dirs) {
+    for (const name of readdirSync(dir)) {
+      let p = join(dir, name);
+      for (
+        let hop = 0;
+        hop < 16 && lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink();
+        hop++
+      ) {
+        const next = resolve(dirname(p), readlinkSync(p));
+        if (!existsSync(dirname(next))) break;
+        p = join(realpathSync(dirname(next)), basename(next));
+        if (basename(dirname(p)) === "bin") {
+          out.add(dirname(dirname(p)));
+          break;
+        }
+        if (existsSync(p) && !lstatSync(p).isSymbolicLink()) out.add(p);
+      }
+    }
+  }
+  return [...out];
 }
 
 /**
@@ -395,6 +478,20 @@ export function hostSandboxSettings(input: {
     denied.some((root) => inside(p, root)) &&
     ![...denied, ...keys].some((d) => inside(d, p)) &&
     !keys.some((k) => inside(p, k));
+  // An install folder right below the home (`~/.local`) is too wide.
+  const deep = (p: string) => !inside(p, user) || p.slice(user.length + 1).includes("/");
+  const installs = symlinkTargets(toolchains).filter(
+    (p) => deep(p) && !inside(p, input.achordsHome),
+  );
+  // Git config files sit in ~/.config/git, denied with ~/.config: re-allowed by file only.
+  const config = join(user, ".config");
+  const gitFiles = gitConfigReads(user).filter(
+    (p) =>
+      inside(p, user) &&
+      !inside(p, input.achordsHome) &&
+      !keys.some((k) => k !== config && inside(p, k)) &&
+      (!inside(p, config) || inside(p, join(config, "git"))),
+  );
   return {
     sandbox: {
       enabled: true,
@@ -410,7 +507,12 @@ export function hostSandboxSettings(input: {
       filesystem: {
         allowWrite: [...new Set(input.write)],
         denyRead: [...new Set([...denied, ...keys])],
-        allowRead: [...new Set([...input.own, ...input.write, ...toolchains].filter(readable))],
+        allowRead: [
+          ...new Set([
+            ...[...input.own, ...input.write, ...toolchains, ...installs].filter(readable),
+            ...gitFiles,
+          ]),
+        ],
       },
     },
     permissions: {
