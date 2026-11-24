@@ -663,4 +663,189 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
       expect(calls).toEqual([]);
     });
   });
+
+  describe("question mode", () => {
+    const DEV =
+      "roles: [dev]\ntools: [Read, Glob, Grep, Edit, Write, Bash]\nshell:\n  allow: [npm]";
+    // The boss answers every structured-output run; agents get `behave`.
+    let decision: Record<string, unknown>;
+    const withBoss = () => {
+      const agent = behave;
+      behave = (req, task) =>
+        req.jsonSchema
+          ? result({
+              structured: {
+                action: "delegate",
+                message: "On it.",
+                task: {
+                  title: "Explain the cart",
+                  description: "Explain how the cart works",
+                  assignee: "dev",
+                  language: "English",
+                  ...decision,
+                },
+              },
+            })
+          : agent(req, task);
+    };
+    const needChecks = () => {
+      const wf = join(home, "workflows", "shared.yaml");
+      writeFileSync(
+        wf,
+        readFileSync(wf, "utf8").replace(
+          "review: { assign: role:qa }",
+          "review: { assign: role:qa, needs_checks: true }",
+        ),
+      );
+    };
+    const agentRuns = () => calls.filter((c) => !c.req.jsonSchema);
+    const hubTools = (req: RunRequest | undefined) =>
+      req?.mcpConfigPath
+        ? String(
+            JSON.parse(readFileSync(req.mcpConfigPath, "utf8")).mcpServers.achords.env
+              .ACHORDS_TOOLS,
+          ).split(",")
+        : [];
+    let configs: string[][];
+    beforeEach(() => {
+      decision = {};
+      configs = [];
+    });
+    // The MCP config file is removed when the run ends: read it during the run.
+    const recordTools = () => {
+      const inner = behave;
+      behave = (req, task) => {
+        if (!req.jsonSchema) configs.push(hubTools(req));
+        return inner(req, task);
+      };
+    };
+
+    it("the boss's question=true: a read-only run, and the card goes to done without checks or review", async () => {
+      setup([
+        ["dev", DEV],
+        ["qa", "roles: [qa]"],
+      ]);
+      needChecks();
+      decision = { question: true };
+      withBoss();
+      recordTools();
+      const thread = createThread(db, {});
+      expect(await orch.handleMessage(thread.id, "how does the cart work?", "web")).toBe(
+        "delegate",
+      );
+      const id = threadCard(db, thread.id) as string;
+      expect(getTask(db, id)?.questionMode).toBe(true);
+      await drain();
+      const runs = agentRuns();
+      expect(runs.map((c) => c.task.assigneeAgentId)).toEqual(["dev"]);
+      const req = runs[0]?.req;
+      expect(req?.tools).toEqual(["Read", "Glob", "Grep", "TodoWrite"]);
+      expect(req?.allowedTools.some((r) => /^(Edit|Write|Bash)/.test(r))).toBe(false);
+      expect(req?.prompt).toContain(
+        "This is a question: answer it; you can only read. If answering needs changes, say so and the owner will ask for work.",
+      );
+      expect(req?.prompt).not.toMatch(/report_checks/);
+      expect(configs[0]).toEqual(["ask_owner", "skill_read"]);
+      expect(column(id)).toBe("done");
+      expect(listMoves(db, id).map((m) => [m.from, m.to, m.actor])).toEqual([
+        [null, "in_progress", "system"],
+        ["in_progress", "done", "system"],
+      ]);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ?").get(id)?.n).toBe(0);
+      expect(listMessages(db, thread.id).at(-1)).toMatchObject({
+        author: "dev",
+        content: expect.stringContaining("done"),
+      });
+    });
+
+    it("work (no question) still goes to review", async () => {
+      setup([
+        ["dev", DEV],
+        ["qa", "roles: [qa]"],
+      ]);
+      withBoss();
+      const thread = createThread(db, {});
+      await orch.handleMessage(thread.id, "fix the cart", "web");
+      const id = threadCard(db, thread.id) as string;
+      expect(getTask(db, id)?.questionMode).toBe(false);
+      await drain();
+      expect(agentRuns().map((c) => c.task.assigneeAgentId)).toEqual(["dev", "qa"]);
+      expect(agentRuns()[0]?.req.tools).toContain("Edit");
+      expect(column(id)).toBe("review");
+    });
+
+    it("'?:' and 'Q:' force question mode, whatever the boss says", async () => {
+      setup([["dev", DEV]]);
+      decision = { question: false };
+      withBoss();
+      for (const text of ["?: how does the cart work?", "  q: why is it slow?"]) {
+        const thread = createThread(db, {});
+        await orch.handleMessage(thread.id, text, "web");
+        const id = threadCard(db, thread.id) as string;
+        expect(getTask(db, id)?.questionMode).toBe(true);
+        await drain();
+        expect(column(id)).toBe("done");
+      }
+      expect(agentRuns().every((c) => !c.req.tools.includes("Edit"))).toBe(true);
+      // The boss is told; the text it decides on carries no prefix.
+      expect(calls.find((c) => c.req.jsonSchema)?.req.prompt).toMatch(/marked it as a question/);
+    });
+
+    it("'@agent ?: …' asks the agent directly, without the prefix", async () => {
+      setup([["dev", DEV]]);
+      const thread = createThread(db, {});
+      expect(await orch.handleMessage(thread.id, "@dev ?: what does checkout() do?", "web")).toBe(
+        "delegate",
+      );
+      const id = threadCard(db, thread.id) as string;
+      const task = getTask(db, id);
+      expect(task?.questionMode).toBe(true);
+      expect(task?.title).toBe("what does checkout() do?");
+      expect(task?.description).toMatch(/^what does checkout\(\) do\?/);
+      await drain();
+      expect(calls[0]?.req.tools).not.toContain("Bash");
+      expect(column(id)).toBe("done");
+      // Without the prefix a direct message is work as before.
+      const other = createThread(db, {});
+      await orch.handleMessage(other.id, "@dev Q:fix checkout", "web");
+      expect(getTask(db, threadCard(db, other.id) as string)?.questionMode).toBe(true);
+      const work = createThread(db, {});
+      await orch.handleMessage(work.id, "@dev fix checkout", "web");
+      expect(getTask(db, threadCard(db, work.id) as string)?.questionMode).toBe(false);
+    });
+
+    it("a question in a chat whose card is in review leaves that card in review", async () => {
+      setup([["dev", DEV]]);
+      const { thread, id } = give();
+      await drain();
+      expect(column(id)).toBe("review");
+      const q = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: "dev", title: "Why?", instructions: "why" },
+        { question: true },
+      );
+      if (!q.ok) throw new Error(q.reason);
+      await drain();
+      expect(getTask(db, q.taskId)).toMatchObject({ status: "done", column: null });
+      expect(column(id)).toBe("review");
+      expect(threadCard(db, thread.id)).toBe(id);
+      expect(listMessages(db, thread.id).at(-1)?.content).toMatch(/Why\?/);
+    });
+
+    it("a question in a chat whose card is done takes the card over and leaves it done", async () => {
+      setup([["dev", DEV]]);
+      const { thread, id } = give();
+      await drain();
+      expect(orch.ownerMove(id, "review", "done")).toMatchObject({ ok: true });
+      const q = orch.delegate(
+        { from: "boss", threadId: thread.id },
+        { agent: "dev", title: "Why?", instructions: "why" },
+        { question: true },
+      );
+      if (!q.ok) throw new Error(q.reason);
+      expect(threadCard(db, thread.id)).toBe(q.taskId);
+      await drain();
+      expect(column(q.taskId)).toBe("done");
+    });
+  });
 });

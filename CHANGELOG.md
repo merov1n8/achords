@@ -7,6 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Question mode: when you only ask an agent something, it answers read-only (no file changes,
+  shell, drafts, delegation or handoff, whatever its level) and its card goes straight to done,
+  without checks or review. The boss decides this from your message; start a message with `?:`
+  or `Q:` (also after `@agent`) to force it. A question in a chat whose card is still being
+  worked on leaves that card where it is and only answers in the chat.
 - Unsent text in a chat's message box is kept per chat in the browser: switching to another chat
   or page and back brings it back (drafts older than 30 days are dropped).
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
