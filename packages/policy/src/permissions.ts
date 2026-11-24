@@ -83,6 +83,47 @@ export function webFetchSettings(network: string[]): string | undefined {
   });
 }
 
+export const NO_COAUTHOR =
+  "Commit messages must not contain Co-Authored-By lines in this project; remove the line and commit again.";
+
+// A PreToolUse hook on Bash: no shell command mentions co-authored-by, and `git commit -F/--file`
+// may not read a message file that holds it. A file the command itself writes is caught by the
+// first check; an obfuscated spelling is not (the CLI's attribution setting is the first layer).
+const COAUTHOR_HOOK_COMMAND = [
+  "i=$(cat)",
+  `refuse() { echo "${NO_COAUTHOR}" >&2; exit 2; }`,
+  `case $(printf %s "$i" | tr 'A-Z' 'a-z') in *co-authored-by*) refuse;; esac`,
+  `case "$i" in *commit*) ;; *) exit 0;; esac`,
+  String.raw`d=$(printf %s "$i" | sed -nE 's/.*"cwd" *: *"([^"]*)".*/\1/p' | head -n 1)`,
+  `[ -n "$d" ] && cd "$d" 2>/dev/null`,
+  String.raw`for f in $(printf %s "$i" | sed -nE 's/.*"command" *: *"(.*)".*/\1/p' | tr -d '\042\047\134' | grep -oE -- '(-F|--file)( +|=)?[^ ;&|]+' | sed -E 's/^(-F|--file)( +|=)?//'); do [ -f "$f" ] && grep -qi co-authored-by "$f" && refuse; done`,
+  "exit 0",
+].join("; ");
+
+/**
+ * `--settings` for every claude run: the CLI's own commit and PR attribution off, the
+ * co-authored-by hook on Bash, and the WebFetch path hook and sandbox box when given. Both hooks
+ * go under one PreToolUse list so neither replaces the other.
+ */
+export function claudeRunSettings(
+  fetchHook: string | undefined,
+  box: Record<string, unknown> | undefined,
+): string {
+  const fetch = fetchHook
+    ? (JSON.parse(fetchHook) as { hooks: { PreToolUse: unknown[] } }).hooks.PreToolUse
+    : [];
+  return JSON.stringify({
+    ...box,
+    attribution: { commit: "", pr: "", sessionUrl: false },
+    hooks: {
+      PreToolUse: [
+        ...fetch,
+        { matcher: "Bash", hooks: [{ type: "command", command: COAUTHOR_HOOK_COMMAND }] },
+      ],
+    },
+  });
+}
+
 /**
  * Whether a run reads the open web (ADR-0066), the one definition for skills, memory and the
  * publishing guard: the effective run allows any site, has WebSearch, or has full access. A

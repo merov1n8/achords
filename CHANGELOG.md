@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Commits agents make carry no `Co-Authored-By` lines: claude runs have the CLI's attribution off
+  and a hook that refuses such commands, codex and gemini runs get a git hook that strips them.
 - A Kanban card's title is now its chat's name (and follows a chat rename) instead of the latest
   task's title; renaming the card in its detail view sticks across follow-up tasks, and an empty
   name goes back to the chat's name. The current task's title is shown below the field.
