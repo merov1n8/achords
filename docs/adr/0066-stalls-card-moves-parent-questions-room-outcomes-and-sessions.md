@@ -1,6 +1,6 @@
 # ADR-0066: Stall watcher, card moves that start work, questions to the parent, room outcomes, sessions per card, and no memory from open-web runs
 
-Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, ADR-0039 and ADR-0051.
+Status: Accepted (2026-11-24). Amends ADR-0024, ADR-0029, ADR-0030, ADR-0032, ADR-0038, ADR-0039, ADR-0049 and ADR-0051.
 
 - Context: what exists today, so each decision below covers only the gap. None of the six items is fully built.
   - **Task state.** Task status is `queued | claimed | done | failed | cancelled`.
