@@ -13,6 +13,8 @@ export interface Thread {
   lastAgent: string | null;
   /** Seq of the last agent reply; null before any (reply alerts). */
   lastAgentSeq: number | null;
+  /** Something in the chat waits for the owner's answer (a question or approval buttons). */
+  waitingOwner: boolean;
   updatedAt: number;
 }
 
@@ -51,6 +53,8 @@ export interface Task {
   project: string | null;
   /** Made by hand and not started yet: no agent works on it until the owner starts it. */
   parked: boolean;
+  /** Board list only: the card's chain or chat waits for the owner's answer (never parked). */
+  waitsForOwner?: boolean;
   error: string | null;
   createdAt: number;
   updatedAt: number;

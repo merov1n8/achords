@@ -20,6 +20,8 @@ export interface Thread {
   lastAgent: string | null;
   /** Seq of the last visible agent message; null before any reply (the web's reply alert). */
   lastAgentSeq: number | null;
+  /** Something in the chat waits for the owner: an open question, or approval buttons. */
+  waitingOwner: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -61,6 +63,7 @@ const toThread = (r: Row): Thread => ({
   scheduled: Number(r.scheduled ?? 0) === 1,
   lastAgent: (r.last_agent as string | null) ?? null,
   lastAgentSeq: r.last_agent_seq == null ? null : Number(r.last_agent_seq),
+  waitingOwner: Number(r.waiting_owner ?? 0) === 1,
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at),
 });
@@ -124,12 +127,23 @@ export function makeThreadLocalOnly(db: Db, id: string): boolean {
   );
 }
 
+/**
+ * SQL that is true while the chat waits for the owner: a queued task asked a question
+ * (ask_owner, command, permission, access), or a message still shows approval buttons (every
+ * decision clears them).
+ */
+export const waitingOwnerSql = (threadId: string) =>
+  `(EXISTS (SELECT 1 FROM tasks w WHERE w.thread_id = ${threadId} AND w.status = 'queued'
+     AND w.waiting_owner = 1)
+   OR EXISTS (SELECT 1 FROM messages w WHERE w.thread_id = ${threadId} AND w.actions IS NOT NULL))`;
+
 const SCHEDULED = `EXISTS (SELECT 1 FROM schedules s WHERE s.thread_id = threads.id) AS scheduled,
   (SELECT COALESCE(a.name, m.author) FROM messages m LEFT JOIN agents a ON a.id = m.author
    WHERE m.thread_id = threads.id AND m.role = 'agent' AND m.visibility = 'normal'
    ORDER BY m.rowid DESC LIMIT 1) AS last_agent,
   (SELECT MAX(m.rowid) FROM messages m
-   WHERE m.thread_id = threads.id AND m.role = 'agent' AND m.visibility = 'normal') AS last_agent_seq`;
+   WHERE m.thread_id = threads.id AND m.role = 'agent' AND m.visibility = 'normal') AS last_agent_seq,
+  ${waitingOwnerSql("threads.id")} AS waiting_owner`;
 
 export function getThread(db: Db, id: string): Thread | undefined {
   const row = db.prepare(`SELECT *, ${SCHEDULED} FROM threads WHERE id = ?`).get(id);
