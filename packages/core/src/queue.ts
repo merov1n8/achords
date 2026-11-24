@@ -64,6 +64,8 @@ export interface Task {
   } | null;
   /** ADR-0067: the half of a split run this task works in (null = accounts). */
   runMode: "accounts" | "web" | null;
+  /** The owner's own name for the card; null = the card shows its chat's title (cardTitleOf). */
+  ownCardTitle: string | null;
 }
 
 const toTask = (r: Record<string, unknown>): Task => ({
@@ -76,6 +78,7 @@ const toTask = (r: Record<string, unknown>): Task => ({
   continuesFrom: (r.continues_from as string | null) ?? null,
   handoff: r.handoff ? (JSON.parse(String(r.handoff)) as Task["handoff"]) : null,
   runMode: (r.run_mode as Task["runMode"] | undefined) ?? null,
+  ownCardTitle: (r.card_title as string | null | undefined) ?? null,
   sensitivity: r.sensitivity as Task["sensitivity"],
   rootId: r.root_id as string | null,
   depth: Number(r.depth),

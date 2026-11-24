@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { listMoves, moveCard, placeCard, takeOverCard } from "./board.ts";
-import { addChecklistItem, addComment, listChecklist, listComments } from "./cards.ts";
+import {
+  cardTitleOf,
+  listMoves,
+  moveCard,
+  placeCard,
+  takeOverCard,
+  withCardTitles,
+} from "./board.ts";
+import { addChecklistItem, addComment, listChecklist, listComments, updateTask } from "./cards.ts";
 import { openCoreDatabase, openDatabase } from "./db/database.ts";
 import { migrate, migrationsFromDir } from "./db/migrate.ts";
-import { enqueue, getTask } from "./queue.ts";
+import { enqueue, getTask, type Task } from "./queue.ts";
+import { createThread, updateThread } from "./threads.ts";
 
 const setup = () => {
   const db = openCoreDatabase(":memory:");
@@ -29,6 +37,43 @@ describe("kanban board", () => {
       ["in_progress", "done"],
       ["done", "in_progress"],
     ]);
+  });
+
+  it("the owner's name for a card goes with it to the task that takes it over", () => {
+    const { db, t } = setup();
+    placeCard(db, t.id, "in_progress", "system");
+    updateTask(db, t.id, { cardTitle: "Partner hotels" });
+    const next = enqueue(db, { title: "move the block below" });
+    takeOverCard(db, t.id, next.id, "in_progress", "system");
+    expect(getTask(db, next.id)).toMatchObject({
+      ownCardTitle: "Partner hotels",
+      title: "move the block below",
+    });
+  });
+
+  it("a card shows the owner's name, else its chat's title, else its task's title", () => {
+    expect(cardTitleOf({ ownCardTitle: "Mine", title: "task" }, "Chat")).toBe("Mine");
+    expect(cardTitleOf({ ownCardTitle: null, title: "task" }, "Chat")).toBe("Chat");
+    expect(cardTitleOf({ ownCardTitle: " ", title: "task" }, "  ")).toBe("task");
+    expect(cardTitleOf({ ownCardTitle: null, title: "task" }, null)).toBe("task");
+
+    const { db } = setup();
+    const th = createThread(db, { title: "Hotel page" });
+    const inChat = enqueue(db, { title: "boss title", threadId: th.id });
+    const alone = enqueue(db, { title: "by hand" });
+    const titles = () =>
+      withCardTitles(
+        db,
+        [inChat.id, alone.id].map((id) => getTask(db, id) as Task),
+      );
+    expect(titles().map((x) => x.cardTitle)).toEqual(["Hotel page", "by hand"]);
+    updateThread(db, th.id, { title: "Hotels" });
+    expect(titles()[0]?.cardTitle).toBe("Hotels");
+    updateTask(db, inChat.id, { cardTitle: "Mine" });
+    expect(titles()[0]?.cardTitle).toBe("Mine");
+    expect(getTask(db, inChat.id)?.title).toBe("boss title");
+    updateTask(db, inChat.id, { cardTitle: null });
+    expect(titles()[0]?.cardTitle).toBe("Hotels");
   });
 
   it("a task has no card until it is placed; placing logs a move", () => {

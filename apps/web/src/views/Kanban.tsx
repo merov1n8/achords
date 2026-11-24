@@ -89,7 +89,7 @@ export function Kanban() {
     setError(undefined);
     try {
       await api(`/api/tasks/${task.id}/move`, { method: "POST", body: { from, to } });
-      setStatus(t("kanban.moved", { title: task.title, to: columnLabel(to) }));
+      setStatus(t("kanban.moved", { title: task.cardTitle, to: columnLabel(to) }));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -152,7 +152,7 @@ export function Kanban() {
       } else if (e.key === " ") {
         e.preventDefault();
         setKeyMove({ task, from, to: from });
-        setStatus(t("kanban.picked", { title: task.title, to: columnLabel(from) }));
+        setStatus(t("kanban.picked", { title: task.cardTitle, to: columnLabel(from) }));
       }
       return;
     }
@@ -163,7 +163,7 @@ export function Kanban() {
         setKeyMove({ ...keyMove, to: next });
         const kind = dropKind(matrixFor(task), from, next);
         setStatus(
-          `${t("kanban.picked", { title: task.title, to: columnLabel(next) })}${kind === "override" ? ` ${t("kanban.override")}` : ""}`,
+          `${t("kanban.picked", { title: task.cardTitle, to: columnLabel(next) })}${kind === "override" ? ` ${t("kanban.override")}` : ""}`,
         );
       }
     } else if (e.key === "Enter" || e.key === " ") {
@@ -264,7 +264,7 @@ export function Kanban() {
                     {task.assigneeAgentId ?? t("kanban.unassigned")}
                   </span>
                 </div>
-                <div class="t">{task.title}</div>
+                <div class="t">{task.cardTitle}</div>
                 <div class="m">
                   {task.parked ? (
                     <span class="chip">{t("kanban.notStarted")}</span>

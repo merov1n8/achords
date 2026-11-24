@@ -1,4 +1,5 @@
 import { type Db, transaction } from "./db/database.ts";
+import type { Task } from "./queue.ts";
 
 export interface CardMove {
   from: string | null;
@@ -76,7 +77,8 @@ export function listMoves(db: Db, taskId: string): CardMove[] {
 /**
  * One chat, one card: the chat's next task takes over the card of the earlier one. The card moves
  * to `column` on the new task, with its checklist, comments and move history; the earlier task
- * leaves the board (it stays in the database and in the chat).
+ * leaves the board (it stays in the database and in the chat). The owner's name for the card
+ * goes with it.
  */
 export function takeOverCard(
   db: Db,
@@ -93,7 +95,9 @@ export function takeOverCard(
       db.prepare(`UPDATE ${table} SET task_id = ? WHERE task_id = ?`).run(toId, fromId);
     }
     db.prepare("UPDATE tasks SET board_column = NULL WHERE id = ?").run(fromId);
-    db.prepare("UPDATE tasks SET board_column = ? WHERE id = ?").run(column, toId);
+    db.prepare(
+      "UPDATE tasks SET board_column = ?, card_title = (SELECT card_title FROM tasks WHERE id = ?) WHERE id = ?",
+    ).run(column, fromId, toId);
     log(db, toId, from ?? null, column, actor, false, now);
   });
 }
@@ -107,4 +111,27 @@ export function threadCard(db: Db, threadId: string): string | undefined {
     )
     .get(threadId);
   return r ? (r.id as string) : undefined;
+}
+
+/**
+ * The title a card shows: the owner's own name for it, else its chat's title, else the title of
+ * the task holding it (each follow-up task in the chat brings a new one, so it comes last).
+ */
+export function cardTitleOf(
+  task: Pick<Task, "ownCardTitle" | "title">,
+  threadTitle: string | null | undefined,
+): string {
+  return task.ownCardTitle?.trim() || threadTitle?.trim() || task.title;
+}
+
+/** Adds `cardTitle` (cardTitleOf) to tasks, reading each chat's title once. */
+export function withCardTitles<T extends Task>(db: Db, tasks: T[]): (T & { cardTitle: string })[] {
+  const titles = new Map<string, string | null>();
+  const q = db.prepare("SELECT title FROM threads WHERE id = ?");
+  return tasks.map((t) => {
+    if (t.threadId && !titles.has(t.threadId)) {
+      titles.set(t.threadId, (q.get(t.threadId)?.title as string | null | undefined) ?? null);
+    }
+    return { ...t, cardTitle: cardTitleOf(t, t.threadId ? titles.get(t.threadId) : null) };
+  });
 }

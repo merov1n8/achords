@@ -11,7 +11,7 @@ type Item = { id: number; text: string; done: boolean };
 type Comment = { id: number; text: string; author: string | null; createdAt: number };
 type Detail = Task & { description: string | null; checklist: Item[]; comments: Comment[] };
 
-/** Card details: edit title and description, sub-items, own comments, move, start, delete. */
+/** Card details: name the card, edit the description, sub-items, own comments, move, start, delete. */
 export function CardModal(props: {
   id: string;
   columns: string[];
@@ -43,13 +43,15 @@ export function CardModal(props: {
       return false;
     }
   };
+  // The title field is the owner's name for the card, not the task's title (agents' prompts use
+  // that); empty clears it, back to the chat's name.
+  const own = c?.ownCardTitle ?? "";
   const dirty =
-    c &&
-    ((title ?? c.title) !== c.title || (desc ?? c.description ?? "") !== (c.description ?? ""));
+    c && ((title ?? own) !== own || (desc ?? c.description ?? "") !== (c.description ?? ""));
   const save = async () => {
     if (!c) return;
     const body = {
-      ...((title ?? c.title) !== c.title ? { title } : {}),
+      ...((title ?? own) !== own ? { cardTitle: title } : {}),
       ...((desc ?? c.description ?? "") !== (c.description ?? "") ? { description: desc } : {}),
     };
     if (await call(base, "PATCH", body)) {
@@ -62,7 +64,7 @@ export function CardModal(props: {
     return (
       <Confirm
         title={t("card.deleteTitle")}
-        message={t("card.deleteConfirm", { title: c.title })}
+        message={t("card.deleteConfirm", { title: c.cardTitle })}
         confirmLabel={t("card.delete")}
         danger
         onConfirm={async () => {
@@ -78,7 +80,7 @@ export function CardModal(props: {
   return (
     <Modal
       wide
-      title={c?.title ?? t("app.loading")}
+      title={c?.cardTitle ?? t("app.loading")}
       onClose={props.onClose}
       footer={
         c && (
@@ -152,10 +154,12 @@ export function CardModal(props: {
             {t("card.title")}
             <input
               class="input"
-              value={title ?? c.title}
+              value={title ?? own}
+              placeholder={c.ownCardTitle ? t("card.titleChatName") : c.cardTitle}
               maxLength={200}
               onInput={(e) => setTitle(e.currentTarget.value)}
             />
+            <span class="muted small">{t("card.currentTask", { title: c.title })}</span>
           </label>
           <label class="field">
             {t("card.description")}

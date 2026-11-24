@@ -37,23 +37,29 @@ const toComment = (r: Record<string, unknown>): TaskComment => ({
   createdAt: Number(r.created_at),
 });
 
-/** `description: null` clears it. Returns undefined for an unknown task. */
+/**
+ * `description: null` clears it; `cardTitle` is the owner's name for the card (null clears it,
+ * back to the chat's title). Returns undefined for an unknown task.
+ */
 export function updateTask(
   db: Db,
   id: string,
-  patch: { title?: string; description?: string | null },
+  patch: { title?: string; description?: string | null; cardTitle?: string | null },
   now = Date.now(),
 ): Task | undefined {
   const r = db
     .prepare(
       `UPDATE tasks SET title = COALESCE(?, title),
-         description = CASE WHEN ? THEN ? ELSE description END, updated_at = ?
+         description = CASE WHEN ? THEN ? ELSE description END,
+         card_title = CASE WHEN ? THEN ? ELSE card_title END, updated_at = ?
        WHERE id = ?`,
     )
     .run(
       patch.title ?? null,
       patch.description !== undefined ? 1 : 0,
       patch.description ?? null,
+      patch.cardTitle !== undefined ? 1 : 0,
+      patch.cardTitle ?? null,
       now,
       id,
     );
