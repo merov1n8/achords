@@ -69,3 +69,4 @@
 - [ADR-0067: Permission levels, remit and project class instead of per-agent lists](0067-permission-levels.md)
 - [ADR-0068: Billing per agent, and the subscription as fallback when the API budget is used up](0068-billing-per-agent-and-subscription-fallback.md)
 - [ADR-0069: Notes to running work](0069-notes-to-running-work.md)
+- [ADR-0070: Review only for code changes](0070-review-only-for-code-changes.md)

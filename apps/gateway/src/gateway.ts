@@ -32,6 +32,7 @@ import { cliClaude, cliCodex, cliGemini, localOpenAI } from "@achords/providers"
 import { createRedactor, openHomeVault, type Vault } from "@achords/secrets";
 import { createApps } from "./apps.ts";
 import { BILLING, createBilling, fallbackKey, periodStart } from "./billing.ts";
+import { changedFiles } from "./changed-files.ts";
 import { containerHost } from "./container.ts";
 import { pushBranch } from "./git-push.ts";
 import { createApiHandler } from "./http/api.ts";
@@ -293,6 +294,7 @@ export function runGateway(home: string): Promise<number> {
     // ADR-0067 level 5: push_branch runs git here, in a folder only the gateway reads.
     gitPush: (input) => pushBranch({ ...input, tmpRoot: join(home, "run") }),
     gitIdentity: () => (identity ??= ownerGitIdentity()),
+    changedFiles,
     // Price list for CLIs that report tokens only; read per run, so edits apply at once.
     price: (model, usage) => costOf(loadPricing(home), model, usage),
     db,
