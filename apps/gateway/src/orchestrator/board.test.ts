@@ -19,8 +19,9 @@ import {
 import { createProject } from "@achords/policy";
 import type { ModelProvider, RunRequest, RunResult } from "@achords/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { changedFiles } from "../changed-files.ts";
 import { createRunTokens } from "../mcp/tokens.ts";
-import { createOrchestrator, type Orchestrator } from "./orchestrator.ts";
+import { createOrchestrator, type Orchestrator, type OrchestratorDeps } from "./orchestrator.ts";
 
 const result = (over: Partial<RunResult> = {}): RunResult => ({
   ok: true,
@@ -39,7 +40,7 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
   let calls: { task: Task; req: RunRequest }[];
   let behave: (req: RunRequest, task: Task) => RunResult;
 
-  const setup = (agents: [string, string][]) => {
+  const setup = (agents: [string, string][], extra: Partial<OrchestratorDeps> = {}) => {
     for (const [id, extra] of [["boss", ""], ...agents] as [string, string][]) {
       mkdirSync(join(home, "agents", id), { recursive: true });
       writeFileSync(
@@ -62,6 +63,7 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
       home,
       providers: { "cli-claude": p },
       hub: { url: "http://127.0.0.1:1", tokens: createRunTokens(), serverEntry: "/x.ts" },
+      ...extra,
     });
     orch.syncAgents();
   };
@@ -530,6 +532,44 @@ describe("kanban workflow in the gateway (ADR-0030)", () => {
       message: expect.stringMatching(/no pending/i),
     });
   });
+  describe("review only for code changes (ADR-0070)", () => {
+    const work = (file: string) => {
+      setup(
+        [
+          ["dev", "roles: [dev]"],
+          ["qa", "roles: [qa]"],
+        ],
+        { changedFiles },
+      );
+      behave = (req, task) => {
+        if (task.assigneeAgentId === "dev") writeFileSync(join(req.cwd, file), "x");
+        return result();
+      };
+      return give();
+    };
+
+    it("a run that only wrote Markdown goes straight to done, with a note, and nobody reviews", async () => {
+      const { thread, id } = work("summary.md");
+      await drain();
+      expect(column(id)).toBe("done");
+      expect(calls.map((c) => c.task.assigneeAgentId)).toEqual(["dev"]);
+      expect(listMoves(db, id).map((m) => [m.from, m.to, m.actor])).toEqual([
+        [null, "in_progress", "system"],
+        ["in_progress", "done", "system"],
+      ]);
+      expect(listMessages(db, thread.id).at(-1)?.content).toBe(
+        '"Build page" changed no code, so it skips review and goes to done.',
+      );
+    });
+
+    it("a run that changed code goes to review as before", async () => {
+      const { id } = work("app.ts");
+      await drain();
+      expect(column(id)).toBe("review");
+      expect(calls.map((c) => c.task.assigneeAgentId)).toEqual(["dev", "qa"]);
+    });
+  });
+
   describe("an owner's card move starts work (ADR-0066)", () => {
     const tasksOf = (agent: string) =>
       db

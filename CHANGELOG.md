@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- Review only for code changes: work that changed no code (a Markdown summary, notes, images,
+  or nothing at all) goes straight to done without waking the code reviewer, and the chat says
+  so. When achords cannot tell, the card goes to review as before (ADR-0070).
 - Notes to running work: while an agent is working on a chat's card, write to it in the chat
   (the boss passes on what adds to or corrects the work) or comment on its card. Claude and
   Codex agents get the note at their next step, without a restart, and the chat says when it

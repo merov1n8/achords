@@ -180,6 +180,7 @@ import {
 import type { ModelProvider, RunRequest, RunResult, Usage } from "@achords/providers";
 import { z } from "zod";
 import type { Apps } from "../apps.ts";
+import { isCode } from "../changed-files.ts";
 import type { Prepared } from "../container.ts";
 import { readGuide } from "../guide.ts";
 import { dropInbox, hookCommand, inboxDir, putNote, takenNotes } from "../inbox.ts";
@@ -414,6 +415,11 @@ export interface OrchestratorDeps {
    * shells, which cannot read ~/.gitconfig.
    */
   gitIdentity?: () => Record<string, string>;
+  /**
+   * ADR-0070: files under the folders modified since a time (undefined: too many to tell). A
+   * card whose runs changed no code skips review. Without it every card goes to review.
+   */
+  changedFiles?: (folders: string[], since: number) => string[] | undefined;
   gitPush?: (input: {
     folder: string;
     branch: string;
@@ -1327,6 +1333,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ? `the integration ${g.id}`
         : `level ${g.level}`;
   /**
+   * ADR-0070: by card, when its first run since the last finish started and the folders its runs
+   * (delegated ones too) could write. finishCard reads and clears it. Lost on a restart: review.
+   */
+  const cardWork = new Map<string, { since: number; folders: Set<string> }>();
+  /**
    * ADR-0067: runs that may call push_branch, by task: what a push is checked against. Set when
    * the run starts, removed when it ends.
    */
@@ -1430,12 +1441,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * (ADR-0065), and the owner decides what happens to it.
    */
   const finishCard = (task: Task): string | undefined => {
+    const work = cardWork.get(task.id);
+    cardWork.delete(task.id);
     const cur = getTask(db, task.id);
     if (!cur?.column || !cur.assigneeAgentId) return;
     const wf = workflowForTask(cur);
     if (cur.column !== wf.start) return;
-    if (cur.questionMode) {
-      // An answer has nothing to check or review: straight to done, as a system move.
+    const files = work && deps.changedFiles?.([...work.folders], work.since);
+    const noCode = !cur.questionMode && files !== undefined && !files.some(isCode);
+    if (cur.questionMode || noCode) {
+      // An answer, or work that changed no code, has nothing to check or review: straight to
+      // done, as a system move.
       const done = doneColumn(wf);
       if (
         done !== cur.column &&
@@ -1444,7 +1460,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ) {
         endCardSessions(db, home, [cardKey(cur)]);
       }
-      return;
+      return noCode ? t("thread.noCodeChange", { title: cur.title }) : undefined;
     }
     if (needsChecks(wf)) {
       const checks = checksOf(cur.id);
@@ -4499,6 +4515,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         post: hookCommand(process.execPath, dir, "post"),
         stop: hookCommand(process.execPath, dir, "stop"),
       };
+    }
+    if (deps.changedFiles) {
+      const key = task.rootId ?? task.id;
+      // A little earlier than now: a container's clock may lag the host's.
+      const work = cardWork.get(key) ?? { since: Date.now() - 2000, folders: new Set<string>() };
+      for (const f of manifest.fs.write.length
+        ? manifest.fs.write.map(expandHome)
+        : [workFolder(manifest)]) {
+        work.folders.add(f);
+      }
+      cardWork.set(key, work);
     }
     const run = startRun(db, {
       provider: built.provider.id,
